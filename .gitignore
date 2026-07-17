@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+wandb/
+logs/
+*.onnx
+*.npz
+# device-specific config (managed by let_there_be_light.sh)
+/data/
+/dependencies/
+.claude/settings.json
+.claude/settings.local.json
+.vscode/settings.json

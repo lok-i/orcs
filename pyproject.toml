@@ -1,0 +1,46 @@
+[project]
+name = "sortr"
+version = "0.1.0"
+description = "mjlab project: sortr"
+readme = "readme.md"
+requires-python = ">=3.10"
+dependencies = [
+    # ── active ─────────────────────────────────────────────────────────────────
+    "mjlab>=1.1.0",
+
+    # ── variants (uncomment and adapt) ─────────────────────────────────────────
+    # 1.  PyPI, latest compatible          "wandb>=0.17"
+    # 2.  PyPI, exact pin                  "numpy==1.26.4"
+    # 3.  PyPI, version range              "torch>=2.1.0,<2.4.0"
+    # 4.  PyPI, no constraint              "tqdm"
+    # 5.  Git, HEAD (not reproducible)     "pkg @ git+https://github.com/org/pkg.git"
+    # 6.  Git, commit SHA  ← preferred     "pkg @ git+https://github.com/org/pkg.git@a1b2c3d"
+    # 7.  Git, tag                         "pkg @ git+https://github.com/org/pkg.git@v1.4.0"
+    # 8.  Git, branch (moving target)      "pkg @ git+https://github.com/org/pkg.git@my-branch"
+    # 9.  Local editable sibling repo      "pkg"  +  pip install -e /path/to/pkg  (separately)
+    # 10. Embedded vendor copy             "pkg @ file:///${PWD}/vendor/pkg"
+    # note: variants 5-10 won't upload to PyPI — fine for research repos
+]
+
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# mjlab auto-discovers tasks by importing this module at startup.
+# Format: <key> = "<python-module-to-import>"  (key is arbitrary, module is what gets imported)
+# Adding a package here triggers its __init__.py -> register_mjlab_task() calls.
+# Multi-package: add one line per package that registers tasks.
+[project.entry-points."mjlab.tasks"]
+sortr = "sortr"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[tool.ruff]
+src = ["src"]
+indent-width = 4
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
