@@ -26,7 +26,7 @@ from typing import Literal
 
 from mjlab.tasks.tracking.mdp.commands import MotionCommandCfg
 
-from sortr.mdp.commands_omni_object import OmniObjectMotionCommandCfg
+from sortr.uolm.mdp.commands_omni_object import OmniObjectMotionCommandCfg
 
 # Scripts that gate on isinstance(cmd, MotionCommandCfg).
 _PATCHED_SCRIPTS = ("mjlab.scripts.train", "mjlab.scripts.play")

@@ -1,33 +1,17 @@
-"""sortr — SONIC REtarget & REfine. Registers Sortr-OmniObj (+ -Smpl).
+"""sortr — SONIC REtarget & REfine: a framework for retargeting the frozen SONIC
+WBC to mjlab tasks.
 
-Registration is skipped (with a warning) when local assets/motions are
-missing — object XMLs are machine-generated (make_object_models.py) and not
-tracked, so a fresh checkout must not break ``import sortr``.
+sortr itself is not a task. Each task lives in its own sub-package and
+self-registers on import:
+
+  sortr.uolm   Uni-Object Loco-Manipulation (Sortr-Uolm, Sortr-Uolm-Smpl)
+
+Future tasks (locomotion, whole-body control, ...) drop in as sibling packages
+and add their line below. The mjlab compat shim (multi-clip motion command,
+``--agent initial``, VRAM caps) is applied once here for all tasks.
 """
 
-from mjlab.tasks.registry import register_mjlab_task
-
-from sortr.env_cfg import sortr_omni_obj_env_cfg
-from sortr.rl_cfg import _SMPL_CKPT, sonic_agent_cfg
-
-try:
-    register_mjlab_task(
-        task_id="Sortr-OmniObj",
-        env_cfg=sortr_omni_obj_env_cfg(),
-        play_env_cfg=sortr_omni_obj_env_cfg(play=True),
-        rl_cfg=sonic_agent_cfg(),
-    )
-    # SMPL command space: same object plumbing, smpl tokenizer + encoder.
-    # Rollout-only for now (rewards nullified; see scripts/rollout_smpl.py).
-    register_mjlab_task(
-        task_id="Sortr-OmniObj-Smpl",
-        env_cfg=sortr_omni_obj_env_cfg(command_space="smpl"),
-        play_env_cfg=sortr_omni_obj_env_cfg(command_space="smpl", play=True),
-        rl_cfg=sonic_agent_cfg("sortr_omni_obj_smpl", base_checkpoint=_SMPL_CKPT),
-    )
-except FileNotFoundError as e:
-    print(f"[sortr] skipping Sortr-OmniObj task registration: {e}")
-
+import sortr.uolm  # noqa: F401 — task registration
 from sortr._mjlab_compat import apply as _apply_mjlab_compat
 
 _apply_mjlab_compat()  # let mjlab train/play tolerate the multi-clip "motion" command

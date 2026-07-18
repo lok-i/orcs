@@ -61,7 +61,7 @@ def _runner(experiment_name: str) -> RslRlOnPolicyRunnerCfg:
 
 
 def sonic_agent_cfg(
-    experiment_name: str = "sortr_omni_obj",
+    experiment_name: str = "sortr_uolm",
     *,
     rank: int = 16,
     alpha: float = 1.0,

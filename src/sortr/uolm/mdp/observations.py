@@ -71,7 +71,7 @@ def object_twist_b(
 # ---------------------------------------------------------------------------
 
 def _get_omni_cmd(env: ManagerBasedRlEnv, command_name: str):
-    from sortr.mdp.commands_omni_object import OmniObjectMotionCommand
+    from sortr.uolm.mdp.commands_omni_object import OmniObjectMotionCommand
     return cast(OmniObjectMotionCommand, env.command_manager.get_term(command_name))
 
 

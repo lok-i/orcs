@@ -30,8 +30,8 @@ from mjlab.utils.lab_api.math import (
     sample_uniform,
 )
 
-from sortr.mdp.contact_schedule import ContactSchedule
-from sortr.mdp.demo_loader import (
+from sortr.uolm.mdp.contact_schedule import ContactSchedule
+from sortr.uolm.mdp.demo_loader import (
     get_motion_files_for_objects,
     load_field_or_make_zeros,
 )

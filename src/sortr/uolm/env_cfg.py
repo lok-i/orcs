@@ -1,16 +1,17 @@
-"""Sortr-OmniObj env config — frozen SONIC WBC adapter over per-world object variants.
+"""UOLM env config — frozen SONIC WBC adapter over per-world object variants.
 
-THE uni-object locomanipulation task: each env simulates ONE object from
-`object_names` (mjlab VariantEntityCfg, round-robin world->variant) and tracks
-demo clips of THAT object (OmniObjectMotionCommand in omni mode: env->object
-from sim.world_to_variant, per-env clip masking).
+Uni-Object Loco-Manipulation: each env simulates ONE object from `object_names`
+(mjlab VariantEntityCfg, round-robin world->variant) and tracks demo clips of
+THAT object (OmniObjectMotionCommand in omni mode: env->object from
+sim.world_to_variant, per-env clip masking). Registered as Sortr-Uolm (robot
+command space) and Sortr-Uolm-Smpl (human SMPL command space).
 
 SONIC-only, ObjKin-only: the policy stream + tokenizer stream come from
 mocke.sonic.profile (frozen base I/O contract); the augmentation stream is
 base-frame object kinematics + sys1 feedforward commands; the critic is
 privileged. Single factory:
 
-  sortr_omni_obj_env_cfg(play=False, ...)
+  uolm_env_cfg(play=False, ...)
 """
 
 from __future__ import annotations
@@ -36,19 +37,23 @@ from mjlab.terrains import TerrainEntityCfg
 from mjlab.viewer import ViewerConfig
 from mocke.sonic import profile
 
-from sortr import mdp
 from sortr.assets import (
     OBJECT_BODY_NAME,
     Collision,
     get_g1_flat_hand_cfg,
     omni_object_entity_cfg,
 )
-from sortr.mdp.commands_omni_object import OmniObjectMotionCommandCfg
-from sortr.mdp.demo_loader import get_motion_files_for_objects
-from sortr.robustness import apply_robustness
+from sortr.uolm import mdp
+from sortr.uolm.mdp.commands_omni_object import OmniObjectMotionCommandCfg
+from sortr.uolm.mdp.demo_loader import get_motion_files_for_objects
+from sortr.uolm.robustness import apply_robustness
 
-_SORTR_ROOT = Path(__file__).resolve().parents[2]
+_SORTR_ROOT = Path(__file__).resolve().parents[3]  # src/sortr/uolm/ -> repo root
 _G1_DATASETS_ROOT = str(_SORTR_ROOT / "data/retargeted_motions/data/unitree_g1")
+# SMPL command-space dataset (flat <root>/<clip>/<sampleN>/*.npz), built by
+# scripts/build_smpl_dataset.py. Absent until the contributor builds it —
+# registration degrades gracefully (see _resolve_smpl_motions).
+_SMPL_DATASETS_ROOT = str(_SORTR_ROOT / "data/smpl_motions")
 
 # fcrl's default roster (assets + motions verified locally). Order matters:
 # it is the variant order, i.e. the object-id space.
@@ -101,6 +106,19 @@ def _resolve_motions(
     )
     max_len = max(int(np.load(f)["joint_pos"].shape[0]) for f in files)
     return tuple(files), max_len
+
+
+def _resolve_smpl_motions() -> tuple[str | None, int]:
+    """(first clip's motion.npz | None, longest clip frames) for the flat SMPL
+    dataset. Graceful when data/smpl_motions is absent/empty — registration must
+    not require the (contributor-built) dataset; env build then errors clearly."""
+    from sortr.uolm.mdp.commands_omni_object import _scan_flat_dataset
+    try:
+        files = _scan_flat_dataset(_SMPL_DATASETS_ROOT)
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return None, 500  # ~10 s @ 50 fps placeholder episode length
+    max_len = max(int(np.load(f)["joint_pos"].shape[0]) for f in files)
+    return files[0], max_len
 
 
 def _object_contact_graph_sensor(object_entity: str) -> ContactSensorCfg:
@@ -244,7 +262,7 @@ def _sonic_obs(
 # THE factory
 # ---------------------------------------------------------------------------
 
-def sortr_omni_obj_env_cfg(
+def uolm_env_cfg(
     *,
     command_space: str = "robot",
     play: bool = False,
@@ -252,11 +270,27 @@ def sortr_omni_obj_env_cfg(
     collision: Collision | Mapping[str, Collision] | None = None,
     num_steps_per_env: int = 24,
 ) -> ManagerBasedRlEnvCfg:
-    """THE Sortr-OmniObj env config factory (SONIC augment layout, MoTr rewards)."""
+    """THE Sortr-Uolm env config factory (SONIC augment layout, MoTr rewards).
+
+    command_space="robot": object-keyed omni dataset (retargeted G1 clips).
+    command_space="smpl":  flat SMPL dataset (data/smpl_motions, single object);
+                           rollout-only (rewards/RSI unsupported, PR pending).
+    """
     names = tuple(object_names or _DEFAULT_OBJECT_NAMES)
-    files, max_clip_len = _resolve_motions(names, _EXCLUDE_MOTIONS)
     obj = SceneEntityCfg(OBJECT_BODY_NAME)
     _p = {"command_name": "motion"}
+
+    if command_space == "smpl":
+        print("[sortr.uolm] Sortr-Uolm-Smpl: rewards + RSI unsupported "
+              "(rollout only — PR pending).")
+        motion_file, max_clip_len = _resolve_smpl_motions()
+        dataset_dir, cmd_object_names, cmd_excludes = _SMPL_DATASETS_ROOT, None, None
+        if motion_file is None:  # dataset not built yet — harmless placeholder
+            motion_file = _resolve_motions(names, _EXCLUDE_MOTIONS)[0][0]
+    else:
+        files, max_clip_len = _resolve_motions(names, _EXCLUDE_MOTIONS)
+        motion_file, dataset_dir = files[0], _G1_DATASETS_ROOT
+        cmd_object_names, cmd_excludes = names, _EXCLUDE_MOTIONS
 
     cfg = ManagerBasedRlEnvCfg(
         scene=SceneCfg(
@@ -347,10 +381,10 @@ def sortr_omni_obj_env_cfg(
 
     # ── motion command (omni mode) + object contact-graph sensor ──
     cfg.commands["motion"] = OmniObjectMotionCommandCfg(
-        motion_file=files[0],
-        dataset_dir=_G1_DATASETS_ROOT,
-        ordered_object_names=names,
-        exclude_motions=_EXCLUDE_MOTIONS,
+        motion_file=motion_file,
+        dataset_dir=dataset_dir,
+        ordered_object_names=cmd_object_names,
+        exclude_motions=cmd_excludes,
         object_entity_name=OBJECT_BODY_NAME,
         command_space=command_space,
         future_steps=5,

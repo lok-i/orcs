@@ -1,37 +1,87 @@
 # sortr — SONIC REtarget & REfine
 
-omni-object locomanipulation: frozen SONIC WBC base + LoRA adapter (PPO), ObjKin obs.
+A framework for kinematically retarget a reference, dynamically refine with a LoRA
+adapter by adapting **SONIC** whole-body controller to mjlab
+tasks: . 
 
-## Install
+## Setup
+
+Run these from the repo root, inside your project env (conda or uv, Python 3.11):
+
 ```bash
-scripts/setup/sync_dependencies.sh   # assets, retargeted_motions, mocke, rsl_rl
+# 1. core package (pulls mjlab)
 pip install -e .
-# object XMLs are machine-generated (not tracked):
-# python dependencies/assets/source/omni_objects/make_object_models.py
+
+# 2. custom deps + data (assets, retargeted_motions, mocke[+ckpts], rsl_rl fork)
+#    reads deps.lock; idempotent; needs git-lfs on PATH
+bash scripts/setup/sync_dependencies.sh
+
+# 3. generate object collision/visual XMLs (machine-generated, not tracked)
+python dependencies/assets/source/omni_objects/make_object_models.py --all
+
+# 4. (optional) editor + Claude config for this machine
+bash scripts/setup/let_there_be_light.sh
+
+# 5. verify — expect Sortr-Uolm and Sortr-Uolm-Smpl
+python -c "import sortr, mjlab.tasks; from mjlab.tasks.registry import list_tasks; print(list_tasks())"
 ```
 
-## Play / Train
+## Play / Train — robot command space (`Sortr-Uolm`)
+
 ```bash
-play  Sortr-OmniObj --agent initial   # frozen base, no ckpt; also zero|random|trained
-train Sortr-OmniObj --num_envs 4096
+play  Sortr-Uolm --agent initial   # frozen base, no ckpt; also zero|random|trained
+train Sortr-Uolm --num_envs 4096
 ```
 
-## SMPL rollout (Sortr-OmniObj-Smpl, phase 2)
+`--agent initial` = the task's real agent (frozen SONIC base + zero-init LoRA),
+no training checkpoint → rolls the frozen base bit-exact.
+
+## SMPL command space (`Sortr-Uolm-Smpl`)
+
+Rollout-only for now — rewards and RSI are unsupported (pending a separate PR);
+the env nullifies rewards and rolls the frozen base over SMPL motion.
+
+**Quicktest** — roll one clip (self-contained, stages a scratch dataset):
+
 ```bash
-# one-time: port the smpl encoder (in dependencies/mocke)
-python dependencies/mocke/scripts/port_sonic_checkpoint.py --smpl
-# roll frozen base on a clip (omit --smpl for a synthetic smoke clip)
-python scripts/rollout_smpl.py --smpl clip.pkl --viewer native
-```
-smpl_motion.npz contract: `smpl_joints` (T,24,3) + `smpl_root_quat_w` (T,4) — z-up, wxyz, SMPL base rot removed. Wrist refs ride motion.npz `joint_pos` (zeros OK).
+# a shipped SONIC sample
+python scripts/rollout_smpl.py \
+  --smpl dependencies/GR00T-WholeBodyControl/sample_data/smpl_filtered/walk_forward_amateur_001__A001_M.pkl \
+  --viewer native
 
-## Layout
+python scripts/rollout_smpl.py            # no args -> synthetic standing clip
 ```
-src/sortr/
-  __init__.py       # registers Sortr-OmniObj + mjlab compat shim
-  env_cfg.py        # THE env factory (sonic wiring, 3-stream obs, MoTr rewards)
-  rl_cfg.py         # PPO runner + sonic LoRA-adapter agent
-  robustness.py     # training domain (state + param variations)
-  assets.py         # flat-hand G1 + omni-object variant entity
-  mdp/              # object-manip term library
+
+**Persistent dataset** — convert a directory of SONIC smpl pkls, then play:
+
+```bash
+python scripts/build_smpl_dataset.py \
+  --src dependencies/GR00T-WholeBodyControl/sample_data/smpl_filtered
+# -> data/smpl_motions/<clip>/sample0/*.npz
+
+play Sortr-Uolm-Smpl --agent initial --viewer native   # multi-clip rollout
 ```
+
+Object motion is a static nominal placeholder unless a matching object npz is
+passed (`--object-dir <dir>`, matched by clip stem) — no smpl+object clips exist
+yet, so the object stream is a placeholder to exercise the plumbing.
+
+### SMPL data conventions
+
+Per gear_sonic's split (see `dependencies/GR00T-WholeBodyControl/docs/source/references/conventions.md`):
+
+| field | frame | used for |
+|---|---|---|
+| `smpl_joints` (T,24,3) | **z-up, root-centered, RAW** | encoder input (never converted) |
+| `pose_aa` root, `transl` | SMPL-native **y-up** | converted to z-up for root quat / ghost |
+
+`sortr.uolm.smpl_data.load_smpl_clip` handles the conversion; the staged
+`smpl_motion.npz` carries `smpl_joints` (RAW) + `smpl_root_quat_w` (z-up, wxyz,
+base-rot removed) + `smpl_joints_viz_w` (z-up world, ghost only). G1 wrist refs
+ride `motion.npz` `joint_pos` (zeros OK — degraded wrist orientation only).
+
+## Adding a task
+
+Drop a sibling package under `src/sortr/` that registers its envs on import,
+then add one line to `src/sortr/__init__.py`. Framework pieces shared across
+tasks (`assets.py`, `_mjlab_compat.py`) stay at the top level.
