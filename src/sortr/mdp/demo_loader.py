@@ -1,0 +1,134 @@
+"""Pure-Python helpers for loading object-manipulation demo data.
+
+No mjlab / sim dependency — safe to run standalone for testing.
+Ported 1:1 from fcrl/tasks/uolm/g1/demo_loader.py for consistency.
+"""
+
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+
+
+def load_field_or_make_zeros(
+    data: np.lib.npyio.NpzFile | None,
+    field_name: str,
+    shape: tuple[int, ...],
+    device: str,
+    verbose: bool = False,
+) -> tuple[torch.Tensor, bool]:
+    if data is not None and field_name in data:
+        data_tensor = torch.tensor(data[field_name], device=device)
+        if verbose:
+            print(f"[INFO]: Field {field_name} found in data. Loading data with shape {data_tensor.shape}.")
+        return data_tensor, True
+    else:
+        data_tensor = torch.zeros(shape, device=device)
+        if verbose:
+            print(f"[INFO]: Field {field_name} not found in data. Using zeros with shape {data_tensor.shape}.")
+        return data_tensor, False
+
+
+def load_motion_files_from_datasets(
+    path_to_datasets: str,
+    exclude_motions: list[str] | None = None,
+) -> dict[str, list[str]]:
+    """Load motion files from a robot-level dataset root, keyed by object name.
+
+    Expects the structure ``<path_to_datasets>/<dataset>/<motion>/<sampleX>/motion.npz``.
+    All immediate subdirs of ``path_to_datasets`` are treated as individual
+    datasets (e.g. ``omomo/``, ``physhoi/``), and each dataset is walked
+    recursively for motion folders containing sample dirs.
+
+    Args:
+        path_to_datasets: Root directory for a robot, e.g.
+            ``/path/to/retargeted_motions/data/unitree_g1/``.
+        exclude_motions: Optional list of motions to skip. Each entry is either
+            a bare motion-folder name (``"sub1_largebox_003"``) — excluded in
+            every dataset it appears in — or a dataset-qualified
+            ``"<dataset>/<motion>"`` (``"custom/tire_flip"``) — excluded only in
+            that dataset.
+
+    Returns:
+        dict mapping object_name -> list of motion.npz paths (sorted by
+        motion dir then sample number).
+    """
+    exclude_set = set(exclude_motions) if exclude_motions else set()
+    motion_files_by_object: dict[str, list[str]] = {}
+
+    root = Path(path_to_datasets)
+    if not root.exists():
+        raise FileNotFoundError(f"path_to_datasets does not exist: {root}")
+
+    dataset_dirs = sorted(
+        [d for d in root.iterdir() if d.is_dir()],
+        key=lambda d: d.name,
+    )
+    if not dataset_dirs:
+        raise FileNotFoundError(f"No dataset subdirectories found under {root}")
+
+    for dataset_dir in dataset_dirs:
+        motion_dirs = sorted(
+            [d for d in dataset_dir.iterdir() if d.is_dir()],
+            key=lambda d: d.name,
+        )
+        for motion_dir in motion_dirs:
+            qualified_name = f"{dataset_dir.name}/{motion_dir.name}"
+            if motion_dir.name in exclude_set or qualified_name in exclude_set:
+                print(f"[INFO] excluding motion '{qualified_name}'")
+                continue
+
+            sample_dirs = sorted(
+                [d for d in motion_dir.iterdir() if d.is_dir() and d.name.startswith("sample")],
+                key=lambda d: int("".join(filter(str.isdigit, d.name))) if any(c.isdigit() for c in d.name) else 0,
+            )
+            for sample_dir in sample_dirs:
+                motion_file = sample_dir / "motion.npz"
+                if not motion_file.exists():
+                    continue
+
+                metadata_file = sample_dir / "metadata.json"
+                if metadata_file.exists():
+                    with open(metadata_file) as f:
+                        metadata = json.load(f)
+                    object_path = metadata.get("object_path", "N/A")
+                    object_name = object_path.split("/")[-2] if object_path != "N/A" else "N/A"
+                else:
+                    print(f"\tNo metadata found for {sample_dir}")
+                    object_name = "N/A"
+
+                motion_files_by_object.setdefault(object_name, []).append(str(motion_file))
+
+    total = sum(len(v) for v in motion_files_by_object.values())
+    if total == 0:
+        raise FileNotFoundError(
+            f"No motion files found under path_to_datasets={root} "
+            f"(excluded={exclude_set or 'none'})"
+        )
+
+    return motion_files_by_object
+
+
+def get_motion_files_for_objects(
+    ordered_object_names: list[str],
+    path_to_datasets: str,
+    exclude_motions: list[str] | None = None,
+) -> tuple[dict[str, list[str]], list[str]]:
+    motion_files_by_object = load_motion_files_from_datasets(
+        path_to_datasets, exclude_motions=exclude_motions
+    )
+
+    motion_files_for_given_objects = {}
+    motion_files_object_ordered: list[str] = []
+    for object_name in ordered_object_names:
+        if object_name in motion_files_by_object:
+            motion_files_object_ordered.extend(motion_files_by_object[object_name])
+            motion_files_for_given_objects[object_name] = motion_files_by_object[object_name]
+        else:
+            raise ValueError(
+                f"No motion files found for object '{object_name}' under "
+                f"path_to_datasets={path_to_datasets}. Check your datasets or assets."
+            )
+
+    return motion_files_for_given_objects, motion_files_object_ordered

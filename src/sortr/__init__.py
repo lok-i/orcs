@@ -1,37 +1,33 @@
-# sortr — mjlab task package
-#
-# mjlab imports this file at startup (via the entry-point in pyproject.toml).
-# Call register_mjlab_task() once per task you want to expose.
-#
-# ── single-task project ────────────────────────────────────────────────────────
-# import mjlab.tasks
-# import mjlab.rl
-# from sortr.env_cfg import train_cfg, play_cfg
-#
-# mjlab.tasks.register_mjlab_task(
-#     task_id="Mjlab-MyTask",           # string used with train / play CLI
-#     env_cfg=train_cfg(),              # ManagerBasedRlEnvCfg for training
-#     play_env_cfg=play_cfg(),          # same but DR off, fewer envs
-#     rl_cfg=mjlab.rl.RslRlOnPolicyRunnerCfg(
-#         experiment_name="sortr",   # groups runs in wandb / logs/
-#     ),
-#     runner_cls=None,                  # None -> default MjlabOnPolicyRunner
-# )
-#
-# ── multi-task project (e.g. mjlab_playground style) ──────────────────────────
-# import mjlab.tasks
-# import mjlab.rl
-# from sortr.task_a.env_cfg import train_cfg as a_train, play_cfg as a_play
-# from sortr.task_b.env_cfg import train_cfg as b_train, play_cfg as b_play
-#
-# for task_id, train_fn, play_fn in [
-#     ("Mjlab-TaskA", a_train, a_play),
-#     ("Mjlab-TaskB", b_train, b_play),
-# ]:
-#     mjlab.tasks.register_mjlab_task(
-#         task_id=task_id,
-#         env_cfg=train_fn(),
-#         play_env_cfg=play_fn(),
-#         rl_cfg=mjlab.rl.RslRlOnPolicyRunnerCfg(experiment_name=task_id),
-#         runner_cls=None,
-#     )
+"""sortr — SONIC REtarget & REfine. Registers Sortr-OmniObj (+ -Smpl).
+
+Registration is skipped (with a warning) when local assets/motions are
+missing — object XMLs are machine-generated (make_object_models.py) and not
+tracked, so a fresh checkout must not break ``import sortr``.
+"""
+
+from mjlab.tasks.registry import register_mjlab_task
+
+from sortr.env_cfg import sortr_omni_obj_env_cfg
+from sortr.rl_cfg import _SMPL_CKPT, sonic_agent_cfg
+
+try:
+    register_mjlab_task(
+        task_id="Sortr-OmniObj",
+        env_cfg=sortr_omni_obj_env_cfg(),
+        play_env_cfg=sortr_omni_obj_env_cfg(play=True),
+        rl_cfg=sonic_agent_cfg(),
+    )
+    # SMPL command space: same object plumbing, smpl tokenizer + encoder.
+    # Rollout-only for now (rewards nullified; see scripts/rollout_smpl.py).
+    register_mjlab_task(
+        task_id="Sortr-OmniObj-Smpl",
+        env_cfg=sortr_omni_obj_env_cfg(command_space="smpl"),
+        play_env_cfg=sortr_omni_obj_env_cfg(command_space="smpl", play=True),
+        rl_cfg=sonic_agent_cfg("sortr_omni_obj_smpl", base_checkpoint=_SMPL_CKPT),
+    )
+except FileNotFoundError as e:
+    print(f"[sortr] skipping Sortr-OmniObj task registration: {e}")
+
+from sortr._mjlab_compat import apply as _apply_mjlab_compat
+
+_apply_mjlab_compat()  # let mjlab train/play tolerate the multi-clip "motion" command
