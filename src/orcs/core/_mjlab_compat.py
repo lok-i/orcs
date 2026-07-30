@@ -7,7 +7,7 @@ an *external single-file* motion resolution:
   - ``play.py``   -> demands ``--motion-file`` / WandB registry, else raises before it can play
                      a local checkpoint.
 
-A task's multi-clip cfg (e.g. UOLM's :class:`OmniObjectMotionCommandCfg`) is named ``"motion"``
+A task's multi-clip cfg (e.g. UOLM's :class:`ObjectMotionCommandCfg`) is named ``"motion"``
 (tracking rewards/obs key on it) and *is* a ``MotionCommandCfg`` subclass, but it loads its own
 multi-clip dataset from ``dataset_dir`` — so that single-file path is both unnecessary and fatal
 for local runs.

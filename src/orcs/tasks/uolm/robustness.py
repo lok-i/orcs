@@ -6,7 +6,7 @@ play-time stripping) is a prefix match, not a name list:
   perturb_* : STATE variations — sweep states across the basin of attraction
               so the policy learns to recover rather than memorize one
               trajectory. Runtime pushes here; the reset-time half (RSI
-              randomization) lives in OmniObjectMotionCommand and is wired
+              randomization) lives in ObjectMotionCommand and is wired
               via the command cfg fields.
   rand_*    : PARAM variations — per-env-constant world parameters the policy
               can neither infer nor control (sim2real invariance). Physical
@@ -35,7 +35,7 @@ from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from orcs.tasks.uolm import mdp
-from orcs.tasks.uolm.mdp.commands_omni_object import OmniObjectMotionCommandCfg
+from orcs.tasks.uolm.mdp.commands import ObjectMotionCommandCfg
 
 __all__ = ["STATE_VARIATION", "PARAM_VARIATION", "apply_robustness"]
 
@@ -54,7 +54,7 @@ _ROOT_VELOCITY_RANGE = {  # m/s, rad/s — same as the low-level WBC MDP
 }
 
 STATE_VARIATION = {
-    # ── RSI (consumed by OmniObjectMotionCommand._resample_command) ──
+    # ── RSI (consumed by ObjectMotionCommand._resample_command) ──
     "robot_pose_range": {},  # zeros — RSI pose is exact, like the WBC's MDP
     "robot_velocity_range": _ROOT_VELOCITY_RANGE,
     "robot_joint_position_range": (-0.05, 0.05),  # rad
@@ -134,7 +134,7 @@ def apply_robustness(
 
     if state:
         mc = cfg.commands.get("motion")
-        if isinstance(mc, OmniObjectMotionCommandCfg):
+        if isinstance(mc, ObjectMotionCommandCfg):
             mc.pose_range = dict(sv["robot_pose_range"])
             mc.velocity_range = dict(sv["robot_velocity_range"])
             mc.joint_position_range = sv["robot_joint_position_range"]

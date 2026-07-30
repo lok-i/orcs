@@ -2,7 +2,7 @@
 
 Uni-Object Loco-Manipulation: each env simulates ONE object from `object_names`
 (mjlab VariantEntityCfg, round-robin world->variant) and tracks demo clips of
-THAT object (OmniObjectMotionCommand in omni mode: env->object from
+THAT object (ObjectMotionCommand in omni mode: env->object from
 sim.world_to_variant, per-env clip masking). Registered as Orcs-Uolm (robot
 command space) and Orcs-Uolm-Smpl (human SMPL command space).
 
@@ -17,18 +17,16 @@ privileged. Single factory:
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Mapping
+from typing import Callable, Mapping
 
 import numpy as np
+from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.managers.event_manager import EventTermCfg
-from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.scene import SceneCfg
-from mjlab.sensor import ContactSensorCfg
-from mjlab.sensor.contact_sensor import ContactMatch
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.manipulation.mdp.terminations import illegal_contact
 from mjlab.tasks.tracking.mdp import rewards as tracking_rewards
@@ -44,9 +42,19 @@ from orcs.assets import (
 )
 from orcs.core.paths import DATA_ROOT
 from orcs.tasks.uolm import mdp
-from orcs.tasks.uolm.mdp.commands_omni_object import OmniObjectMotionCommandCfg
+from orcs.tasks.uolm.mdp.commands import ObjectMotionCommandCfg
 from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
+from orcs.tasks.uolm.observation_cfgs import ObsCtx, sonic_obs, tara_obs
 from orcs.tasks.uolm.robustness import apply_robustness
+from orcs.tasks.uolm.sensors import (
+    CONTACT_GRAPH_BODY_NAMES,
+    CONTACT_GRAPH_SENSOR_NAME,
+    HAND_BODY_NAMES,
+    LOCOMANIP_KILL_BODIES,
+    TERRAIN_CONTACT_SENSOR_NAME,
+    object_contact_graph_sensor,
+    terrain_contact_sensor,
+)
 
 _G1_DATASETS_ROOT = str(DATA_ROOT / "retargeted_motions/data/unitree_g1")
 # SMPL command-space dataset (flat <root>/<clip>/<sampleN>/*.npz), built by
@@ -79,22 +87,6 @@ _DEFAULT_COLLISION: dict[str, Collision] = {}  # all -> "cvx_dcmp"
 # Post-motion hold padding (episode — not the motion — owns resets).
 _MOTION_PAD_EPS_SEC = 2.0
 
-# --- contact-graph nodes (single source of truth; 1:1 with the demo
-# contact_matrix.npz legend names) ---
-_CONTACT_GRAPH_BODY_NAMES = (
-    "pelvis", "torso_link",
-    "left_shoulder_roll_link", "left_elbow_link", "left_wrist_yaw_link",
-    "right_shoulder_roll_link", "right_elbow_link", "right_wrist_yaw_link",
-    "left_knee_link", "left_ankle_roll_link",
-    "right_knee_link", "right_ankle_roll_link",
-)
-_CONTACT_GRAPH_SENSOR_NAME = "object_contact_graph"
-
-# hand subset of the graph nodes — gates the contact-conditional object
-# perturbation (hand contact == control-authority over the object).
-_HAND_BODY_NAMES = ("left_wrist_yaw_link", "right_wrist_yaw_link")
-
-
 @lru_cache(maxsize=None)
 def _resolve_motions(
     names: tuple[str, ...], excludes: tuple[str, ...]
@@ -111,150 +103,13 @@ def _resolve_smpl_motions() -> tuple[str | None, int]:
     """(first clip's motion.npz | None, longest clip frames) for the flat SMPL
     dataset. Graceful when data/smpl_motions is absent/empty — registration must
     not require the (contributor-built) dataset; env build then errors clearly."""
-    from orcs.tasks.uolm.mdp.commands_omni_object import _scan_flat_dataset
+    from orcs.tasks.uolm.mdp.commands import _scan_flat_dataset
     try:
         files = _scan_flat_dataset(_SMPL_DATASETS_ROOT)
     except (FileNotFoundError, NotADirectoryError, OSError):
         return None, 500  # ~10 s @ 50 fps placeholder episode length
     max_len = max(int(np.load(f)["joint_pos"].shape[0]) for f in files)
     return files[0], max_len
-
-
-def _object_contact_graph_sensor(object_entity: str) -> ContactSensorCfg:
-    """One object-filtered multi-primary contact sensor for all graph nodes.
-
-    mjlab expands `primary` to P=K primaries in a single sensor, so
-    `data.force` is already the batched (B, K, 3) per-body vector. Column
-    order is MODEL order (find_bodies), not tuple order — consumers must
-    reorder by name via `sensor.primary_names`. Secondary matches by BODY,
-    so it is collision-representation agnostic.
-    """
-    return ContactSensorCfg(
-        name=_CONTACT_GRAPH_SENSOR_NAME,
-        primary=ContactMatch(
-            mode="body", pattern=_CONTACT_GRAPH_BODY_NAMES, entity="robot"),
-        secondary=ContactMatch(
-            mode="body", pattern=object_entity, entity=object_entity),
-        fields=("found", "force"),
-        reduce="netforce",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Obs groups: policy (frozen SONIC) / augmentation (task) / critic (privileged)
-# ---------------------------------------------------------------------------
-
-def _aug_obs_group(obj: SceneEntityCfg, _p: dict) -> ObservationGroupCfg:
-    """Augmentation stream (adapter injects into this) — ObjKin feedback +
-    sys1 feedforward commands.
-
-    feedback:    base-frame object kin + robot root lin vel (world frame
-                 needs odometry — unavailable on hw).
-    feedforward: task goal (object_goal_*, fixed per episode, from above
-                 sys1) + sys1 command stream {l, v, w}_cmd_t (SUGAR c_t
-                 parity, robot-state language).
-    """
-    return ObservationGroupCfg(
-        terms={
-            "object_pose_b": ObservationTermCfg(
-                func=mdp.object_pose_b, params={"object_cfg": obj}),
-            "object_twist_b": ObservationTermCfg(
-                func=mdp.object_twist_b, params={"object_cfg": obj}),
-            "base_lin_vel": ObservationTermCfg(func=mdp.base_lin_vel),
-            "object_goal_ori": ObservationTermCfg(
-                func=mdp.object_goal_ori_mat6d, params=_p),
-            "object_goal_pos": ObservationTermCfg(
-                func=mdp.object_goal_pos_env, params=_p),
-            "bodywise_contact_cmd": ObservationTermCfg(
-                func=mdp.bodywise_contact_cmd, params=_p),
-            "robot_root_lin_vel_cmd": ObservationTermCfg(
-                func=mdp.robot_root_lin_vel_cmd, params=_p),
-            "robot_root_ang_vel_cmd": ObservationTermCfg(
-                func=mdp.robot_root_ang_vel_cmd, params=_p),
-        },
-        concatenate_terms=True,
-        enable_corruption=False,
-        nan_policy="sanitize",
-        nan_check_per_term=True,
-    )
-
-
-def _critic_obs_group(obj: SceneEntityCfg, _p: dict) -> ObservationGroupCfg:
-    """Privileged critic obs: full proprio + object + goal + ref (un-zeroed)."""
-    return ObservationGroupCfg(
-        terms={
-            # tracking command + anchor (privileged: not zeroed)
-            "command": ObservationTermCfg(
-                func=mdp.generated_commands, params=_p),
-            "motion_anchor_pos_b": ObservationTermCfg(
-                func=mdp.motion_anchor_pos_b_future, params=_p),
-            "motion_anchor_ori_b": ObservationTermCfg(
-                func=mdp.motion_anchor_ori_b_future, params=_p),
-            # proprio
-            "projected_gravity": ObservationTermCfg(func=mdp.projected_gravity),
-            "base_lin_vel": ObservationTermCfg(func=mdp.base_lin_vel),
-            "base_ang_vel": ObservationTermCfg(func=mdp.base_ang_vel),
-            "joint_pos": ObservationTermCfg(func=mdp.joint_pos_rel),
-            "joint_vel": ObservationTermCfg(func=mdp.joint_vel_rel),
-            "actions": ObservationTermCfg(func=mdp.last_action),
-            # object state (env-frame)
-            "object_pos_w": ObservationTermCfg(
-                func=mdp.object_pos_w_obs, params={"object_cfg": obj}),
-            "object_ori_mat6d_w": ObservationTermCfg(
-                func=mdp.object_ori_mat6d_w, params={"object_cfg": obj}),
-            "object_lin_vel_w": ObservationTermCfg(
-                func=mdp.object_lin_vel_w_obs, params={"object_cfg": obj}),
-            "object_ang_vel_w": ObservationTermCfg(
-                func=mdp.object_ang_vel_w_obs, params={"object_cfg": obj}),
-            # object goal (full pose)
-            "object_goal_ori": ObservationTermCfg(
-                func=mdp.object_goal_ori_mat6d, params=_p),
-            "object_goal_pos": ObservationTermCfg(
-                func=mdp.object_goal_pos_env, params=_p),
-            # object reference trajectory (N-step future, body frame)
-            "object_ref_pos_b": ObservationTermCfg(
-                func=mdp.motion_object_pos_b_future, params=_p),
-            "object_ref_ori_b": ObservationTermCfg(
-                func=mdp.motion_object_ori_b_future, params=_p),
-            # sys1 command stream (reward-relevant: contact_consistency)
-            "bodywise_contact_cmd": ObservationTermCfg(
-                func=mdp.bodywise_contact_cmd, params=_p),
-            "robot_root_lin_vel_cmd": ObservationTermCfg(
-                func=mdp.robot_root_lin_vel_cmd, params=_p),
-            "robot_root_ang_vel_cmd": ObservationTermCfg(
-                func=mdp.robot_root_ang_vel_cmd, params=_p),
-            # reward conditioning: V(concat(s, r_vec))
-            "reward_vec": ObservationTermCfg(
-                func=mdp.unweighted_reward_vector, params={"enabled": True}),
-        },
-        concatenate_terms=True,
-        enable_corruption=False,
-        nan_policy="sanitize",
-        nan_check_per_term=True,
-    )
-
-
-def _sonic_obs(
-    cfg: ManagerBasedRlEnvCfg, obj: SceneEntityCfg, _p: dict, mode: str = "g1"
-) -> None:
-    """3-stream obs layout: frozen SONIC streams + augmentation + critic.
-
-    policy = the frozen decoder's proprio stream (history-10, no odometry by
-    construction); extra groups = the g1-encoder tokenizer stream (10 future
-    ref frames @ 0.1 s) — both from mocke.sonic.profile.
-    """
-    cfg.observations = {
-        "policy": ObservationGroupCfg(
-            terms=profile.policy_obs_terms(),
-            concatenate_terms=True,
-            enable_corruption=True,
-            nan_policy="sanitize",
-            nan_check_per_term=True,
-        ),
-        **profile.extra_obs_groups("motion", mode=mode),
-        "augmentation": _aug_obs_group(obj, _p),
-        "critic": _critic_obs_group(obj, _p),
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -264,17 +119,39 @@ def _sonic_obs(
 def uolm_env_cfg(
     *,
     command_space: str = "robot",
+    agent: str = "sonic",
     play: bool = False,
     object_names: tuple[str, ...] | None = None,
     collision: Collision | Mapping[str, Collision] | None = None,
     num_steps_per_env: int = 24,
+    robot_cfg: Callable[[], EntityCfg] | None = None,
+    kill_bodies: tuple[str, ...] = LOCOMANIP_KILL_BODIES,
+    kill_exclude: tuple[str, ...] = (),
 ) -> ManagerBasedRlEnvCfg:
     """THE Orcs-Uolm env config factory (SONIC augment layout, MoTr rewards).
 
     command_space="robot": object-keyed omni dataset (retargeted G1 clips).
     command_space="smpl":  flat SMPL dataset (data/smpl_motions, single object);
                            rollout-only (rewards/RSI unsupported, PR pending).
+
+    agent="sonic": frozen SONIC base + LoRA adapter (3-stream obs).
+    agent="tara":  tabula rasa, from-scratch MLP (2-stream obs) — the
+                   no-frozen-base baseline. smpl needs the SONIC smpl encoder,
+                   so that pairing is rejected.
+
+    Injection points for a downstream consumer (§ethos: adapt, don't fork):
+      robot_cfg   the G1 variant to build on — physics is identical across
+                  variants, so this only picks the visual set (a consumer with
+                  a camera wants out-of-frame meshes demoted).
+      kill_bodies which robot geoms ending up on the terrain terminate the
+                  episode. Loco-manip default is the upper-body core only;
+                  pass STRICT_KILL_BODIES + exclude for a task where nothing
+                  but the feet should touch down.
     """
+    assert agent in ("sonic", "tara"), f"unknown agent {agent!r}"
+    assert not (agent == "tara" and command_space == "smpl"), (
+        "the smpl command space rides the SONIC smpl encoder — no tabula-rasa variant")
+
     names = tuple(object_names or _DEFAULT_OBJECT_NAMES)
     obj = SceneEntityCfg(OBJECT_BODY_NAME)
     _p = {"command_name": "motion"}
@@ -356,30 +233,18 @@ def uolm_env_cfg(
     )
 
     # ── SONIC robot + action (flat-hand G1, hip_pitch regroup, MJ-order) ──
-    robot = profile.robot_cfg(base=get_g1_flat_hand_cfg())
+    robot = profile.robot_cfg(base=(robot_cfg or get_g1_flat_hand_cfg)())
     cfg.scene.entities["robot"] = robot
     cfg.actions["joint_pos"] = profile.action_cfg(robot)
 
-    # Loco-manip legitimately kneels/braces (knees, thighs, forearms on the
-    # ground while lifting) — terrain kill-switch covers the upper-body core
-    # only, not "everything but feet".
     cfg.scene.sensors = (cfg.scene.sensors or ()) + (
-        ContactSensorCfg(
-            name="torso_terrain_contact",
-            primary=ContactMatch(
-                mode="geom",
-                pattern=("pelvis_collision", "torso_collision",
-                         ".*shoulder.*_collision"),
-                entity="robot",
-            ),
-            secondary=ContactMatch(mode="geom", pattern="terrain"),
-            fields=("found",),
-        ),
+        terrain_contact_sensor(kill_bodies, kill_exclude),
     )
-    cfg.terminations["illegal_contact"].params["sensor_name"] = "torso_terrain_contact"
+    cfg.terminations["illegal_contact"].params["sensor_name"] = (
+        TERRAIN_CONTACT_SENSOR_NAME)
 
     # ── motion command (omni mode) + object contact-graph sensor ──
-    cfg.commands["motion"] = OmniObjectMotionCommandCfg(
+    cfg.commands["motion"] = ObjectMotionCommandCfg(
         motion_file=motion_file,
         dataset_dir=dataset_dir,
         ordered_object_names=cmd_object_names,
@@ -392,11 +257,11 @@ def uolm_env_cfg(
         pose_range={},
         velocity_range={},
         joint_position_range=(0.0, 0.0),
-        contact_graph_body_names=_CONTACT_GRAPH_BODY_NAMES,
-        contact_graph_sensor_name=_CONTACT_GRAPH_SENSOR_NAME,
+        contact_graph_body_names=CONTACT_GRAPH_BODY_NAMES,
+        contact_graph_sensor_name=CONTACT_GRAPH_SENSOR_NAME,
     )
     cfg.scene.sensors = cfg.scene.sensors + (
-        _object_contact_graph_sensor(OBJECT_BODY_NAME),
+        object_contact_graph_sensor(OBJECT_BODY_NAME),
     )
 
     # episode = longest clip + ε hold padding (episode owns resets)
@@ -449,14 +314,18 @@ def uolm_env_cfg(
         "contact_consistency": RewardTermCfg(
             func=mdp.object_contact_consistency,
             weight=1.0, params={**_p,
-                                "sensor_name": _CONTACT_GRAPH_SENSOR_NAME,
+                                "sensor_name": CONTACT_GRAPH_SENSOR_NAME,
                                 "contact_force_threshold": 0.1}),
         "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
         "joint_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     }
 
     # ── obs: 3-stream layout (policy + tokenizer / augmentation / critic) ──
-    _sonic_obs(cfg, obj, _p, mode="smpl" if command_space == "smpl" else "g1")
+    ctx = ObsCtx(obj=obj, p=_p)
+    cfg.observations = (
+        tara_obs(ctx) if agent == "tara"
+        else sonic_obs(ctx, mode="smpl" if command_space == "smpl" else "g1")
+    )
 
     if command_space == "smpl":
         # Rollout-only for now: rewards + RSI design deferred (frozen base,
@@ -471,8 +340,8 @@ def uolm_env_cfg(
         # ── robustness domain: state (isr + pushes) + param (physical DR) ──
         apply_robustness(
             cfg, object_name=OBJECT_BODY_NAME,
-            sensor_name=_CONTACT_GRAPH_SENSOR_NAME,
-            hand_body_names=_HAND_BODY_NAMES,
+            sensor_name=CONTACT_GRAPH_SENSOR_NAME,
+            hand_body_names=HAND_BODY_NAMES,
         )
 
     if play:

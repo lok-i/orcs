@@ -1,4 +1,4 @@
-"""OmniObjectMotionCommand — multi-clip motion tracking with object state.
+"""ObjectMotionCommand — multi-clip motion tracking with object state.
 
 Extends mjlab's MotionCommand with:
   1. Concatenated multi-clip loader with object tracking (_ConcatMotionLoader)
@@ -9,7 +9,7 @@ Extends mjlab's MotionCommand with:
   6. Last-frame freeze: past the clip end the reference holds still; resets
      come from episode events only (steady-state hold + truncation backup)
 
-Functionally 1:1 with fcrl's OmniObjectMotionCommand, built on mjlab.
+Functionally 1:1 with fcrl's ObjectMotionCommand, built on mjlab.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from orcs.tasks.uolm.mdp.demo_loader import (
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
-__all__ = ["OmniObjectMotionCommandCfg", "OmniObjectMotionCommand"]
+__all__ = ["ObjectMotionCommandCfg", "ObjectMotionCommand", "motion_dirs"]
 
 # Joint/body order maps — canonical copies live in mocke.mdp.joint_maps.
 from mocke.mdp.joint_maps import (  # noqa: E402
@@ -79,20 +79,40 @@ def _sample_se3(
 # Concatenated multi-clip motion loader
 # ---------------------------------------------------------------------------
 
-def _scan_flat_dataset(
-    dataset_dir: str, exclude_motions: tuple[str, ...] | None = None
-) -> list[str]:
-    """<root>/<motion>/<sampleX>/motion.npz walk — the single-object layout.
+def motion_dirs(dataset_dir: str | list[str]) -> list[Path]:
+    """Motion folders (each holds sampleX/motion.npz), found DEPTH-INVARIANTLY.
 
-    `exclude_motions` entries match a whole motion folder ("<motion>", all
-    samples) or a single clip ("<motion>/<sampleX>").
+    `dataset_dir` is one root (str/Path) or a list of paths; each path may be a
+    motion folder itself OR any ancestor of them — the omni root whose subdirs
+    are motions, a root grouping objects-then-motions, or an explicit list of
+    motion folders (the custom layout). We locate every `sampleX/motion.npz`
+    beneath each root and take its grandparent as the motion folder, so the two
+    layouts differ only in nesting depth and both just work. Sorted by path;
+    deduped, first occurrence wins (preserves list order across roots).
     """
-    root = Path(dataset_dir)
+    roots = ([Path(dataset_dir)] if isinstance(dataset_dir, (str, Path))
+             else [Path(d) for d in dataset_dir])
+    seen: dict[Path, None] = {}
+    for root in roots:
+        for mf in sorted(root.rglob("motion.npz")):
+            seen.setdefault(mf.parent.parent, None)  # <motion>/<sampleX>/motion.npz
+    return list(seen)
+
+
+def _scan_flat_dataset(
+    dataset_dir: str | list[str],
+    exclude_motions: tuple[str, ...] | None = None,
+) -> list[str]:
+    """<motion>/<sampleX>/motion.npz walk — the single-object layout.
+
+    `dataset_dir` is a root (subdirs = motion folders) or a list of motion
+    folders. `exclude_motions` entries match a whole motion folder ("<motion>",
+    all samples) or a single clip ("<motion>/<sampleX>").
+    """
     excl = set(exclude_motions or ())
     n_skipped = 0
     motion_files: list[str] = []
-    motion_dirs = sorted(d for d in root.iterdir() if d.is_dir())
-    for motion_dir in motion_dirs:
+    for motion_dir in motion_dirs(dataset_dir):
         sample_dirs = sorted(
             (d for d in motion_dir.iterdir()
              if d.is_dir() and d.name.startswith("sample")),
@@ -108,10 +128,10 @@ def _scan_flat_dataset(
                 continue
             motion_files.append(str(mf))
     if n_skipped:
-        print(f"[OmniObject] excluded {n_skipped} clips "
+        print(f"[uolm] excluded {n_skipped} clips "
               f"({len(excl)} exclude_motions entries)")
     if not motion_files:
-        raise FileNotFoundError(f"No motion.npz under {root}")
+        raise FileNotFoundError(f"No motion.npz under {dataset_dir}")
     return motion_files
 
 
@@ -130,12 +150,12 @@ class _ConcatMotionLoader:
 
     def __init__(
         self,
-        dataset_dir: str,
+        dataset_dir: str | list[str],
         device: str | torch.device,
         contact_graph_body_names: tuple[str, ...] | None = None,
         motion_files: list[str] | None = None,
     ) -> None:
-        root = Path(dataset_dir)
+        root = dataset_dir  # display only (for the max_len message below)
         if motion_files is None:
             motion_files = _scan_flat_dataset(dataset_dir)
 
@@ -264,22 +284,22 @@ class _ConcatMotionLoader:
         self.max_clip_length: int = int(self.clip_lengths.max().item())
 
         print(
-            f"[OmniObject] {self.n_clips} clips, "
+            f"[uolm] {self.n_clips} clips, "
             f"{self.time_step_total} frames, "
             f"max_len={self.max_clip_length} from {root}"
         )
 
 
 # ---------------------------------------------------------------------------
-# OmniObjectMotionCommand
+# ObjectMotionCommand
 # ---------------------------------------------------------------------------
 
-class OmniObjectMotionCommand(MotionCommand):
+class ObjectMotionCommand(MotionCommand):
     """MotionCommand + object tracking, multi-clip loader, RSI, phase annealing."""
 
-    cfg: OmniObjectMotionCommandCfg
+    cfg: ObjectMotionCommandCfg
 
-    def __init__(self, cfg: OmniObjectMotionCommandCfg, env: ManagerBasedRlEnv):
+    def __init__(self, cfg: ObjectMotionCommandCfg, env: ManagerBasedRlEnv):
         super().__init__(cfg, env)
 
         # Replace single-file MotionLoader with concatenated multi-clip loader.
@@ -807,7 +827,7 @@ class OmniObjectMotionCommand(MotionCommand):
 # ---------------------------------------------------------------------------
 
 @dataclass(kw_only=True)
-class OmniObjectMotionCommandCfg(MotionCommandCfg):
+class ObjectMotionCommandCfg(MotionCommandCfg):
     """MotionCommandCfg + multi-clip object tracking.
 
     entity_name = "robot" for MotionCommand (ghost viz, body tracking).
@@ -823,8 +843,10 @@ class OmniObjectMotionCommandCfg(MotionCommandCfg):
     # only seeds RSI/wrists) — object plumbing identical in both.
     command_space: Literal["robot", "smpl"] = "robot"
 
-    # Multi-clip dataset root (replaces single motion_file after init)
-    dataset_dir: str = ""
+    # Multi-clip dataset root, or a list of motion folders (replaces the
+    # single motion_file after init). Depth-invariant either way — see
+    # `motion_dirs`.
+    dataset_dir: str | list[str] = ""
 
     # Omni mode: spawn-order object names (must match the scene's
     # VariantEntityCfg variant order — orcs.assets preserves it).
@@ -883,5 +905,5 @@ class OmniObjectMotionCommandCfg(MotionCommandCfg):
     success_ori_threshold: float = 0.35
     """Angular error (rad) below which the object goal counts as reached."""
 
-    def build(self, env: ManagerBasedRlEnv) -> OmniObjectMotionCommand:
-        return OmniObjectMotionCommand(self, env)
+    def build(self, env: ManagerBasedRlEnv) -> ObjectMotionCommand:
+        return ObjectMotionCommand(self, env)

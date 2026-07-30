@@ -7,7 +7,7 @@ resolves all of them.
 
 from mjlab.envs.mdp import *  # noqa: F401, F403
 
-from .commands_omni_object import *  # noqa: F403
+from .commands import *  # noqa: F403
 from .contact_schedule import ContactSchedule  # noqa: F401
 from .curriculums import *  # noqa: F403
 from .demo_loader import (  # noqa: F401
@@ -16,7 +16,6 @@ from .demo_loader import (  # noqa: F401
     load_motion_files_from_datasets,
 )
 from .events import *  # noqa: F403
-from .metrics import *  # noqa: F403
 from .observations import *  # noqa: F403
 from .rewards import *  # noqa: F403
 from .terminations import *  # noqa: F403

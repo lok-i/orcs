@@ -1,6 +1,6 @@
 """Event terms — policy-update counter + contact-gated object perturbation.
 
-RSI lives in OmniObjectMotionCommand (wired via the command cfg fields);
+RSI lives in ObjectMotionCommand (wired via the command cfg fields);
 generic resets/pushes come from mjlab stock mdp.
 """
 

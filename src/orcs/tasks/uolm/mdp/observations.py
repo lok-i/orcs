@@ -16,7 +16,7 @@ from mjlab.utils.lab_api.math import (
 __all__ = [
     "object_pose_b",
     "object_twist_b",
-    # tracking obs (OmniObjectMotionCommand)
+    # tracking obs (ObjectMotionCommand)
     "object_pos_w_obs",
     "object_ori_mat6d_w",
     "object_lin_vel_w_obs",
@@ -24,6 +24,7 @@ __all__ = [
     "object_goal_pos_env",
     "object_goal_ori_mat6d",
     "bodywise_contact_cmd",
+    "bodywise_saturated_force",
     "robot_root_lin_vel_cmd",
     "robot_root_ang_vel_cmd",
     "motion_object_pos_b_future",
@@ -67,12 +68,12 @@ def object_twist_b(
     return torch.cat([lin_vel_b, ang_vel_b], dim=-1)
 
 # ---------------------------------------------------------------------------
-# Tracking obs (OmniObjectMotionCommand)
+# Tracking obs (ObjectMotionCommand)
 # ---------------------------------------------------------------------------
 
 def _get_omni_cmd(env: ManagerBasedRlEnv, command_name: str):
-    from orcs.tasks.uolm.mdp.commands_omni_object import OmniObjectMotionCommand
-    return cast(OmniObjectMotionCommand, env.command_manager.get_term(command_name))
+    from orcs.tasks.uolm.mdp.commands import ObjectMotionCommand
+    return cast(ObjectMotionCommand, env.command_manager.get_term(command_name))
 
 
 # -- augmentation stream: object state + goal --
@@ -112,7 +113,7 @@ def object_ang_vel_w_obs(
 
 
 def unweighted_reward_vector(
-    env: ManagerBasedRlEnv, enabled: bool = False
+    env: ManagerBasedRlEnv, enabled: bool = False, terms: list[str] | None = None
 ) -> torch.Tensor:
     """(B, K) per-term UNWEIGHTED reward rates — critic-only conditioning,
     V(concat(s, r)). Reads the reward manager's step cache (already computed
@@ -121,15 +122,18 @@ def unweighted_reward_vector(
     enabled=False -> zeros of the same shape: critic architecture stays
     byte-identical across the with/without A/B, only information flips.
     Toggle: --env.observations.critic.terms.reward_vec.params.enabled True
+    terms=[...] -> only those reward terms, in the given order (e.g. the
+    task-layer subset as a MuZero-style aux prediction target).
 
     Notes:
       - Obs-manager dim probe runs before the reward manager exists -> zeros
-        fallback sized from cfg.rewards.
+        fallback sized from cfg.rewards / terms.
       - First step after reset reads the pre-reset cache (one-frame stale).
       - Zero-weight terms read 0 (reward manager skips them).
     """
+    n = len(terms) if terms else len(env.cfg.rewards)
     if not enabled or not hasattr(env, "reward_manager"):
-        return torch.zeros(env.num_envs, len(env.cfg.rewards), device=env.device)
+        return torch.zeros(env.num_envs, n, device=env.device)
     rm = env.reward_manager
     w = getattr(env, "_reward_vec_inv_w", None)
     if w is None:
@@ -139,7 +143,17 @@ def unweighted_reward_vector(
             device=env.device,
         )
         env._reward_vec_inv_w = w
-    return rm._step_reward / w
+    vec = rm._step_reward / w
+    if terms:
+        sel = getattr(env, "_reward_vec_sel", None)
+        if sel is None:
+            sel = env._reward_vec_sel = {}
+        key = tuple(terms)
+        if key not in sel:
+            sel[key] = torch.tensor(
+                [rm._term_names.index(t) for t in key], device=env.device)
+        vec = vec[:, sel[key]]
+    return vec
 
 
 def object_goal_pos_env(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
@@ -164,6 +178,42 @@ def bodywise_contact_cmd(env: ManagerBasedRlEnv, command_name: str) -> torch.Ten
     single scalar; we keep the per-body vector (which-limb information)."""
     cmd = _get_omni_cmd(env, command_name)
     return cmd.object_bodywise_contact.float()
+
+
+def bodywise_saturated_force(
+    env: ManagerBasedRlEnv,
+    command_name: str,
+    sensor_name: str,
+    body_names: tuple[str, ...] | None = None,
+    f_max: float = 50.0,
+) -> torch.Tensor:
+    """tanh(||f|| / f_max): live per-body robot<->object contact force -> (B, K).
+
+    The live twin of ``bodywise_contact_cmd`` (reference flags). ``body_names``
+    picks the columns and defaults to the full graph
+    (``cmd.cfg.contact_graph_body_names``, 1:1 with the demo ref and the
+    ``object_contact_consistency`` reward); a caller may pass a subset.
+
+    Saturating, not binary: a hard threshold manufactures label chatter at the
+    boundary, and raw ||f|| is spike-and-slab (a consumer's normalizer std gets
+    eaten by the impact tail). tanh is the variance-stabilizing transform —
+    linear where the signal is, saturating on impacts.
+
+    ``f_max`` is a ROBOT constant, never per-object: normalizing by object mass
+    would inject an unobservable into the signal and silently reweight it per
+    env. From the actuation bound max_q J^T(q) tau_lim; G1 stance-pull peak is
+    57.4 N (https://arxiv.org/pdf/2505.06776), so 50 N is the tightest value
+    leaving the whole arm-achievable range unsaturated. Above it is
+    support/impact load, not manipulation. One flat knob, so on a wide
+    ``body_names`` a torso/leg column runs saturated and degenerates to a
+    near-binary "load-bearing or not". Revisit on a robot swap.
+    """
+    from orcs.tasks.uolm.mdp.rewards import _bodywise_contact_force
+
+    cmd = _get_omni_cmd(env, command_name)
+    force = _bodywise_contact_force(
+        env, sensor_name, body_names or cmd.cfg.contact_graph_body_names)
+    return torch.tanh(force / f_max)  # (B, K)
 
 
 def robot_root_lin_vel_cmd(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:

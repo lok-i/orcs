@@ -30,7 +30,7 @@ def base_collapsed(
 
 
 # ---------------------------------------------------------------------------
-# Motion tracking terminations (OmniObjectMotionCommand property API)
+# Motion tracking terminations (ObjectMotionCommand property API)
 # ---------------------------------------------------------------------------
 
 def bad_anchor_pos(

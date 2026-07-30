@@ -21,7 +21,7 @@ def _goal_quat(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     """Get object goal quaternion from either command type."""
     term = env.command_manager.get_term(command_name)
     if hasattr(term, "object_goal_quat"):
-        return term.object_goal_quat  # OmniObjectMotionCommand
+        return term.object_goal_quat  # ObjectMotionCommand
     return term.command  # ReorientationCommand (.command = target_quat)
 
 
@@ -52,7 +52,7 @@ def orientation_success_bonus(
 
 
 # ---------------------------------------------------------------------------
-# Object tracking rewards (OmniObjectMotionCommand property API:
+# Object tracking rewards (ObjectMotionCommand property API:
 # .object, .object_pos_w, .object_quat_w)
 # ---------------------------------------------------------------------------
 

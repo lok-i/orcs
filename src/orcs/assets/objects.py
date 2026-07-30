@@ -3,7 +3,7 @@
 mjlab analogue of fcrl's MultiAssetSpawner(random_choice=False) — every world
 simulates ONE object from `object_names`, assigned round-robin (world i ->
 object i % K) and fixed for the whole run. The authoritative env->object table
-is `env.sim.world_to_variant["<entity>"]` — consumers (OmniObjectMotionCommand)
+is `env.sim.world_to_variant["<entity>"]` — consumers (ObjectMotionCommand)
 read it from there, never recompute.
 
 Object assets come from the ``assets`` dep: each object dir ships generated
