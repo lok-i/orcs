@@ -7,6 +7,9 @@ requires-python = ">=3.10"
 dependencies = [
     # ── active ─────────────────────────────────────────────────────────────────
     "mjlab>=1.1.0",
+    "joblib",           # reads SONIC smpl .pkl clips (orcs.tasks.uolm.smpl_data)
+    # NB: numpy/torch/mujoco/mujoco_warp are imported directly but guaranteed by
+    # mjlab; mocke + rsl_rl are git deps owned by deps.lock, never listed here.
 
     # ── variants (uncomment and adapt) ─────────────────────────────────────────
     # 1.  PyPI, latest compatible          "wandb>=0.17"

@@ -32,6 +32,18 @@ python -c "import orcs, mjlab.tasks; from mjlab.tasks.registry import list_tasks
 Step 5 printing `[orcs.tasks.uolm] skipping task registration: ...` means step 2
 or 3 is incomplete — registration degrades instead of breaking `import orcs`.
 
+**Order matters, and re-running step 1 alone undoes step 2.** mjlab pins
+`rsl-rl-lib==5.4.0`; our fork declares `5.4.1`, so any pip run that re-resolves
+mjlab's dependencies replaces the editable fork with vanilla 5.4.0 from PyPI —
+silently. For re-installs after step 2, use:
+
+```bash
+pip install --no-deps -e .          # re-install orcs, touch nothing else
+python -c "import rsl_rl; print(rsl_rl.__file__)"   # must be dependencies/rsl_rl/
+```
+
+If it points into `site-packages`, the fork was clobbered — re-run step 2.
+
 ## Play / Train — robot command space (`Orcs-Uolm`)
 
 ```bash
