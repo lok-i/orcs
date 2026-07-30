@@ -1,7 +1,7 @@
 [project]
-name = "sortr"
+name = "orcs"
 version = "0.1.0"
-description = "mjlab project: sortr"
+description = "Oracle Robot Control Synthesis — privileged-observation policies for humanoid control"
 readme = "readme.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -34,7 +34,7 @@ where = ["src"]
 # Adding a package here triggers its __init__.py -> register_mjlab_task() calls.
 # Multi-package: add one line per package that registers tasks.
 [project.entry-points."mjlab.tasks"]
-sortr = "sortr"
+orcs = "orcs"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]

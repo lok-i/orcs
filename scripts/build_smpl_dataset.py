@@ -1,4 +1,4 @@
-"""Build the persistent SMPL dataset for Sortr-Uolm-Smpl.
+"""Build the persistent SMPL dataset for Orcs-Uolm-Smpl.
 
 Converts a directory of SONIC smpl pkls into the flat layout the UOLM motion
 command flat-scans (one sample dir per clip):
@@ -8,7 +8,7 @@ command flat-scans (one sample dir per clip):
 Object motion is a static nominal placeholder unless a matching object npz is
 found (no smpl+object clips exist yet). Once built:
 
-  play Sortr-Uolm-Smpl --agent initial --viewer native   # multi-clip rollout
+  play Orcs-Uolm-Smpl --agent initial --viewer native   # multi-clip rollout
 
 Usage:
   python scripts/build_smpl_dataset.py --src <dir-of-pkls> [--object-dir <dir>]
@@ -20,10 +20,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from sortr.uolm.smpl_data import load_smpl_clip, stage_clip
+from orcs.core.paths import DATA_ROOT
+from orcs.tasks.uolm.smpl_data import load_smpl_clip, stage_clip
 
-_SORTR_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_OUT = _SORTR_ROOT / "data/smpl_motions"
+_DEFAULT_OUT = DATA_ROOT / "smpl_motions"
 
 
 def main() -> None:
@@ -57,7 +57,7 @@ def main() -> None:
         print(f"[build]   {stem}: {joints.shape[0]} frames"
               f"{' (+object)' if obj_npz else ''}")
 
-    print("[build] done — play Sortr-Uolm-Smpl --agent initial")
+    print("[build] done — play Orcs-Uolm-Smpl --agent initial")
 
 
 if __name__ == "__main__":

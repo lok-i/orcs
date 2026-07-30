@@ -30,8 +30,8 @@ from mjlab.utils.lab_api.math import (
     sample_uniform,
 )
 
-from sortr.uolm.mdp.contact_schedule import ContactSchedule
-from sortr.uolm.mdp.demo_loader import (
+from orcs.tasks.uolm.mdp.contact_schedule import ContactSchedule
+from orcs.tasks.uolm.mdp.demo_loader import (
     get_motion_files_for_objects,
     load_field_or_make_zeros,
 )
@@ -315,14 +315,14 @@ class OmniObjectMotionCommand(MotionCommand):
         # Omni mode: env->object identity from the sim's per-world variant
         # table (single source of truth — VariantEntityCfg assignment, fixed
         # at sim init). Variant order == ordered_object_names order by
-        # construction (sortr.assets), so the table IS the
+        # construction (orcs.assets), so the table IS the
         # object-id map. _clip_allowed masks clip sampling per env.
         if cfg.ordered_object_names:
             w2v = env.sim.world_to_variant.get(cfg.object_entity_name)
             assert w2v is not None, (
                 f"ordered_object_names set but scene entity "
                 f"'{cfg.object_entity_name}' has no variant table — spawn it "
-                "via sortr.assets.omni_object_entity_cfg"
+                "via orcs.assets.omni_object_entity_cfg"
             )
             self._env_object_ids = w2v.to(device=self.device, dtype=torch.long)
             assert int(self._env_object_ids.max()) < len(cfg.ordered_object_names)
@@ -827,7 +827,7 @@ class OmniObjectMotionCommandCfg(MotionCommandCfg):
     dataset_dir: str = ""
 
     # Omni mode: spawn-order object names (must match the scene's
-    # VariantEntityCfg variant order — sortr.assets preserves it).
+    # VariantEntityCfg variant order — orcs.assets preserves it).
     # When set, dataset_dir is the multi-dataset root (clips object-keyed via
     # each sample's metadata.json) and every env samples only clips of its
     # assigned object (env->object read from sim.world_to_variant).

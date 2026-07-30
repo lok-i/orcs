@@ -1,4 +1,4 @@
-"""Compat shim: let mjlab's train/play scripts tolerate sortr's multi-clip motion command.
+"""Compat shim: let mjlab's train/play scripts tolerate orcs's multi-clip motion command.
 
 Both scripts flag a task as "tracking" via ``isinstance(cmd, MotionCommandCfg)`` and then force
 an *external single-file* motion resolution:
@@ -7,15 +7,19 @@ an *external single-file* motion resolution:
   - ``play.py``   -> demands ``--motion-file`` / WandB registry, else raises before it can play
                      a local checkpoint.
 
-sortr's :class:`OmniObjectMotionCommandCfg` is named ``"motion"`` (tracking rewards/obs key on it)
-and *is* a ``MotionCommandCfg`` subclass, but it loads its own multi-clip dataset from
-``dataset_dir`` — so that single-file path is both unnecessary and fatal for local runs.
+A task's multi-clip cfg (e.g. UOLM's :class:`OmniObjectMotionCommandCfg`) is named ``"motion"``
+(tracking rewards/obs key on it) and *is* a ``MotionCommandCfg`` subclass, but it loads its own
+multi-clip dataset from ``dataset_dir`` — so that single-file path is both unnecessary and fatal
+for local runs.
 
 Rather than rename the command or fork the scripts, we swap the ``MotionCommandCfg`` symbol inside
-each script for a metaclass sentinel whose ``isinstance`` reports our multi-clip cfg as *not* a
-plain tracking cfg. Genuine mjlab single-file tracking tasks are untouched (still report True).
+each script for a metaclass sentinel whose ``isinstance`` reports those cfgs as *not* plain
+tracking cfgs. Genuine mjlab single-file tracking tasks are untouched (still report True).
 
-Idempotent, import-time. ``import sortr`` runs before either script's ``run_*``, since both call
+Task classes arrive as :func:`apply`'s ``multi_clip_cfgs`` argument — core never imports from
+:mod:`orcs.tasks`; ``orcs/__init__.py`` wires the two together.
+
+Idempotent, import-time. ``import orcs`` runs before either script's ``run_*``, since both call
 ``import mjlab.tasks`` (which imports this package via the entry point) before doing any work.
 """
 
@@ -26,29 +30,36 @@ from typing import Literal
 
 from mjlab.tasks.tracking.mdp.commands import MotionCommandCfg
 
-from sortr.uolm.mdp.commands_omni_object import OmniObjectMotionCommandCfg
-
 # Scripts that gate on isinstance(cmd, MotionCommandCfg).
 _PATCHED_SCRIPTS = ("mjlab.scripts.train", "mjlab.scripts.play")
 
 
-class _SingleFileMotionMeta(type):
-    """``isinstance`` is True only for *single-file* tracking cfgs, not sortr's multi-clip one."""
+def _single_file_sentinel(multi_clip_cfgs: tuple[type, ...]) -> type:
+    """Build the scripts' ``MotionCommandCfg`` stand-in.
 
-    def __instancecheck__(cls, obj: object) -> bool:
-        return isinstance(obj, MotionCommandCfg) and not isinstance(
-            obj, OmniObjectMotionCommandCfg
-        )
+    ``isinstance`` is True only for *single-file* tracking cfgs — anything in
+    ``multi_clip_cfgs`` reports False. An empty tuple is a no-op passthrough.
+    """
+
+    class _SingleFileMotionMeta(type):
+        def __instancecheck__(cls, obj: object) -> bool:
+            return isinstance(obj, MotionCommandCfg) and not isinstance(
+                obj, multi_clip_cfgs
+            )
+
+    class _SingleFileMotionCfg(metaclass=_SingleFileMotionMeta):
+        """Drop-in for the scripts' ``MotionCommandCfg`` isinstance target."""
+
+    return _SingleFileMotionCfg
 
 
-class _SingleFileMotionCfg(metaclass=_SingleFileMotionMeta):
-    """Drop-in for the scripts' ``MotionCommandCfg`` isinstance target."""
-
-
-def apply() -> None:
+def apply(multi_clip_cfgs: tuple[type, ...] = ()) -> None:
+    """Patch mjlab in place. ``multi_clip_cfgs``: task command cfgs that own
+    their own dataset and must escape mjlab's single-file motion resolution."""
+    sentinel = _single_file_sentinel(multi_clip_cfgs)
     for name in _PATCHED_SCRIPTS:
         mod = importlib.import_module(name)
-        mod.MotionCommandCfg = _SingleFileMotionCfg  # type: ignore[attr-defined]
+        mod.MotionCommandCfg = sentinel  # type: ignore[attr-defined]
     _patch_play_init_agent()
     _muffle_mesh_support_warning()
     _patch_put_data_nccdmax()
@@ -64,7 +75,7 @@ def _patch_put_data_nccdmax() -> None:
     so for the omni-object scenes (nconmax=150+, 12k worlds) the default
     allocates tens of GB of workspace that box/capsule contacts never touch.
 
-    Wrap ``put_data`` to cap CCD rows per world at ``SORTR_NCCDMAX`` (default
+    Wrap ``put_data`` to cap CCD rows per world at ``ORCS_NCCDMAX`` (default
     64, clamped to nconmax). Undershoot is loud, not silent: mjwarp printf's
     "CCD overflow - please increase naccdmax" to stderr and drops the
     contact — watch run logs and raise the env var if it appears.
@@ -74,7 +85,7 @@ def _patch_put_data_nccdmax() -> None:
 
     import mujoco_warp as mjwarp
 
-    if getattr(mjwarp.put_data, "_sortr_nccdmax", False):
+    if getattr(mjwarp.put_data, "_orcs_nccdmax", False):
         return
     _orig = mjwarp.put_data
 
@@ -84,11 +95,11 @@ def _patch_put_data_nccdmax() -> None:
         if (nconmax is not None
                 and kwargs.get("nccdmax") is None
                 and kwargs.get("naccdmax") is None):
-            nccdmax = int(os.environ.get("SORTR_NCCDMAX", "64"))
+            nccdmax = int(os.environ.get("ORCS_NCCDMAX", "64"))
             kwargs["nccdmax"] = min(nccdmax, nconmax)
         return _orig(*args, **kwargs)
 
-    put_data._sortr_nccdmax = True  # type: ignore[attr-defined]
+    put_data._orcs_nccdmax = True  # type: ignore[attr-defined]
     mjwarp.put_data = put_data
 
 
@@ -132,9 +143,9 @@ def _patch_play_init_agent() -> None:
     import torch
 
     play = importlib.import_module("mjlab.scripts.play")
-    if getattr(play, "_sortr_init_agent", False):
+    if getattr(play, "_orcs_init_agent", False):
         return
-    play._sortr_init_agent = True
+    play._orcs_init_agent = True
     _orig_run_play = play.run_play
     _OrigPlayConfig = play.PlayConfig
 

@@ -1,4 +1,4 @@
-# sortr — SONIC REtarget & REfine
+# orcs — SONIC REtarget & REfine
 
 A framework for kinematically retarget a reference, dynamically refine with a LoRA
 adapter by adapting **SONIC** whole-body controller to mjlab
@@ -22,21 +22,21 @@ python dependencies/assets/source/omni_objects/make_object_models.py --all
 # 4. (optional) editor + Claude config for this machine
 bash scripts/setup/let_there_be_light.sh
 
-# 5. verify — expect Sortr-Uolm and Sortr-Uolm-Smpl
-python -c "import sortr, mjlab.tasks; from mjlab.tasks.registry import list_tasks; print(list_tasks())"
+# 5. verify — expect Orcs-Uolm and Orcs-Uolm-Smpl
+python -c "import orcs, mjlab.tasks; from mjlab.tasks.registry import list_tasks; print(list_tasks())"
 ```
 
-## Play / Train — robot command space (`Sortr-Uolm`)
+## Play / Train — robot command space (`Orcs-Uolm`)
 
 ```bash
-play  Sortr-Uolm --agent initial   # frozen base, no ckpt; also zero|random|trained
-train Sortr-Uolm --num_envs 4096
+play  Orcs-Uolm --agent initial   # frozen base, no ckpt; also zero|random|trained
+train Orcs-Uolm --num_envs 4096
 ```
 
 `--agent initial` = the task's real agent (frozen SONIC base + zero-init LoRA),
 no training checkpoint → rolls the frozen base bit-exact.
 
-## SMPL command space (`Sortr-Uolm-Smpl`)
+## SMPL command space (`Orcs-Uolm-Smpl`)
 
 Rollout-only for now — rewards and RSI are unsupported (pending a separate PR);
 the env nullifies rewards and rolls the frozen base over SMPL motion.
@@ -59,7 +59,7 @@ python scripts/build_smpl_dataset.py \
   --src dependencies/GR00T-WholeBodyControl/sample_data/smpl_filtered
 # -> data/smpl_motions/<clip>/sample0/*.npz
 
-play Sortr-Uolm-Smpl --agent initial --viewer native   # multi-clip rollout
+play Orcs-Uolm-Smpl --agent initial --viewer native   # multi-clip rollout
 ```
 
 Object motion is a static nominal placeholder unless a matching object npz is
@@ -75,13 +75,13 @@ Per gear_sonic's split (see `dependencies/GR00T-WholeBodyControl/docs/source/ref
 | `smpl_joints` (T,24,3) | **z-up, root-centered, RAW** | encoder input (never converted) |
 | `pose_aa` root, `transl` | SMPL-native **y-up** | converted to z-up for root quat / ghost |
 
-`sortr.uolm.smpl_data.load_smpl_clip` handles the conversion; the staged
+`orcs.tasks.uolm.smpl_data.load_smpl_clip` handles the conversion; the staged
 `smpl_motion.npz` carries `smpl_joints` (RAW) + `smpl_root_quat_w` (z-up, wxyz,
 base-rot removed) + `smpl_joints_viz_w` (z-up world, ghost only). G1 wrist refs
 ride `motion.npz` `joint_pos` (zeros OK — degraded wrist orientation only).
 
 ## Adding a task
 
-Drop a sibling package under `src/sortr/` that registers its envs on import,
-then add one line to `src/sortr/__init__.py`. Framework pieces shared across
+Drop a sibling package under `src/orcs/` that registers its envs on import,
+then add one line to `src/orcs/__init__.py`. Framework pieces shared across
 tasks (`assets.py`, `_mjlab_compat.py`) stay at the top level.
