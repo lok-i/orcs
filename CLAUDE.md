@@ -29,6 +29,15 @@ Today: **UOLM** (`src/orcs/tasks/uolm/`, Uni-Object Loco-Manipulation).
 4. **Deps are edited in `dependencies/<dep>/`** and pushed to their own remotes; after any
    change, commit+push there and repin that dep's SHA in `deps.lock`. Applies to
    `mocke`, `assets`, `rsl_rl`.
+5. **When orcs is a dependency, the CONSUMER's lock wins.** `mocke`/`rsl_rl`/`assets` are one
+   editable install per venv, so a consumer (today: `vibe`) decides their SHAs and this
+   lock is what a STANDALONE orcs checkout uses. Both currently agree.
+   `core/deps.py` records what orcs was validated against and prints drift at import —
+   believe it, especially for `mocke`. Dev on orcs alone belongs in its own venv; running
+   `sync_dependencies.sh` inside a consumer's venv silently re-points the shared deps.
+   **Unmerged:** the `assets` commits this lock used to pin (`6822f3b`, `46511a8` —
+   optimized tire/woodchair2/largetable decompositions) are not in the pinned SHA; they
+   want merging in the assets repo.
 
 ## Dependency web (non-obvious)
 

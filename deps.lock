@@ -1,14 +1,14 @@
 {
     "assets": {
         "url": "git@github.com:drcl-deploy/assets.git",
-        "sha": "6822f3bac5a9bbd7f8538986e2af23e1c61f9b56",
+        "sha": "0d5ab0709f27e2a1fffc08b6f67e4c7e52df6f6a",
         "path": "dependencies/assets",
         "pip_install": true,
         "lfs": true
     },
     "retargeted_motions": {
         "url": "https://huggingface.co/datasets/l-k-r/retargeted_motions",
-        "sha": "ead930e529dfe337a8c047558d666ea69fbf0d16",
+        "sha": "5b766829f5e35d186ee54fb47694ced4c74a8aa5",
         "path": "data/retargeted_motions",
         "pip_install": false,
         "lfs": true
