@@ -5,10 +5,10 @@ a default agent hiding in a bare id is how the suffix slot ends up meaning two
 different things — and the command space is an optional suffix that defaults to
 the native robot one.
 
-  Orcs-Uolm-AdptSonic        frozen SONIC base + LoRA adapter. THE task.
+  Orcs-Uolm-AdaptSonic        frozen SONIC base + LoRA adapter. THE task.
   Orcs-Uolm-TaRa             tabula rasa from-scratch MLP — the no-frozen-base
                              floor to measure the adapter against.
-  Orcs-Uolm-AdptSonic-Smpl   same agent, human SMPL command space (SONIC smpl
+  Orcs-Uolm-AdaptSonic-Smpl   same agent, human SMPL command space (SONIC smpl
                              encoder). Rollout-only: rewards + RSI are nullified
                              in the env cfg (PR pending), so `train` on it is
                              meaningless — use scripts/rollout_smpl.py.
@@ -35,9 +35,9 @@ SKIP_REASON: str | None = None
 """Why registration was skipped, or None when every task registered."""
 
 _TASKS = (
-    ("Orcs-Uolm-AdptSonic", {}, sonic_agent_cfg),
+    ("Orcs-Uolm-AdaptSonic", {}, sonic_agent_cfg),
     ("Orcs-Uolm-TaRa", {"agent": "tara"}, tara_agent_cfg),
-    ("Orcs-Uolm-AdptSonic-Smpl", {"command_space": "smpl"},
+    ("Orcs-Uolm-AdaptSonic-Smpl", {"command_space": "smpl"},
      lambda: sonic_agent_cfg("orcs_uolm_smpl", base_checkpoint=_SMPL_CKPT)),
 )
 

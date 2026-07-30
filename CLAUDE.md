@@ -58,7 +58,7 @@ orcs is thin; the substance lives in four pinned deps (`deps.lock`, materialized
   [env_cfg.py](src/orcs/tasks/uolm/env_cfg.py) is the single branching factory. Same object
   plumbing, RSI, goals, terminations; what differs:
 
-  | | `robot` (`Orcs-Uolm-AdptSonic`) | `smpl` (`Orcs-Uolm-AdptSonic-Smpl`) |
+  | | `robot` (`Orcs-Uolm-AdaptSonic`) | `smpl` (`Orcs-Uolm-AdaptSonic-Smpl`) |
   |---|---|---|
   | reference | retargeted G1 clips (object-keyed, omni multi-object) | human SMPL clips (flat, single object) |
   | dataset root | `data/retargeted_motions/.../unitree_g1` | `data/smpl_motions` (built by `build_smpl_dataset.py`) |

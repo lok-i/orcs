@@ -24,7 +24,7 @@ VALIDATED: dict[str, str] = {
     "mocke": "d82830bbfe3d8120e012fe9130d6c785b520ef91",
     "rsl_rl": "30aef22e5aea1477f133f966da1aed202c42c308",
 }
-"""SHAs orcs was last validated against. Bump only after `play Orcs-Uolm-AdptSonic
+"""SHAs orcs was last validated against. Bump only after `play Orcs-Uolm-AdaptSonic
 --agent initial` still rolls the frozen base bit-exact."""
 
 
@@ -62,7 +62,7 @@ def check(strict: bool = False) -> dict[str, tuple[str, str]]:
         if "mocke" in drift:
             print("  ^ mocke carries the frozen-WBC obs/action contract the ported "
                   "SONIC ckpts are bit-coupled to. Re-verify with "
-                  "`play Orcs-Uolm-AdptSonic --agent initial`.")
+                  "`play Orcs-Uolm-AdaptSonic --agent initial`.")
     if strict and drift:
         raise RuntimeError(f"shared dependency drift: {sorted(drift)}")
     return drift
