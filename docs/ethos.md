@@ -20,8 +20,8 @@ and *what can I know*. Solve them apart.
 ```
        full sim state                        onboard only
   ┌────────────────────────┐            ┌────────────────────┐
-  │  ORACLE                │  distill   │  STUDENT           │
-  │  object pose/vel (gt)  │ ─────────► │  proprio + percep  │
+  │  ORACLE POLICY         │  distill   │  STUDENT           │
+  │  any  sim state        │ ─────────► │  proprio + percep  │
   │  contact forces        │  (roadmap) │  learned estimator │
   │  future reference      │            │                    │
   │  privileged critic     │            │  (critic dropped)  │

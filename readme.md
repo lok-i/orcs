@@ -1,13 +1,14 @@
-# orcs — Oracle Robot Control Synthesis
+# orcs
 
-Privileged-observation policies for humanoid control on [mjlab](https://github.com/mujocolab/mjlab),
-and the machinery to distill them into deployable students. Train the oracle
-first (full sim state, asymmetric critic), close the sensing gap after.
+**o**racle **r**obot **c**ontrol **s**ynthesis
 
-orcs is not a task — each task self-registers under `src/orcs/tasks/`. Today:
-**UOLM** (Uni-Object Loco-Manipulation). Design + philosophy: [docs/ethos.md](docs/ethos.md).
+privileged-observation oracle policies for humanoid control on [mjlab](https://github.com/mujocolab/mjlab). 
 
-## Setup
+`orcs` currently supports the following tasks
+1. `omni-object` locomanipualtion 
+2. `perceptive locomtoion` (todo)
+ 
+## setup
 
 Run these from the repo root, inside your project env (conda or uv, Python 3.11):
 
@@ -44,7 +45,7 @@ python -c "import rsl_rl; print(rsl_rl.__file__)"   # must be dependencies/rsl_r
 
 If it points into `site-packages`, the fork was clobbered — re-run step 2.
 
-## Play / Train — robot command space (`Orcs-Uolm`)
+## play / Train — robot command space (`Orcs-Uolm`)
 
 ```bash
 play  Orcs-Uolm --agent initial   # frozen base, no ckpt; also zero|random|trained
@@ -71,7 +72,7 @@ python scripts/rollout_smpl.py \
 python scripts/rollout_smpl.py            # no args -> synthetic standing clip
 ```
 
-**Persistent dataset** — convert a directory of SONIC smpl pkls, then play:
+** persistent dataset** — convert a directory of SONIC smpl pkls, then play:
 
 ```bash
 python scripts/build_smpl_dataset.py \

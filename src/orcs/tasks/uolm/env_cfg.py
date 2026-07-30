@@ -58,11 +58,11 @@ _SMPL_DATASETS_ROOT = str(DATA_ROOT / "smpl_motions")
 # it is the variant order, i.e. the object-id space.
 _DEFAULT_OBJECT_NAMES = (
     "suitcase",
-    # "trashcan",
-    # "largetable",
-    # "plasticbox",
-    # "tire",
-    # "woodchair2",
+    "trashcan",
+    "largetable",
+    "plasticbox",
+    "tire",
+    "woodchair2",
 )
 _EXCLUDE_MOTIONS = ("sub5_suitcase_015", "woodchair2_sit", "custom/tire_flip")
 
