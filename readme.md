@@ -1,6 +1,6 @@
 # orcs
 
-privileged-observation oracle policies for humanoid control on [mjlab](https://github.com/mujocolab/mjlab). 
+privileged oracle policies for humanoid control on [mjlab](https://github.com/mujocolab/mjlab). 
 
 `orcs` currently supports the following tasks
 1. `omni-object` locomanipualtion 
