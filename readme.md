@@ -1,7 +1,5 @@
 # orcs
 
-**o**racle **r**obot **c**ontrol **s**ynthesis
-
 privileged-observation oracle policies for humanoid control on [mjlab](https://github.com/mujocolab/mjlab). 
 
 `orcs` currently supports the following tasks
