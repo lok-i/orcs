@@ -1,4 +1,4 @@
-"""sortr mdp — THE object-manipulation term library (SONIC-only, fcrl lineage).
+"""uolm mdp — THE object-manipulation term library .
 
 Aggregates mjlab's stock mdp + every local object-manip term
 (obs/rewards/terminations/curriculums/events/commands) so ``mdp.<name>``

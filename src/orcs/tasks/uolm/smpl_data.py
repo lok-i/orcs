@@ -109,7 +109,7 @@ def stage_clip(
     zero -> valid, degraded wrist orientation only). object_motion is a static
     nominal pose when ``object_npz`` is None (no smpl+object clips exist yet).
     """
-    from sortr.uolm.env_cfg import _CONTACT_GRAPH_BODY_NAMES
+    from orcs.tasks.uolm.env_cfg import _CONTACT_GRAPH_BODY_NAMES
 
     T = joints.shape[0]
     sample_dir.mkdir(parents=True, exist_ok=True)
