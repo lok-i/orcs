@@ -157,8 +157,8 @@ def uolm_env_cfg(
     _p = {"command_name": "motion"}
 
     if command_space == "smpl":
-        print("[orcs.tasks.uolm] Orcs-Uolm-Smpl: rewards + RSI unsupported "
-              "(rollout only — PR pending).")
+        # rollout-only (rewards + RSI nullified below); documented in
+        # tasks/uolm/__init__ rather than printed at every import.
         motion_file, max_clip_len = _resolve_smpl_motions()
         dataset_dir, cmd_object_names, cmd_excludes = _SMPL_DATASETS_ROOT, None, None
         if motion_file is None:  # dataset not built yet — harmless placeholder

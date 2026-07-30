@@ -2,12 +2,21 @@
 
   Orcs-Uolm        frozen SONIC base + LoRA adapter, robot command space.
   Orcs-Uolm-TaRa   tabula rasa from-scratch MLP — the no-frozen-base floor.
-  Orcs-Uolm-Smpl   human SMPL command space — SONIC smpl encoder; rollout-only
-                   for now (rewards + RSI unsupported, PR pending).
+  Orcs-Uolm-Smpl   human SMPL command space — SONIC smpl encoder. Rollout-only:
+                   rewards + RSI are nullified in the env cfg (PR pending), so
+                   `train` on it is meaningless — use scripts/rollout_smpl.py.
 
-Registration is skipped (with a warning) when local assets/motions are missing:
-object XMLs are machine-generated (assets/.../make_object_models.py) and not
-tracked, so a fresh checkout must not break ``import orcs``.
+Importing orcs is SILENT and never raises. `orcs.core.paths` resolves data and
+assets against the nearest repo root that HAS them, so a host project vendoring
+orcs under `dependencies/` is found automatically — no env vars, no import-order
+coupling. When the data genuinely is absent (a fresh checkout before
+`sync_dependencies.sh` / `make_object_models.py`), registration is skipped
+rather than raising: an incomplete checkout must not break `import orcs` for
+every consumer downstream.
+
+A missing task is the signal; `SKIP_REASON` is the explanation:
+
+    python -c "import orcs; print(orcs.tasks.uolm.SKIP_REASON)"
 """
 
 from mjlab.tasks.registry import register_mjlab_task
@@ -15,26 +24,23 @@ from mjlab.tasks.registry import register_mjlab_task
 from orcs.tasks.uolm.env_cfg import uolm_env_cfg
 from orcs.tasks.uolm.rl_cfg import _SMPL_CKPT, sonic_agent_cfg, tara_agent_cfg
 
+SKIP_REASON: str | None = None
+"""Why registration was skipped, or None when every task registered."""
+
+_TASKS = (
+    ("Orcs-Uolm", {}, sonic_agent_cfg),
+    ("Orcs-Uolm-TaRa", {"agent": "tara"}, tara_agent_cfg),
+    ("Orcs-Uolm-Smpl", {"command_space": "smpl"},
+     lambda: sonic_agent_cfg("orcs_uolm_smpl", base_checkpoint=_SMPL_CKPT)),
+)
+
 try:
-    register_mjlab_task(
-        task_id="Orcs-Uolm",
-        env_cfg=uolm_env_cfg(),
-        play_env_cfg=uolm_env_cfg(play=True),
-        rl_cfg=sonic_agent_cfg(),
-    )
-    register_mjlab_task(
-        task_id="Orcs-Uolm-TaRa",
-        env_cfg=uolm_env_cfg(agent="tara"),
-        play_env_cfg=uolm_env_cfg(agent="tara", play=True),
-        rl_cfg=tara_agent_cfg(),
-    )
-    # SMPL command space: same object plumbing, smpl tokenizer + encoder.
-    # Rollout-only for now (rewards nullified; see scripts/rollout_smpl.py).
-    register_mjlab_task(
-        task_id="Orcs-Uolm-Smpl",
-        env_cfg=uolm_env_cfg(command_space="smpl"),
-        play_env_cfg=uolm_env_cfg(command_space="smpl", play=True),
-        rl_cfg=sonic_agent_cfg("orcs_uolm_smpl", base_checkpoint=_SMPL_CKPT),
-    )
-except FileNotFoundError as e:
-    print(f"[orcs.tasks.uolm] skipping task registration: {e}")
+    for _task_id, _kw, _rl in _TASKS:
+        register_mjlab_task(
+            task_id=_task_id,
+            env_cfg=uolm_env_cfg(**_kw),
+            play_env_cfg=uolm_env_cfg(**_kw, play=True),
+            rl_cfg=_rl(),
+        )
+except (FileNotFoundError, NotADirectoryError, OSError) as e:
+    SKIP_REASON = f"{type(e).__name__}: {e}"

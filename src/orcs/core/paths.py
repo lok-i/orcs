@@ -34,20 +34,48 @@ def _env(var: str) -> Path | None:
     return Path(val).expanduser().resolve() if val else None
 
 
-def _walk_up() -> Path:
+def _repo_roots() -> list[Path]:
+    """Every repo root above this file, nearest first.
+
+    Nearest is orcs's own checkout. When orcs is INSTALLED AS A DEPENDENCY it
+    sits at ``<host>/dependencies/orcs/``, so the next entry is the host repo —
+    which is where the data actually lives, because a dependency checkout is
+    code only (its own ``data/`` and ``dependencies/`` are gitignored and never
+    synced).
+    """
     here = Path(__file__).resolve()
-    for d in here.parents:
-        if all((d / m).exists() for m in _MARKERS):
-            return d
+    return [d for d in here.parents if all((d / m).exists() for m in _MARKERS)]
+
+
+_ROOTS = _repo_roots()
+if not _ROOTS:
     raise FileNotFoundError(
-        f"orcs repo root not found above {here} — no ancestor holds all of "
-        f"{_MARKERS}. Set ORCS_ROOT to override."
+        f"orcs repo root not found above {Path(__file__).resolve()} — no "
+        f"ancestor holds all of {_MARKERS}. Set ORCS_ROOT to override."
     )
 
 
-REPO_ROOT: Path = _env("ORCS_ROOT") or _walk_up()
-DATA_ROOT: Path = _env("ORCS_DATA_ROOT") or REPO_ROOT / "data"
-DEPS_ROOT: Path = _env("ORCS_DEPS_ROOT") or REPO_ROOT / "dependencies"
+def _resolve(var: str, child: str) -> Path:
+    """Env override, else the nearest repo root whose ``child`` exists, else ours.
+
+    The fallback is what makes orcs work unmodified as a library: a host project
+    that vendors orcs under ``dependencies/`` keeps its datasets at its OWN root,
+    and orcs finds them without the host having to set anything. Falling back to
+    ``_ROOTS[0]`` when nothing exists keeps the path well-defined for error
+    messages instead of raising at import.
+    """
+    override = _env(var)
+    if override:
+        return override
+    for root in _ROOTS:
+        if (root / child).is_dir():
+            return root / child
+    return _ROOTS[0] / child
+
+
+REPO_ROOT: Path = _env("ORCS_ROOT") or _ROOTS[0]
+DATA_ROOT: Path = _resolve("ORCS_DATA_ROOT", "data")
+DEPS_ROOT: Path = _resolve("ORCS_DEPS_ROOT", "dependencies")
 
 
 def _assets_candidates() -> list[Path]:

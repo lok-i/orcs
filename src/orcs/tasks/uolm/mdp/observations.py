@@ -12,6 +12,10 @@ from mjlab.utils.lab_api.math import (
     quat_apply_inverse,
     subtract_frame_transforms,
 )
+from mocke.mdp.observations import (  # noqa: F401 — re-exported into `mdp.*`
+    motion_anchor_ori_b_future,
+    motion_anchor_pos_b_future,
+)
 
 __all__ = [
     "object_pose_b",
@@ -30,6 +34,9 @@ __all__ = [
     "motion_object_pos_b_future",
     "motion_object_ori_b_future",
     "unweighted_reward_vector",
+    # re-exported from mocke: the reference-anchor error is the TRACKING layer's,
+    # not the object task's. One definition, so orcs and a vision consumer can
+    # never silently bind different implementations of the same term.
     "motion_anchor_pos_b_future",
     "motion_anchor_ori_b_future",
 ]
@@ -257,25 +264,3 @@ def motion_object_ori_b_future(env: ManagerBasedRlEnv, command_name: str) -> tor
 # ---------------------------------------------------------------------------
 # Anchor tracking obs (future-window command interface; critic stream)
 # ---------------------------------------------------------------------------
-
-def motion_anchor_pos_b_future(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-    """Future N-step anchor position in robot body frame -> (B, N*3)."""
-    cmd = env.command_manager.get_term(command_name)
-    future_pos = cmd.motion_anchor_pos_w_future   # (B, N, 3)
-    future_quat = cmd.motion_anchor_quat_w_future  # (B, N, 4)
-    robot_pos = cmd.robot_anchor_pos_w[:, None, :].expand_as(future_pos)
-    robot_quat = cmd.robot_anchor_quat_w[:, None, :].expand_as(future_quat)
-    pos_b, _ = subtract_frame_transforms(robot_pos, robot_quat, future_pos, future_quat)
-    return pos_b.reshape(env.num_envs, -1)
-
-
-def motion_anchor_ori_b_future(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-    """Future N-step anchor orientation in robot body frame (mat6d) -> (B, N*6)."""
-    cmd = env.command_manager.get_term(command_name)
-    future_pos = cmd.motion_anchor_pos_w_future
-    future_quat = cmd.motion_anchor_quat_w_future
-    robot_pos = cmd.robot_anchor_pos_w[:, None, :].expand_as(future_pos)
-    robot_quat = cmd.robot_anchor_quat_w[:, None, :].expand_as(future_quat)
-    _, ori_b = subtract_frame_transforms(robot_pos, robot_quat, future_pos, future_quat)
-    mat = matrix_from_quat(ori_b)  # (B, N, 3, 3)
-    return mat[..., :2].reshape(env.num_envs, -1)

@@ -283,10 +283,14 @@ class _ConcatMotionLoader:
         self.n_clips: int = len(clip_lengths)
         self.max_clip_length: int = int(self.clip_lengths.max().item())
 
+        from orcs.tasks.uolm.mdp.demo_loader import last_scan
+
+        n_excl = len(last_scan.get("excluded", ()))
         print(
-            f"[uolm] {self.n_clips} clips, "
-            f"{self.time_step_total} frames, "
-            f"max_len={self.max_clip_length} from {root}"
+            f"[uolm] {self.n_clips} clips, {self.time_step_total} frames, "
+            f"max_len={self.max_clip_length}"
+            + (f", {n_excl} motions excluded" if n_excl else "")
+            + f" from {root}"
         )
 
 

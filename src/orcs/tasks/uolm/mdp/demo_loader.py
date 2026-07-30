@@ -10,6 +10,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
+last_scan: dict[str, list[str]] = {"excluded": [], "no_metadata": []}
+"""Report from the most recent dataset scan — excluded motions and samples
+missing metadata.json. Inspect after building an env; see the note in
+`load_motion_files_from_datasets`."""
+
 
 def load_field_or_make_zeros(
     data: np.lib.npyio.NpzFile | None,
@@ -57,6 +62,9 @@ def load_motion_files_from_datasets(
     exclude_set = set(exclude_motions) if exclude_motions else set()
     motion_files_by_object: dict[str, list[str]] = {}
 
+    excluded: list[str] = []      # reported by the caller, not printed here:
+    no_metadata: list[str] = []   # this runs at IMPORT time (cfg construction)
+
     root = Path(path_to_datasets)
     if not root.exists():
         raise FileNotFoundError(f"path_to_datasets does not exist: {root}")
@@ -76,7 +84,7 @@ def load_motion_files_from_datasets(
         for motion_dir in motion_dirs:
             qualified_name = f"{dataset_dir.name}/{motion_dir.name}"
             if motion_dir.name in exclude_set or qualified_name in exclude_set:
-                print(f"[INFO] excluding motion '{qualified_name}'")
+                excluded.append(qualified_name)
                 continue
 
             sample_dirs = sorted(
@@ -95,10 +103,18 @@ def load_motion_files_from_datasets(
                     object_path = metadata.get("object_path", "N/A")
                     object_name = object_path.split("/")[-2] if object_path != "N/A" else "N/A"
                 else:
-                    print(f"\tNo metadata found for {sample_dir}")
+                    no_metadata.append(str(sample_dir))
                     object_name = "N/A"
 
                 motion_files_by_object.setdefault(object_name, []).append(str(motion_file))
+
+    # Stash the scan report on the returned mapping's owner instead of printing:
+    # this function runs at cfg-CONSTRUCTION time, i.e. at `import orcs`, and a
+    # library that talks during import is a library you cannot import quietly.
+    # `_ConcatMotionLoader` prints one summary line at env BUILD, which is where
+    # a human is actually watching.
+    last_scan.clear()
+    last_scan.update(excluded=excluded, no_metadata=no_metadata)
 
     total = sum(len(v) for v in motion_files_by_object.values())
     if total == 0:

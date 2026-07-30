@@ -21,7 +21,7 @@ import subprocess
 from pathlib import Path
 
 VALIDATED: dict[str, str] = {
-    "mocke": "032406265270bb26dd61ebc120248e6597717e6e",
+    "mocke": "d82830bbfe3d8120e012fe9130d6c785b520ef91",
     "rsl_rl": "30aef22e5aea1477f133f966da1aed202c42c308",
 }
 """SHAs orcs was last validated against. Bump only after `play Orcs-Uolm
