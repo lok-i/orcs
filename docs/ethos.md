@@ -99,7 +99,8 @@ Two rules earn their keep:
 
 1. `src/orcs/tasks/<name>/__init__.py` calls `register_mjlab_task(...)`, wrapped
    in `try/except FileNotFoundError` — a checkout without data must still import.
-2. Task id is `Orcs-<Name>[-<Variant>]`.
+2. Task id is `Orcs-<Name>-<Agent>[-<CommandSpace>]` — the agent is always an
+   explicit token, so no row's identity depends on knowing the default.
 3. Add one `import orcs.tasks.<name>` line to `src/orcs/__init__.py`.
 4. Draw robots/objects from `orcs.assets`, paths from `orcs.core.paths`. If you
    need a new robot, add `orcs/assets/<robot>.py` and re-export it.

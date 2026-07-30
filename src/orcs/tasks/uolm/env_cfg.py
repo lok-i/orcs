@@ -3,8 +3,8 @@
 Uni-Object Loco-Manipulation: each env simulates ONE object from `object_names`
 (mjlab VariantEntityCfg, round-robin world->variant) and tracks demo clips of
 THAT object (ObjectMotionCommand in omni mode: env->object from
-sim.world_to_variant, per-env clip masking). Registered as Orcs-Uolm (robot
-command space) and Orcs-Uolm-Smpl (human SMPL command space).
+sim.world_to_variant, per-env clip masking). Registered as Orcs-Uolm-AdptSonic (robot
+command space) and Orcs-Uolm-AdptSonic-Smpl (human SMPL command space).
 
 SONIC-only, ObjKin-only: the policy stream + tokenizer stream come from
 mocke.sonic.profile (frozen base I/O contract); the augmentation stream is
@@ -128,7 +128,7 @@ def uolm_env_cfg(
     kill_bodies: tuple[str, ...] = LOCOMANIP_KILL_BODIES,
     kill_exclude: tuple[str, ...] = (),
 ) -> ManagerBasedRlEnvCfg:
-    """THE Orcs-Uolm env config factory (SONIC augment layout, MoTr rewards).
+    """THE Orcs-Uolm-AdptSonic env config factory (SONIC augment layout, MoTr rewards).
 
     command_space="robot": object-keyed omni dataset (retargeted G1 clips).
     command_space="smpl":  flat SMPL dataset (data/smpl_motions, single object);

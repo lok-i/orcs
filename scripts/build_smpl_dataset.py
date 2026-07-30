@@ -1,4 +1,4 @@
-"""Build the persistent SMPL dataset for Orcs-Uolm-Smpl.
+"""Build the persistent SMPL dataset for Orcs-Uolm-AdptSonic-Smpl.
 
 Converts a directory of SONIC smpl pkls into the flat layout the UOLM motion
 command flat-scans (one sample dir per clip):
@@ -8,7 +8,7 @@ command flat-scans (one sample dir per clip):
 Object motion is a static nominal placeholder unless a matching object npz is
 found (no smpl+object clips exist yet). Once built:
 
-  play Orcs-Uolm-Smpl --agent initial --viewer native   # multi-clip rollout
+  play Orcs-Uolm-AdptSonic-Smpl --agent initial --viewer native   # multi-clip rollout
 
 Usage:
   python scripts/build_smpl_dataset.py --src <dir-of-pkls> [--object-dir <dir>]
@@ -57,7 +57,7 @@ def main() -> None:
         print(f"[build]   {stem}: {joints.shape[0]} frames"
               f"{' (+object)' if obj_npz else ''}")
 
-    print("[build] done — play Orcs-Uolm-Smpl --agent initial")
+    print("[build] done — play Orcs-Uolm-AdptSonic-Smpl --agent initial")
 
 
 if __name__ == "__main__":

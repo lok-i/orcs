@@ -1,10 +1,17 @@
 """Register the UOLM (Uni-Object Loco-Manipulation) tasks with mjlab.
 
-  Orcs-Uolm        frozen SONIC base + LoRA adapter, robot command space.
-  Orcs-Uolm-TaRa   tabula rasa from-scratch MLP — the no-frozen-base floor.
-  Orcs-Uolm-Smpl   human SMPL command space — SONIC smpl encoder. Rollout-only:
-                   rewards + RSI are nullified in the env cfg (PR pending), so
-                   `train` on it is meaningless — use scripts/rollout_smpl.py.
+Task ids read `Orcs-<Task>-<Agent>[-<CommandSpace>]`. The AGENT is always named —
+a default agent hiding in a bare id is how the suffix slot ends up meaning two
+different things — and the command space is an optional suffix that defaults to
+the native robot one.
+
+  Orcs-Uolm-AdptSonic        frozen SONIC base + LoRA adapter. THE task.
+  Orcs-Uolm-TaRa             tabula rasa from-scratch MLP — the no-frozen-base
+                             floor to measure the adapter against.
+  Orcs-Uolm-AdptSonic-Smpl   same agent, human SMPL command space (SONIC smpl
+                             encoder). Rollout-only: rewards + RSI are nullified
+                             in the env cfg (PR pending), so `train` on it is
+                             meaningless — use scripts/rollout_smpl.py.
 
 Importing orcs is SILENT and never raises. `orcs.core.paths` resolves data and
 assets against the nearest repo root that HAS them, so a host project vendoring
@@ -28,9 +35,9 @@ SKIP_REASON: str | None = None
 """Why registration was skipped, or None when every task registered."""
 
 _TASKS = (
-    ("Orcs-Uolm", {}, sonic_agent_cfg),
+    ("Orcs-Uolm-AdptSonic", {}, sonic_agent_cfg),
     ("Orcs-Uolm-TaRa", {"agent": "tara"}, tara_agent_cfg),
-    ("Orcs-Uolm-Smpl", {"command_space": "smpl"},
+    ("Orcs-Uolm-AdptSonic-Smpl", {"command_space": "smpl"},
      lambda: sonic_agent_cfg("orcs_uolm_smpl", base_checkpoint=_SMPL_CKPT)),
 )
 

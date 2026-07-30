@@ -1,9 +1,9 @@
 """Roll the frozen SONIC base (zero-adapt) on ONE smpl + object clip — quicktest.
 
 Stages the given clip into a scratch single-clip dataset (flat layout) and
-points Orcs-Uolm-Smpl's play cfg at it. Rewards are nullified in the -Smpl cfg;
+points Orcs-Uolm-AdptSonic-Smpl's play cfg at it. Rewards are nullified in the -Smpl cfg;
 this is rollout only. For a persistent multi-clip dataset use
-scripts/build_smpl_dataset.py + `play Orcs-Uolm-Smpl`.
+scripts/build_smpl_dataset.py + `play Orcs-Uolm-AdptSonic-Smpl`.
 
   --smpl    SONIC smpl pkl (pose_aa (T,72), transl, smpl_joints (T,24,3), fps;
             y-up unless --z-up) OR a ready npz (see orcs.tasks.uolm.smpl_data).
@@ -51,7 +51,7 @@ def main() -> None:
     stage_clip(scratch / "clip" / "sample0", joints, root_quat, joints_viz, args.object)
     print(f"[rollout] staged {T}-frame clip -> {scratch}")
 
-    cfg = load_env_cfg("Orcs-Uolm-Smpl", play=True)
+    cfg = load_env_cfg("Orcs-Uolm-AdptSonic-Smpl", play=True)
     cfg.scene.num_envs = 1
     mc = cfg.commands["motion"]
     mc.dataset_dir = str(scratch)
@@ -62,7 +62,7 @@ def main() -> None:
     cfg.episode_length_s = T * step_dt + 2.0
 
     device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
-    agent_cfg = load_rl_cfg("Orcs-Uolm-Smpl")
+    agent_cfg = load_rl_cfg("Orcs-Uolm-AdptSonic-Smpl")
     env = ManagerBasedRlEnv(cfg=cfg, device=device, render_mode=None)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
     runner = MjlabOnPolicyRunner(env, asdict(agent_cfg), device=device)

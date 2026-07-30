@@ -7,7 +7,7 @@ orcs itself is not a task. Three layers, no upward imports:
   assets   robots + objects as mjlab entity cfgs (g1, objects).
   tasks    one self-registering sub-package per task:
              tasks.uolm   Uni-Object Loco-Manipulation
-                          (Orcs-Uolm, Orcs-Uolm-TaRa, Orcs-Uolm-Smpl)
+                          (Orcs-Uolm-AdptSonic, Orcs-Uolm-TaRa, Orcs-Uolm-AdptSonic-Smpl)
 
 Adding a task: drop ``tasks/<name>/`` that self-registers on import, then add
 its import line below. Philosophy, layer contract and roadmap: docs/ethos.md.

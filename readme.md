@@ -26,7 +26,7 @@ python dependencies/assets/source/omni_objects/make_object_models.py --all
 # 4. (optional) editor + Claude config for this machine
 bash scripts/setup/let_there_be_light.sh
 
-# 5. verify — expect Orcs-Uolm and Orcs-Uolm-Smpl
+# 5. verify — expect Orcs-Uolm-AdptSonic, -TaRa, -AdptSonic-Smpl
 python -c "import orcs, mjlab.tasks; from mjlab.tasks.registry import list_tasks; print(list_tasks())"
 ```
 
@@ -45,18 +45,20 @@ python -c "import rsl_rl; print(rsl_rl.__file__)"   # must be dependencies/rsl_r
 
 If it points into `site-packages`, the fork was clobbered — re-run step 2.
 
-## play / Train — robot command space (`Orcs-Uolm`)
+## play / Train — robot command space (`Orcs-Uolm-AdptSonic`)
 
 ```bash
-play  Orcs-Uolm --agent initial   # frozen base, no ckpt; also zero|random|trained
-train Orcs-Uolm --num_envs 4096
+play  Orcs-Uolm-AdptSonic --agent initial   # frozen base, no ckpt; also zero|random|trained
+train Orcs-Uolm-AdptSonic --num_envs 4096
+
+train Orcs-Uolm-TaRa --num_envs 4096       # the no-frozen-base floor, same env
 ```
 
 `--agent initial` = the task's real agent (frozen SONIC base + zero-init LoRA),
 no training checkpoint → rolls the frozen base bit-exact. There is no test
 suite; this is how you verify a change (watch obs shapes + reward).
 
-## SMPL command space (`Orcs-Uolm-Smpl`)
+## SMPL command space (`Orcs-Uolm-AdptSonic-Smpl`)
 
 Rollout-only for now — rewards and RSI are unsupported (pending a separate PR);
 the env nullifies rewards and rolls the frozen base over SMPL motion.
@@ -79,7 +81,7 @@ python scripts/build_smpl_dataset.py \
   --src dependencies/GR00T-WholeBodyControl/sample_data/smpl_filtered
 # -> data/smpl_motions/<clip>/sample0/*.npz
 
-play Orcs-Uolm-Smpl --agent initial --viewer native   # multi-clip rollout
+play Orcs-Uolm-AdptSonic-Smpl --agent initial --viewer native   # multi-clip rollout
 ```
 
 Object motion is a static nominal placeholder unless a matching object npz is
