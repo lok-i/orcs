@@ -1,8 +1,11 @@
-# orcs — SONIC REtarget & REfine
+# orcs — Oracle Robot Control Synthesis
 
-A framework for kinematically retarget a reference, dynamically refine with a LoRA
-adapter by adapting **SONIC** whole-body controller to mjlab
-tasks: . 
+Privileged-observation policies for humanoid control on [mjlab](https://github.com/mujocolab/mjlab),
+and the machinery to distill them into deployable students. Train the oracle
+first (full sim state, asymmetric critic), close the sensing gap after.
+
+orcs is not a task — each task self-registers under `src/orcs/tasks/`. Today:
+**UOLM** (Uni-Object Loco-Manipulation). Design + philosophy: [docs/ethos.md](docs/ethos.md).
 
 ## Setup
 
@@ -26,6 +29,9 @@ bash scripts/setup/let_there_be_light.sh
 python -c "import orcs, mjlab.tasks; from mjlab.tasks.registry import list_tasks; print(list_tasks())"
 ```
 
+Step 5 printing `[orcs.tasks.uolm] skipping task registration: ...` means step 2
+or 3 is incomplete — registration degrades instead of breaking `import orcs`.
+
 ## Play / Train — robot command space (`Orcs-Uolm`)
 
 ```bash
@@ -34,7 +40,8 @@ train Orcs-Uolm --num_envs 4096
 ```
 
 `--agent initial` = the task's real agent (frozen SONIC base + zero-init LoRA),
-no training checkpoint → rolls the frozen base bit-exact.
+no training checkpoint → rolls the frozen base bit-exact. There is no test
+suite; this is how you verify a change (watch obs shapes + reward).
 
 ## SMPL command space (`Orcs-Uolm-Smpl`)
 
@@ -80,8 +87,26 @@ Per gear_sonic's split (see `dependencies/GR00T-WholeBodyControl/docs/source/ref
 base-rot removed) + `smpl_joints_viz_w` (z-up world, ghost only). G1 wrist refs
 ride `motion.npz` `joint_pos` (zeros OK — degraded wrist orientation only).
 
+## Lint
+
+```bash
+ruff check src scripts     # config: pyproject [tool.ruff.lint]
+```
+
+## Environment overrides
+
+Paths resolve through `orcs.core.paths` — override a root instead of moving files:
+
+| var | default | notes |
+|---|---|---|
+| `ORCS_ROOT` | walk up for `pyproject.toml`+`deps.lock` | repo root |
+| `ORCS_DATA_ROOT` | `<repo>/data` | datasets |
+| `ORCS_DEPS_ROOT` | `<repo>/dependencies` | synced deps |
+| `ORCS_ASSETS_SOURCE` | `<deps>/assets/source`, else the installed `assets` pkg | raises if set but wrong |
+| `ORCS_NCCDMAX` | `64` | mujoco-warp CCD workspace rows/world; raise it if stderr shows "CCD overflow" |
+
 ## Adding a task
 
-Drop a sibling package under `src/orcs/` that registers its envs on import,
-then add one line to `src/orcs/__init__.py`. Framework pieces shared across
-tasks (`assets.py`, `_mjlab_compat.py`) stay at the top level.
+Drop a package under `src/orcs/tasks/` that registers its envs on import, then
+add one line to `src/orcs/__init__.py`. Layer contract and full checklist:
+[docs/ethos.md](docs/ethos.md).
