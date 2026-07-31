@@ -1,7 +1,7 @@
 {
     "assets": {
         "url": "git@github.com:drcl-deploy/assets.git",
-        "sha": "0d5ab0709f27e2a1fffc08b6f67e4c7e52df6f6a",
+        "sha": "bcf1fff3bdf90d4739d872e374e8757c4bc4422d",
         "path": "dependencies/assets",
         "pip_install": true,
         "lfs": true

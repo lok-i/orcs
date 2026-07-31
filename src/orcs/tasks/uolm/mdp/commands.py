@@ -33,7 +33,9 @@ from mjlab.utils.lab_api.math import (
 from orcs.tasks.uolm.mdp.contact_schedule import ContactSchedule
 from orcs.tasks.uolm.mdp.demo_loader import (
     get_motion_files_for_objects,
+    last_scan,
     load_field_or_make_zeros,
+    matches_exclude,
 )
 
 if TYPE_CHECKING:
@@ -106,13 +108,18 @@ def _scan_flat_dataset(
     """<motion>/<sampleX>/motion.npz walk — the single-object layout.
 
     `dataset_dir` is a root (subdirs = motion folders) or a list of motion
-    folders. `exclude_motions` entries match a whole motion folder ("<motion>",
-    all samples) or a single clip ("<motion>/<sampleX>").
+    folders. `exclude_motions` grammar: see `demo_loader.matches_exclude`.
+    Fills `demo_loader.last_scan`; the summary is printed by the loader.
     """
     excl = set(exclude_motions or ())
-    n_skipped = 0
+    excl_motions: list[str] = []
+    excl_clips: list[str] = []
     motion_files: list[str] = []
     for motion_dir in motion_dirs(dataset_dir):
+        dataset = motion_dir.parent.name
+        if matches_exclude(excl, dataset, motion_dir.name):
+            excl_motions.append(f"{dataset}/{motion_dir.name}")
+            continue
         sample_dirs = sorted(
             (d for d in motion_dir.iterdir()
              if d.is_dir() and d.name.startswith("sample")),
@@ -122,14 +129,14 @@ def _scan_flat_dataset(
             mf = sample_dir / "motion.npz"
             if not mf.exists():
                 continue
-            if (motion_dir.name in excl
-                    or f"{motion_dir.name}/{sample_dir.name}" in excl):
-                n_skipped += 1
+            if matches_exclude(excl, dataset, motion_dir.name, sample_dir.name):
+                excl_clips.append(
+                    f"{dataset}/{motion_dir.name}/{sample_dir.name}")
                 continue
             motion_files.append(str(mf))
-    if n_skipped:
-        print(f"[uolm] excluded {n_skipped} clips "
-              f"({len(excl)} exclude_motions entries)")
+    last_scan.clear()
+    last_scan.update(excluded_motions=excl_motions, excluded_clips=excl_clips,
+                     no_metadata=[])
     if not motion_files:
         raise FileNotFoundError(f"No motion.npz under {dataset_dir}")
     return motion_files
@@ -283,14 +290,20 @@ class _ConcatMotionLoader:
         self.n_clips: int = len(clip_lengths)
         self.max_clip_length: int = int(self.clip_lengths.max().item())
 
-        from orcs.tasks.uolm.mdp.demo_loader import last_scan
-
-        n_excl = len(last_scan.get("excluded", ()))
+        # MOTION = one demo folder; CLIP = one `sampleN` take of it (a motion
+        # holds 1..200+). `n_clips` is what the timeline is made of; the
+        # exclusion tally is per kind because the two are not interchangeable.
+        n_motions = len({Path(f).parent.parent for f in motion_files})
+        dropped = [  # scan-wide (exclusion precedes the object-roster filter)
+            f"{len(v)} {k[len('excluded_'):].rstrip('s')}{'s' * (len(v) > 1)}"
+            for k in ("excluded_motions", "excluded_clips")
+            if (v := last_scan.get(k))
+        ]
         print(
-            f"[uolm] {self.n_clips} clips, {self.time_step_total} frames, "
-            f"max_len={self.max_clip_length}"
-            + (f", {n_excl} motions excluded" if n_excl else "")
-            + f" from {root}"
+            f"[uolm] {self.n_clips} clips from {n_motions} motions, "
+            f"{self.time_step_total} frames, max_len={self.max_clip_length}"
+            + (f", dropped {' + '.join(dropped)}" if dropped else "")
+            + f" — {root}"
         )
 
 
@@ -859,8 +872,9 @@ class ObjectMotionCommandCfg(MotionCommandCfg):
     # assigned object (env->object read from sim.world_to_variant).
     # None -> single-object flat scan (e.g. the repose cube task).
     ordered_object_names: tuple[str, ...] | None = None
-    # Motions to skip. Omni mode: bare name (any dataset) or "<dataset>/<motion>".
-    # Flat mode (single-object): "<motion>" (whole folder) or "<motion>/<sampleX>".
+    # Motions/clips to skip — same grammar in both modes, see
+    # `demo_loader.matches_exclude`: "<motion>" or "<dataset>/<motion>" drops a
+    # whole motion; append "/<sampleN>" to drop that one clip of it.
     exclude_motions: tuple[str, ...] | None = None
 
     # Conditional object RSI randomization ({x..yaw} -> (lo, hi) dicts):

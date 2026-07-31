@@ -45,7 +45,7 @@ _DIST_LEARNABLE = {
 
 _NUM_STEPS_PER_ENV = 24
 _MAX_ITERATIONS = 60_000
-_SAVE_INTERVAL = 1000
+_SAVE_INTERVAL = 1500
 
 
 def _runner(experiment_name: str) -> RslRlOnPolicyRunnerCfg:

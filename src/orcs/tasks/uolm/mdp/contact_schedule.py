@@ -59,7 +59,7 @@ class ContactSchedule:
 
         if self._n is None:
             raise RuntimeError(
-                "ContactSchedule: no contact_matrix.npz found for ANY motion — "
+                "ContactSchedule: no contact_matrix.npz found for ANY clip — "
                 "cannot establish the contact legend."
             )
 
@@ -73,7 +73,7 @@ class ContactSchedule:
                 n_missing += 1
             self._matrix_list.append(mat)
         if n_missing:
-            print(f"[ContactSchedule] {n_missing}/{len(motion_files)} motions "
+            print(f"[ContactSchedule] {n_missing}/{len(motion_files)} clips "
                   f"missing contact_matrix.npz -> zeros fallback")
 
     # ── legend ──
@@ -87,7 +87,7 @@ class ContactSchedule:
             self._name_to_idx = {nm: i for i, nm in enumerate(block)}
         elif n != self._n or block != self._canon_block:
             raise RuntimeError(
-                "ContactSchedule: contact-matrix legend drift across motions — "
+                "ContactSchedule: contact-matrix legend drift across clips — "
                 "body order is not consistent.\n"
                 f"  expected robot+world block: {self._canon_block}\n"
                 f"  got:                        {block}"

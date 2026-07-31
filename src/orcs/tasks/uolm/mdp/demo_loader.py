@@ -10,10 +10,43 @@ from pathlib import Path
 import numpy as np
 import torch
 
-last_scan: dict[str, list[str]] = {"excluded": [], "no_metadata": []}
-"""Report from the most recent dataset scan — excluded motions and samples
-missing metadata.json. Inspect after building an env; see the note in
-`load_motion_files_from_datasets`."""
+last_scan: dict[str, list[str]] = {
+    "excluded_motions": [], "excluded_clips": [], "no_metadata": []
+}
+"""Report from the most recent dataset scan — motions dropped whole, individual
+clips dropped, and clips missing metadata.json. Inspect after building an env;
+see the note in `load_motion_files_from_datasets`."""
+
+
+def matches_exclude(
+    exclude_set: set[str],
+    dataset: str,
+    motion: str,
+    sample: str | None = None,
+) -> bool:
+    """Does an `exclude_motions` entry cover this motion folder / clip?
+
+    Vocabulary: a MOTION is one demo folder (`<dataset>/<motion>/`); a CLIP is
+    one take of it (`<sampleN>/motion.npz`) — one motion holds 1..200+ clips.
+
+    Entry grammar (a trailing `sample*` component is what makes it clip-level):
+
+    | entry | drops |
+    |---|---|
+    | `<motion>` | every clip of that motion, in any dataset |
+    | `<dataset>/<motion>` | ... in that dataset only |
+    | `<motion>/<sampleN>` | that one clip, in any dataset |
+    | `<dataset>/<motion>/<sampleN>` | that one clip, that dataset |
+
+    `sample=None` asks the motion-level question only, so a folder holding an
+    excluded CLIP is still walked.
+    """
+    if motion in exclude_set or f"{dataset}/{motion}" in exclude_set:
+        return True
+    if sample is None:
+        return False
+    return (f"{motion}/{sample}" in exclude_set
+            or f"{dataset}/{motion}/{sample}" in exclude_set)
 
 
 def load_field_or_make_zeros(
@@ -49,11 +82,9 @@ def load_motion_files_from_datasets(
     Args:
         path_to_datasets: Root directory for a robot, e.g.
             ``/path/to/retargeted_motions/data/unitree_g1/``.
-        exclude_motions: Optional list of motions to skip. Each entry is either
-            a bare motion-folder name (``"sub1_largebox_003"``) — excluded in
-            every dataset it appears in — or a dataset-qualified
-            ``"<dataset>/<motion>"`` (``"custom/tire_flip"``) — excluded only in
-            that dataset.
+        exclude_motions: Optional list of motions/clips to skip — grammar in
+            :func:`matches_exclude` (whole motion, or one ``sampleN`` of it,
+            each optionally dataset-qualified).
 
     Returns:
         dict mapping object_name -> list of motion.npz paths (sorted by
@@ -62,8 +93,9 @@ def load_motion_files_from_datasets(
     exclude_set = set(exclude_motions) if exclude_motions else set()
     motion_files_by_object: dict[str, list[str]] = {}
 
-    excluded: list[str] = []      # reported by the caller, not printed here:
-    no_metadata: list[str] = []   # this runs at IMPORT time (cfg construction)
+    excl_motions: list[str] = []  # reported by the caller, not printed here:
+    excl_clips: list[str] = []    # this runs at IMPORT time (cfg construction)
+    no_metadata: list[str] = []
 
     root = Path(path_to_datasets)
     if not root.exists():
@@ -83,8 +115,8 @@ def load_motion_files_from_datasets(
         )
         for motion_dir in motion_dirs:
             qualified_name = f"{dataset_dir.name}/{motion_dir.name}"
-            if motion_dir.name in exclude_set or qualified_name in exclude_set:
-                excluded.append(qualified_name)
+            if matches_exclude(exclude_set, dataset_dir.name, motion_dir.name):
+                excl_motions.append(qualified_name)
                 continue
 
             sample_dirs = sorted(
@@ -94,6 +126,10 @@ def load_motion_files_from_datasets(
             for sample_dir in sample_dirs:
                 motion_file = sample_dir / "motion.npz"
                 if not motion_file.exists():
+                    continue
+                if matches_exclude(exclude_set, dataset_dir.name,
+                                   motion_dir.name, sample_dir.name):
+                    excl_clips.append(f"{qualified_name}/{sample_dir.name}")
                     continue
 
                 metadata_file = sample_dir / "metadata.json"
@@ -114,7 +150,8 @@ def load_motion_files_from_datasets(
     # `_ConcatMotionLoader` prints one summary line at env BUILD, which is where
     # a human is actually watching.
     last_scan.clear()
-    last_scan.update(excluded=excluded, no_metadata=no_metadata)
+    last_scan.update(excluded_motions=excl_motions, excluded_clips=excl_clips,
+                     no_metadata=no_metadata)
 
     total = sum(len(v) for v in motion_files_by_object.values())
     if total == 0:

@@ -72,7 +72,17 @@ _DEFAULT_OBJECT_NAMES = (
     "tire",
     "woodchair2",
 )
-_EXCLUDE_MOTIONS = ("sub5_suitcase_015", "woodchair2_sit", "custom/tire_flip")
+_EXCLUDE_MOTIONS = ("sub5_suitcase_015", 
+                    "woodchair2_sit", 
+
+                    "tire_flip",
+                    "custom/tire_roll",
+                    "sugar/tire_roll/sample1",
+                    "sugar/tire_roll/sample3",
+
+                    "custom/woodchair2_flip/sample1",
+                    "custom/woodchair2_flip/sample3",
+                    )
 
 # Collision budget: cvx_dcmp everywhere. Whole-object hulls looked like the
 # cheap option but are a narrowphase trap (measured 2026-07-15, 4096 envs):
@@ -194,19 +204,19 @@ def uolm_env_cfg(
             # VOF: decaying PD wrench pushing the object toward the demo ref.
             # Per-world mass/inertia scaling comes from the variant model
             # (build_variant_model populates body_mass/body_inertia per world).
-            "virtual_object_force": EventTermCfg(
-                func=mdp.VirtualObjectForceCurriculum,
-                mode="interval",
-                interval_range_s=(0.0, 0.0),
-                params={
-                    "natural_frequency": 12.0,
-                    "terminal_scale": 1e-4,
-                    "decay_mode": "exponential",
-                    "decay_by_policy_iterations": 10_000,
-                    "object_cfg": obj,
-                    **_p,
-                },
-            ),
+            # "virtual_object_force": EventTermCfg(
+            #     func=mdp.VirtualObjectForceCurriculum,
+            #     mode="interval",
+            #     interval_range_s=(0.0, 0.0),
+            #     params={
+            #         "natural_frequency": 12.0,
+            #         "terminal_scale": 1e-4,
+            #         "decay_mode": "exponential",
+            #         "decay_by_policy_iterations": 10_000,
+            #         "object_cfg": obj,
+            #         **_p,
+            #     },
+            # ),
         },
         rewards={},       # filled below
         terminations={
