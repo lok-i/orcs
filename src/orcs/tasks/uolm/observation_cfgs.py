@@ -141,6 +141,10 @@ def critic_group(c: ObsCtx) -> ObservationGroupCfg:
         "motion_anchor_ori_b": _T(mdp.motion_anchor_ori_b_future, c.p),
         # proprio
         **proprio_terms(),
+        # explicit, NOT via proprio_terms: base_lin_vel left the deployable
+        # bundle 1Aug2026 (no state estimator on hw), but the critic never
+        # deploys — dropping it there was a pure value-function downgrade.
+        "base_lin_vel": _T(mdp.base_lin_vel),
         "actions": _T(mdp.last_action),
         # object state (env frame)
         "object_pos_w": _T(mdp.object_pos_w_obs, {"object_cfg": c.obj}),
