@@ -55,7 +55,7 @@ def proprio_terms() -> dict:
     """Robot self-state (deployable): gravity dir + base twist + joint pos/vel."""
     return {
         "projected_gravity": _T(mdp.projected_gravity),
-        "base_lin_vel": _T(mdp.base_lin_vel),
+        # "base_lin_vel": _T(mdp.base_lin_vel),  #NOTE (lok-i) 1Aug2026: found insensitive 
         "base_ang_vel": _T(mdp.base_ang_vel),
         "joint_pos": _T(mdp.joint_pos_rel),
         "joint_vel": _T(mdp.joint_vel_rel),

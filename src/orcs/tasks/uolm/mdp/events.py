@@ -50,34 +50,27 @@ class PolicyUpdateCounter(ManagerTermBase):
 # ---------------------------------------------------------------------------
 
 class PerturbObjectInRobotContact(ManagerTermBase):
-    """Kick the object's root velocity at most ONCE per episode, on the first
-    step at-or-after a per-episode random watch-start where the robot's hands
-    touch the object (control-authority -> the kick is recoverable, not a
-    fling; root-link contact is not meaningful control).
+    """Kick the object's root velocity on EVERY step the robot's hands touch it
+    (control-authority gate -> the kick is recoverable, not a fling; root-link
+    contact is not meaningful control).
 
-    - mode="interval", interval_range_s=(0.0, 0.0) -> ticks every env step.
-    - watch-start ~ U[0, max_episode_length) per episode randomizes WHEN we
-      begin watching for contact, NOT when we fire.
+    - mode="interval", interval_range_s=(0.0, 0.0) -> ticks every env step, so
+      the perturbation is a continuous shake for as long as contact holds.
+    - stateless: no once-per-episode latch and no random watch-start (both
+      dropped 2026-08-01) — contact alone gates firing, ``reset`` is a no-op.
     - live contact from the one multi-primary object contact-graph sensor
       (columns are MODEL order — resolved by name via ``sensor.primary_names``).
     """
 
     def __init__(self, cfg, env):
         super().__init__(env)
-        self._fired = torch.zeros(
-            env.num_envs, dtype=torch.bool, device=env.device)
-        self._watch_start = torch.zeros(
-            env.num_envs, dtype=torch.long, device=env.device)
+
         self._cols: list[int] | None = None  # sensor built after cfg time
 
     def reset(self, env_ids=None):
         if env_ids is None:
             env_ids = torch.arange(self._env.num_envs, device=self._env.device)
-        self._fired[env_ids] = False
-        self._watch_start[env_ids] = torch.randint(
-            0, self._env.max_episode_length, (len(env_ids),),
-            device=self._env.device,
-        )
+
 
     def __call__(
         self,
@@ -97,11 +90,12 @@ class PerturbObjectInRobotContact(ManagerTermBase):
         force = torch.norm(sensor.data.force, dim=-1)  # (N, K) model order
         in_contact = (force[:, self._cols] > contact_force_threshold).any(dim=-1)
 
-        watching = env.episode_length_buf >= self._watch_start
-        fire = (watching & in_contact & ~self._fired).nonzero(
-            as_tuple=False).squeeze(-1)
-        if fire.numel() == 0:
+        envs_to_pertueb = in_contact .nonzero(as_tuple=False).squeeze(-1)
+        if envs_to_pertueb.numel() == 0:
             return
         push_by_setting_velocity(
-            env, fire, velocity_range=velocity_range, asset_cfg=object_cfg)
-        self._fired[fire] = True
+                                 env, 
+                                 envs_to_pertueb, 
+                                 velocity_range=velocity_range, 
+                                 asset_cfg=object_cfg
+                                 )
