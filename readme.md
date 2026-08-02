@@ -24,7 +24,7 @@ python dependencies/assets/source/omni_objects/make_object_models.py --all
 # 4. (optional) editor + Claude config for this machine
 bash scripts/setup/let_there_be_light.sh
 
-# 5. verify — expect Orcs-Uolm-AdaptSonic, -TaRa, -AdaptSonic-Smpl
+# 5. verify — expect Orcs-Uolm-* and (once terrain is staged) Orcs-PerLoco-*
 python -c "import orcs, mjlab.tasks; from mjlab.tasks.registry import list_tasks; print(list_tasks())"
 ```
 
@@ -99,6 +99,26 @@ Per gear_sonic's split (see `dependencies/GR00T-WholeBodyControl/docs/source/ref
 `smpl_motion.npz` carries `smpl_joints` (RAW) + `smpl_root_quat_w` (z-up, wxyz,
 base-rot removed) + `smpl_joints_viz_w` (z-up world, ghost only). G1 wrist refs
 ride `motion.npz` `joint_pos` (zeros OK — degraded wrist orientation only).
+
+## PerLoco — perceptive locomotion (`Orcs-PerLoco-AdaptSonic`)
+
+Same frozen SONIC base and LoRA adapter as UOLM; the adapter reads a TERRAIN
+height scan instead of object kinematics. Needs staged (terrain, motion) pairs
+— full usage in [tasks/perloco/readme.md](src/orcs/tasks/perloco/readme.md).
+
+```bash
+python scripts/stage_terrain_motions.py --source omni   # once: 145 clips / 145 tiles
+python scripts/view_terrain_motions.py  --source omni   # inspect + curate -> :8080
+
+play  Orcs-PerLoco-AdaptSonic --num-envs 10 --agent initial
+train Orcs-PerLoco-AdaptSonic --num_envs 4096
+```
+
+Tasks are skipped (never raised) when the staging directory is absent:
+
+```bash
+python -c "import orcs; print(orcs.tasks.perloco.SKIP_REASON)"
+```
 
 ## Lint
 

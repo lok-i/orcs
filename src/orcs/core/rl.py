@@ -1,16 +1,24 @@
-"""The PPO runner spine and the actor builders — task-blind.
+"""THE agent zoo — task-blind. Every orcs agent is generated from here.
 
 Every orcs task trains the same way: adaptive-KL PPO over an asymmetric
 actor-critic, `policy` in and `critic` in. What differs per task is the ACTOR,
-and what differs per agent is which actor. So:
+and what differs per agent is which actor. Two tiers:
 
-  _runner(name)          THE runner/algo/critic defaults. One source.
-  sonic_adapter_actor()  frozen SONIC base + zero-init LoRA on the decoder
-  mlp_actor()            from-scratch MLP — the no-frozen-base floor
-  sidecar_actor()        frozen textop WBC + bounded action residual
+  runner(name)              THE runner/algo/critic defaults. One source.
+  *_actor()                 the actor dicts — composable parts
 
-A task's `rl_cfg.py` is then `_runner(...)` plus one actor call, and a
-downstream consumer (vibe) imports the spine rather than re-declaring it.
+  adapt_sonic_agent_cfg()   frozen SONIC base + zero-init LoRA on the decoder
+  tara_agent_cfg()          from-scratch MLP — the no-frozen-base floor
+  sidecar_agent_cfg()       frozen textop WBC + bounded action residual
+
+**A task does not own an agent.** It picks one by name and passes an
+experiment name — `adapt_sonic_agent_cfg("orcs_perloco")` is the whole of a
+task's RL config. That is why there is no `rl_cfg.py` under any task: a second
+place to spell "PPO" is a second place for the two to drift.
+
+A task that genuinely needs a different actor adds a generator HERE (if it is
+task-blind) or overrides `.actor` on the returned cfg (if it is not). Consumers
+outside orcs do the same — import the generator, override one field.
 
 Nothing here names an object, a terrain, or a dataset.
 """
@@ -26,6 +34,7 @@ __all__ = [
     "DIST_BASE_BAND", "DIST_LEARNABLE",
     "NUM_STEPS_PER_ENV", "MAX_ITERATIONS", "SAVE_INTERVAL",
     "runner", "sonic_adapter_actor", "mlp_actor", "sidecar_actor",
+    "adapt_sonic_agent_cfg", "tara_agent_cfg", "sidecar_agent_cfg",
 ]
 
 SONIC_CKPT = str(PRETRAINED_DIR / "sonic/last_ported.pt")
@@ -151,3 +160,64 @@ def sidecar_actor(
         "base_checkpoint": base_checkpoint,
         "freeze_base": True,
     }
+
+
+# ---------------------------------------------------------------------------
+# The agent generators — what a task actually calls
+# ---------------------------------------------------------------------------
+
+def adapt_sonic_agent_cfg(
+    experiment_name: str,
+    *,
+    rank: int = 16,
+    alpha: float = 1.0,
+    base_checkpoint: str = SONIC_CKPT,
+    adapter_obs_group: str = "augmentation",
+) -> RslRlOnPolicyRunnerCfg:
+    """AdaptSonic — frozen SONIC base + LoRA adapter on the decoder. THE agent.
+
+    Task-blind by construction: the ONLY thing a task varies is what rides
+    `adapter_obs_group`. uolm feeds it object kinematics, perloco a height
+    scan, a vision consumer image features — the agent is the same bytes.
+    """
+    cfg = runner(experiment_name)
+    cfg.actor = sonic_adapter_actor(  # type: ignore[assignment]
+        rank=rank, alpha=alpha, base_checkpoint=base_checkpoint,
+        adapter_obs_group=adapter_obs_group)
+    return cfg
+
+
+def tara_agent_cfg(
+    experiment_name: str, *, hidden_dims: tuple[int, ...] = WBC_HIDDEN
+) -> RslRlOnPolicyRunnerCfg:
+    """TaRa — tabula rasa, from scratch. The no-frozen-base floor.
+
+    WBC width so the comparison against AdaptSonic is architecture-fair: what
+    differs is initialization and what is trainable, not capacity. Pair it with
+    a 2-stream obs layout — with no frozen base there is no tokenizer stream,
+    so the actor must be handed the motion reference directly.
+    """
+    cfg = runner(experiment_name)
+    cfg.actor = mlp_actor(hidden_dims)
+    return cfg
+
+
+def sidecar_agent_cfg(
+    experiment_name: str,
+    *,
+    sidecar_hidden_dims: tuple[int, ...] = (512, 256, 128),
+    base_checkpoint: str = WBC_CKPT,
+    sidecar_obs_group: str = "augmentation",
+) -> RslRlOnPolicyRunnerCfg:
+    """Sidecar — the OTHER way to adapt a frozen base.
+
+    The adapter perturbs the base's INTERNAL weights (LoRA); the sidecar leaves
+    it untouched and corrects its OUTPUT. Rides the textop base
+    (`ModularNormMLP` shaped), not SONIC — rsl_rl has no sonic sidecar model.
+    """
+    cfg = runner(experiment_name)
+    cfg.actor = sidecar_actor(  # type: ignore[assignment]
+        sidecar_hidden_dims=sidecar_hidden_dims,
+        base_checkpoint=base_checkpoint,
+        sidecar_obs_group=sidecar_obs_group)
+    return cfg

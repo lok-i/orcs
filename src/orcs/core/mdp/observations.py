@@ -19,12 +19,20 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import quat_apply_inverse
+from mocke.mdp.observations import (  # noqa: F401 — re-exported into `mdp.*`
+    motion_anchor_ori_b_future,
+    motion_anchor_pos_b_future,
+)
 
 __all__ = [
     "robot_root_pos_env",
     "robot_root_lin_vel_cmd",
     "robot_root_ang_vel_cmd",
     "unweighted_reward_vector",
+    # re-exported from mocke: the reference-anchor error is the TRACKING
+    # layer's, so every orcs task and every consumer binds ONE implementation.
+    "motion_anchor_pos_b_future",
+    "motion_anchor_ori_b_future",
 ]
 
 

@@ -74,7 +74,8 @@ src/orcs/
 │   └── sensors.py  robot<->terrain contact + kill-body vocabulary
 ├── assets/       robots + objects as mjlab entity cfgs. g1.py, objects.py
 └── tasks/        one self-registering package per task
-    └── uolm/     env_cfg · rl_cfg · robustness · smpl_data · mdp/
+    ├── uolm/     env_cfg · robustness · smpl_data · mdp/
+    └── perloco/  env_cfg · terrain · terrain_spec · sensors · sources/ · mdp/
 ```
 
 Import rules — enforced by review, not tooling:

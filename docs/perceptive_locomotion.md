@@ -214,18 +214,51 @@ produce, so `augmentation` remains "needs perception on hw", not "needs a simula
 | | keep from uolm | drop | add |
 |---|---|---|---|
 | rewards | `root_pos/ori`, `body_pos/ori`, `body_lin/ang_vel`, `action_rate_l2`, `joint_pos_limits` | every `object_*`, `contact_consistency` | — |
-| terminations | `time_out`, `illegal_contact`, `exceeded_motion` | `bad_object_*` | **`bad_anchor_pos/ori` ON** (no object drags the root here), mjlab's `out_of_terrain_bounds` |
+| terminations | `time_out`, `illegal_contact`, `exceeded_motion` | `bad_object_*` | **`bad_anchor_pos/ori` ON** (no object drags the root here); loosened to 0.4 m for the vertical excursions climbing produces |
 | events | `reset_default`, `policy_update_counter`, robustness | `virtual_object_force` | — |
 
-Kill set: climbing legitimately puts hands and knees on the box → `UOLM_KILL_BODIES` (pelvis
-only), not `STRICT_KILL_BODIES`. `terrain_contact_sensor`'s secondary is already
-`ContactMatch(mode="geom", pattern="terrain")` and mjlab names every generated tile geom
-`terrain_<n>` — no change.
+Kill set: climbing legitimately puts hands and knees on the box → `ROOT_KILL_BODIES` (pelvis
+only), not `STRICT_KILL_BODIES`.
 
-Each tile emits its own `size × size × 0.5` floor box at `z = -0.25`, so tiles abut seamlessly,
-there are no scan-miss gaps, and OmniRetarget's z-frame (ground at 0) survives verbatim with
-sub-terrain `origin = (0,0,0)` — InstinctMJ's `use_input_origin_frame` insight without their
-code.
+`terrain_contact_sensor` needed ONE change, and it is worth recording because the old code was
+silently plane-only: the secondary match was `mode="geom", pattern="terrain"`. A secondary
+`ContactMatch` with no `entity` is a **literal MuJoCo name, not a regex** — the plane's geom
+happens to be named `terrain`, but the generator renames every tile geom to `terrain_<n>`, so
+the first grid build died with `unrecognized name 'terrain'`. BODY names agree across both
+flavours (one body named `terrain` either way), so the secondary is now `mode="body"`.
+
+**Tile frame — the correction.** An earlier draft of this doc said sub-terrain
+`origin = (0,0,0)`. That is wrong and would have put half of every tile inside its neighbour:
+mjlab hands `function()` a frame whose origin is the tile's **corner**
+(`_get_sub_terrain_position` returns the corner; every stock terrain therefore builds around
+`(size/2, size/2)`). Staged tiles are centred on their own origin, so they are placed at that
+centre and it is returned as `origin` — which is then exactly the `env_origins` RSI adds, so
+OmniRetarget's z-frame (ground at 0) still survives verbatim. Each tile also emits its own
+`size × size × 0.5` floor box with its TOP at `z = 0`, so tiles abut seamlessly and there are
+no scan-miss gaps.
+
+### 5.1 frames + conventions — verified, not assumed
+
+Every place a number crosses from OmniRetarget into MuJoCo. The right-hand column is how it
+was checked, because "both are z-up" is the kind of claim that is true four times and wrong
+once.
+
+| quantity | OmniRetarget / Drake | MuJoCo / mjlab | how verified |
+|---|---|---|---|
+| quaternion | wxyz | wxyz | Drake `MultibodyPlant` qpos is `[quat wxyz(4) \| pos(3) \| joints]`, confirmed against the dataset's own `visualize.py` |
+| up axis | +z | +z | — |
+| box extents | recovered from the 8 `.obj` verts | `geom.size` = **half**-extents | `BoxSpec.half` stores halves; orthogonality of the recovered frame asserted at ~1e-6 |
+| box base | z = 0 | tile floor top at z = 0 | tile floor box is `pos_z = -depth/2` |
+| terrain ↔ motion share a frame | *undocumented by the dataset* | — | **empirical**: min ankle height is +0.002 m at z_scale 1.0 and rises monotonically with z_scale. Feet land on box tops |
+| joint order | URDF order (read from the shipped file) | MJ / XML DFS order | permuted **by name**, never by position; `[il_names[i] for i in IL2MJ] == mj_names` asserted at FK construction |
+| tile origin | tile-local, boxes at ±half | tile-local frame's origin is the **corner** | placed at `(size/2, size/2)`; the viewer's `mj_forward` reproduces staged `body_pos_w` to 0.000000 m |
+| viser box | — | `add_box` takes **full** extents | viewer passes `2 × half` |
+
+The joint-order row is the one that already cost a rebuild: all 145 clips were once FK'd on
+scrambled joints, and it survived every shape/quat/foot-height check because IL and MJ slot 0
+are both `left_hip_pitch`. What caught it was a bone-length audit against a known-good dataset
+— **a limb cannot be longer than its own kinematics allow.** That check is now a name-based
+assertion at staging time, which is cheaper and cannot be argued with.
 
 ---
 
@@ -249,16 +282,17 @@ src/orcs/core/
 │   └── events.py        PolicyUpdateCounter
 ├── obs.py               _T · _grp · proprio_terms · robot_root_state_terms
 │                        · robot_root_twist_cmd_terms
-├── rl.py                _runner · _DIST_BASE_BAND · _DIST_LEARNABLE · sonic actor spine
+├── rl.py                THE agent zoo — runner spine + adapt_sonic/tara/sidecar
+│                        agent cfgs. A task picks one; it never declares PPO.
 └── sensors.py           terrain_contact_sensor · {UOLM,LOCOMANIP,STRICT}_KILL_BODIES
 
 src/orcs/tasks/perloco/
 ├── __init__.py          register both tasks, try/except FileNotFoundError
 ├── env_cfg.py           perloco_env_cfg(agent, source, families, levels, scan_frame, play)
 ├── observation_cfgs.py  augmentation + critic, over core.obs atoms
-├── rl_cfg.py            actors only, over core.rl._runner
-├── sensors.py           height_scan · foot_height_scan · terrain contact
+├── sensors.py           terrain_scan (height scan) · terrain contact
 ├── terrain.py           TileTerrainCfg(SubTerrainCfg) — tile.json → boxes [+ hfield]
+│                        · staged_roster · terrain_generator_cfg
 ├── terrain_spec.py      Box/HField/Tile/ClipSpec · TerrainMotionSource
 ├── sources/{omni,grail,instinct}.py   pure readers, no sim/torch/mjlab
 ├── mdp/commands.py      TerrainMotionCommand(MultiClipMotionCommand)
@@ -298,16 +332,19 @@ Budget: ~450 LOC **moved** into core, ~500 new in `perloco/`, ~580 new offline (
 |---|---|---|
 | **1** | core promotion; uolm refactored onto it; ethos §4 amended | `play Orcs-Uolm-AdaptSonic --agent initial` **bit-identical to today** — it is a pure move, and rolling it is the only way to know |
 | **2** | `OmniRetargetSource` + `stage_terrain_motions.py` + `view_terrain_motions.py` + `perloco/readme.md` | 145 clips staged; viser shows each clip **on its box, not through it**; you curate the roster, it writes `exclude_motions` in orcs's existing grammar |
-| **3** | `TileTerrainCfg`, `TerrainMotionCommand`, sensors, obs, rewards/terminations, `rl_cfg` | `play Orcs-PerLoco-AdaptSonic --agent initial` — obs shapes right, frozen base bit-exact, no spurious `illegal_contact` at RSI |
+| **3** ✅ | `TileTerrainCfg`, `TerrainMotionCommand`, sensors, obs, rewards/terminations; agents promoted to `core.rl` | ✅ `play Orcs-PerLoco-AdaptSonic --num-envs 10 --agent initial` — 5×29 grid, 483 geoms, `augmentation` 187+15, every env's clip verified to belong to its own tile |
 | **4** | `train --num_envs 4096` + z_scale curriculum | beats `Orcs-PerLoco-TaRa` on reward vs `_runtime`; promotion fires |
 | **5** | `GrailSource` + hfield tier 2 — **curb is unblocked now**; stairs when their `robot/` lands | curb clips render on their curb in the same viewer |
 
 **Phase 2's viewer is a deliverable, not a convenience** — the UOLM dataset ships a per-sample
 `retargeted_motion.mp4`; OmniRetarget ships nothing, so this is *how the roster gets chosen*.
-Boxes → `viser.scene.add_box` (`tile.json` fields are already viser's arguments); robot →
-**stick figure from `body_pos_w`** (the `_debug_vis_smpl` trick — no URDF loader, no new
-dependency, and it renders exactly the array RSI will write). Family/level dropdowns, frame
-slider, keep/drop toggle. `viser 1.0.29` is already in the env.
+It renders the **real model**: the G1 entity posed by writing `motion.npz` into `qpos` +
+`mj_forward`, on terrain built by the env's own `TileTerrainCfg`. The first version drew a
+14-node stick figure instead, and its limbs stretched — which turned out to be a real
+joint-order bug in staging, but took a bone-length audit against a known-good dataset to tell
+apart from "the skeleton is a bad drawing". **A viewer built from an abstraction of the data
+can only disagree with the data decoratively.** Cross-check that the current one cannot: FK
+from its `qpos` reproduces the staged `body_pos_w` to 0.000000 m.
 
 ---
 

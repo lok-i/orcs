@@ -7,7 +7,22 @@ One line: **UOLM's adapter reads object kinematics; PerLoco's reads terrain
 kinematics.** Same frozen SONIC base, same LoRA adapter, same multi-clip RSI
 motion command (`orcs.core.mdp.MultiClipMotionCommand`). There is no object.
 
-Status: **P2** — staging + curation work; the env and tasks land in P3.
+Status: **P3 done** — the tasks are registered and roll.
+
+```bash
+play  Orcs-PerLoco-AdaptSonic --num-envs 10 --agent initial   # the gate
+train Orcs-PerLoco-AdaptSonic --num_envs 4096
+```
+
+| task | agent |
+|---|---|
+| `Orcs-PerLoco-AdaptSonic` | frozen SONIC base + LoRA adapter reading the height scan |
+| `Orcs-PerLoco-TaRa` | from-scratch MLP — the no-frozen-base floor |
+
+The grid is 29 families x 5 z-scale levels = 145 tiles (483 static box geoms). Each env stands
+on one tile and may only sample the clips staged against it — read live from
+`terrain_{types,levels}` at every reset, never cached, because a level curriculum moves that
+map underneath the command.
 
 ## stage
 
@@ -54,9 +69,12 @@ OmniRetarget ships nothing, so this is how the training roster gets chosen —
 and how the one thing staging cannot check itself gets checked: **does the
 motion sit ON its terrain, or through it?**
 
-The skeleton is drawn from `motion.npz`'s `body_pos_w`, the same array the
-training loader slices, so a pairing or frame-convention bug shows up here
-rather than as a mysterious tracking regression 10k iterations in.
+It renders the REAL MODEL, not a depiction of one — the G1 entity posed by
+writing `motion.npz` into `qpos` + `mj_forward`, on terrain built by the env's
+own `TileTerrainCfg`, at the same tile offset RSI uses. So a pairing, frame or
+joint-order bug shows up here as a broken robot rather than as a mysterious
+tracking regression 10k iterations in, and a box placed wrong here is a box
+placed wrong in training.
 
 *Keep* / *Drop* per tile, then **Write exclude file** → `exclude.txt` in the
 `exclude_motions` grammar `orcs.core.data.scan` already understands. The roster

@@ -5,9 +5,13 @@ touchdown ends the episode", and the answer is a body-pattern tuple, not a
 semantics. Object-filtered contact graphs are NOT here — they mention an
 object, so they belong to the task that has one.
 
-The secondary match is `geom pattern="terrain"`, which covers both mjlab
-terrain flavours: the ground plane geom is named `terrain`, and generated
-sub-terrain tiles are named `terrain_<n>`.
+The secondary match is `mode="body", pattern="terrain"`, which is what covers
+both mjlab terrain flavours: BODY names agree (`TerrainEntity` puts a plane and
+a generated grid alike in one body named `terrain`) while GEOM names do not —
+the plane's geom is `terrain`, but the generator renames every tile geom to
+`terrain_<n>`. A secondary `ContactMatch` with no `entity` is a LITERAL name,
+not a regex, so a geom-mode `"terrain"` silently works on a plane and raises
+`unrecognized name 'terrain'` the moment the task grows a sub-terrain grid.
 """
 
 from __future__ import annotations
@@ -49,6 +53,6 @@ def terrain_contact_sensor(
         name=TERRAIN_CONTACT_SENSOR_NAME,
         primary=ContactMatch(
             mode="geom", pattern=pattern, exclude=exclude or None, entity="robot"),
-        secondary=ContactMatch(mode="geom", pattern="terrain"),
+        secondary=ContactMatch(mode="body", pattern="terrain"),
         fields=("found",),
     )

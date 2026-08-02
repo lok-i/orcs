@@ -28,17 +28,21 @@ A missing task is the signal; `SKIP_REASON` is the explanation:
 
 from mjlab.tasks.registry import register_mjlab_task
 
+from orcs.core.rl import SMPL_CKPT, adapt_sonic_agent_cfg, tara_agent_cfg
 from orcs.tasks.uolm.env_cfg import uolm_env_cfg
-from orcs.tasks.uolm.rl_cfg import _SMPL_CKPT, sonic_agent_cfg, tara_agent_cfg
 
 SKIP_REASON: str | None = None
 """Why registration was skipped, or None when every task registered."""
 
+# The agents come from `orcs.core.rl` — a task picks one and names its
+# experiment, it never declares PPO. See that module's docstring.
 _TASKS = (
-    ("Orcs-Uolm-AdaptSonic", {}, sonic_agent_cfg),
-    ("Orcs-Uolm-TaRa", {"agent": "tara"}, tara_agent_cfg),
+    ("Orcs-Uolm-AdaptSonic", {},
+     lambda: adapt_sonic_agent_cfg("orcs_uolm")),
+    ("Orcs-Uolm-TaRa", {"agent": "tara"},
+     lambda: tara_agent_cfg("orcs_uolm_tara")),
     ("Orcs-Uolm-AdaptSonic-Smpl", {"command_space": "smpl"},
-     lambda: sonic_agent_cfg("orcs_uolm_smpl", base_checkpoint=_SMPL_CKPT)),
+     lambda: adapt_sonic_agent_cfg("orcs_uolm_smpl", base_checkpoint=SMPL_CKPT)),
 )
 
 try:

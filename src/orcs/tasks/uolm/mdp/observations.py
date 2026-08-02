@@ -1,8 +1,8 @@
 """Object-manip observation terms — body-relative object state, goals, object refs.
 
-Robot-only terms (`robot_root_pos_env`, the {v,w}_cmd_t pair,
-`unweighted_reward_vector`) moved to :mod:`orcs.core.mdp.observations` and are
-re-exported here so ``mdp.<name>`` keeps resolving the whole uolm surface.
+Robot-only terms (`robot_root_pos_env`, the {v,w}_cmd_t pair, the anchor-error
+pair, `unweighted_reward_vector`) live in :mod:`orcs.core.mdp.observations` and
+are re-exported here so ``mdp.<name>`` keeps resolving the whole uolm surface.
 """
 
 from __future__ import annotations
@@ -17,12 +17,10 @@ from mjlab.utils.lab_api.math import (
     quat_apply_inverse,
     subtract_frame_transforms,
 )
-from mocke.mdp.observations import (  # noqa: F401 — re-exported into `mdp.*`
+
+from orcs.core.mdp.observations import (  # noqa: F401 — task-blind, in core
     motion_anchor_ori_b_future,
     motion_anchor_pos_b_future,
-)
-
-from orcs.core.mdp.observations import (  # noqa: F401 — robot-only, moved to core
     robot_root_ang_vel_cmd,
     robot_root_lin_vel_cmd,
     robot_root_pos_env,
@@ -49,9 +47,8 @@ __all__ = [
     "motion_object_pos_b_future",
     "motion_object_ori_b_future",
     "unweighted_reward_vector",
-    # re-exported from mocke: the reference-anchor error is the TRACKING layer's,
-    # not the object task's. One definition, so orcs and a vision consumer can
-    # never silently bind different implementations of the same term.
+    # re-exported THROUGH core (defined in mocke): the reference-anchor error
+    # is the TRACKING layer's, not the object task's.
     "motion_anchor_pos_b_future",
     "motion_anchor_ori_b_future",
 ]

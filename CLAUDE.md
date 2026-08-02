@@ -12,7 +12,19 @@ an encyclopedia** — read the linked docs; do not grow this file with findings.
 
 One-line version: `orcs` (Oracle Robot Control Synthesis) trains privileged/oracle policies for
 humanoid control on mjlab. It is **not** a task — tasks self-register under `src/orcs/tasks/`.
-Today: **UOLM** (`src/orcs/tasks/uolm/`, Uni-Object Loco-Manipulation).
+
+| task | what | docs |
+|---|---|---|
+| **UOLM** `tasks/uolm/` | Uni-Object Loco-Manipulation — adapter reads OBJECT kinematics | this file, §UOLM mechanisms |
+| **PerLoco** `tasks/perloco/` | Perceptive Locomotion over staged (terrain, motion) pairs — adapter reads a TERRAIN height scan | [docs/perceptive_locomotion.md](docs/perceptive_locomotion.md), [tasks/perloco/readme.md](src/orcs/tasks/perloco/readme.md) |
+
+The two differ in exactly ONE obs group (`augmentation`). Everything else — frozen base,
+multi-clip command, agents, critic — is literally shared code. That is the thesis, not a
+coincidence; a term duplicated across the two is a bug.
+
+**Agents live in `core/rl.py`, never in a task.** `adapt_sonic_agent_cfg` / `tara_agent_cfg` /
+`sidecar_agent_cfg` — a task picks one and names its experiment. There is no `rl_cfg.py` under
+any task, and adding one back is how the two definitions of "PPO" start to drift.
 
 ## Hard rules
 
