@@ -1,27 +1,16 @@
 """Staged tiles -> an mjlab sub-terrain grid.
 
-The whole mapping, in one line:
-
     grid COLUMN = family (`terrain_types`)   fixed per env at build
     grid ROW    = level  (`terrain_levels`)  difficulty, promotable at runtime
 
-which is exactly the `<family>/level_<L>/` layout `stage_terrain_motions.py`
-writes, so the grid and the clip library are two views of one directory tree.
-`TerrainMotionCommand` re-derives the same `(row, col) -> tile` indexing from
-:func:`staged_roster`, and both call it — a roster that drifts between the
-terrain and the clips is the one bug this file exists to make impossible.
+which is the `<family>/level_<L>/` layout staging writes, so the grid and the
+clip library are two views of one directory tree. Membership comes from
+`roster.Roster`; this file only turns a tile into geometry.
 
-**Tile-local frames.** mjlab hands `function()` a frame whose origin is the
-tile's CORNER and expects the spawn origin back in it; every stock terrain
-therefore builds around `(size/2, size/2)`. Staged tiles are centred on their
-own origin (boxes at ±half), so we place them at that same centre and return it
-as `origin` — put them at `(0,0)` instead and half of every tile lands in its
-neighbour.
-
-**Boxes, not heightfields.** A staged tile is 1-3 exact oriented boxes
-(`terrain_spec.BoxSpec`); MuJoCo's box-box pair is the cheapest it has and the
-geometry is exact rather than sampled. `HFieldSpec` is the fallback for a
-source whose geometry boxes cannot express — none today.
+Tile-local frames: mjlab's `function()` frame has its origin at the tile CORNER
+and every stock terrain therefore builds around `(size/2, size/2)`. Staged
+tiles are centred on their own origin, so they go at that centre and it is
+returned as `origin` — at `(0,0)` half of every tile lands in its neighbour.
 """
 
 from __future__ import annotations
@@ -39,9 +28,9 @@ from mjlab.terrains.terrain_generator import (
     TerrainOutput,
 )
 
-__all__ = [
-    "TILE_SIZE", "TileTerrainCfg", "staged_roster", "terrain_generator_cfg",
-]
+from orcs.tasks.perloco.roster import Roster
+
+__all__ = ["TILE_SIZE", "TileTerrainCfg", "terrain_generator_cfg"]
 
 TILE_SIZE = (6.0, 6.0)
 """Tile footprint, metres. Measured over all 145 staged omni tiles: the widest
@@ -60,45 +49,6 @@ _BOX_RGBA_HI = np.array([0.88, 0.34, 0.28, 1.0])   # hardest level
 
 def _tile_dir(root: Path, family: str, level: float) -> Path:
     return root / family / f"level_{level:.2f}"
-
-
-def staged_roster(
-    root: str | Path,
-    families: tuple[str, ...] | None = None,
-    levels: tuple[float, ...] | None = None,
-) -> tuple[tuple[str, ...], tuple[float, ...]]:
-    """(families, levels) of a staged source — THE grid axes, sorted.
-
-    Sorted, so column and row indices are a pure function of what is on disk:
-    the terrain builder and the command build the same `(row, col) -> tile` map
-    without passing one to the other.
-
-    The grid mjlab builds is rectangular, so the roster must be too: an env
-    landing on a (family, level) with no clips would have nothing to track.
-    A ragged staging directory fails HERE, at cfg construction, rather than as
-    an empty multinomial at the first reset.
-    """
-    root = Path(root)
-    found: dict[str, set[float]] = {}
-    for tile_json in root.rglob("tile.json"):
-        d = tile_json.parent
-        if not any(d.glob("sample*/motion.npz")):
-            continue  # a tile with no motion is not a tile
-        found.setdefault(d.parent.name, set()).add(float(d.name[len("level_"):]))
-    if not found:
-        raise FileNotFoundError(
-            f"no staged tiles under {root} — run scripts/stage_terrain_motions.py")
-
-    fam = tuple(sorted(families if families is not None else found))
-    lvl = tuple(sorted(levels if levels is not None else set.union(*found.values())))
-    missing = [f"{f}/level_{level:.2f}" for f in fam for level in lvl
-               if level not in found.get(f, ())]
-    if missing:
-        raise FileNotFoundError(
-            f"staged roster is not rectangular — {len(missing)} (family, level) "
-            f"cell(s) have no clips, e.g. {missing[:3]}. Restage, or pass "
-            f"families=/levels= to select a complete sub-grid.")
-    return fam, lvl
 
 
 @dataclass(kw_only=True)
@@ -155,29 +105,25 @@ class TileTerrainCfg(SubTerrainCfg):
 
 
 def terrain_generator_cfg(
-    root: str | Path,
-    families: tuple[str, ...],
-    levels: tuple[float, ...],
-    *,
-    size: tuple[float, float] = TILE_SIZE,
+    root: str | Path, roster: Roster, *, size: tuple[float, float] = TILE_SIZE
 ) -> TerrainGeneratorCfg:
-    """The sub-terrain grid: one column per family, one row per level.
+    """One column per family, one row per level.
 
-    `curriculum=True` is what pins column == family (mjlab then ignores
-    `num_cols` and uses `len(sub_terrains)`), which is the whole reason the
-    env->clip map is derivable rather than sampled.
+    `curriculum=True` pins column == family (mjlab then ignores `num_cols` and
+    uses `len(sub_terrains)`) — that is what makes the env->tile map derivable
+    rather than sampled.
     """
     root = Path(root)
     return TerrainGeneratorCfg(
         size=size,
         curriculum=True,
-        num_rows=len(levels),
-        num_cols=len(families),  # ignored under curriculum; kept honest
+        num_rows=roster.n_rows,
+        num_cols=len(roster.families),  # ignored under curriculum; kept honest
         difficulty_range=(0.0, 1.0),  # TileTerrainCfg inverts this exactly
         border_width=0.0,
         color_scheme="height",  # re-applies TerrainGeometry.color as-is
         sub_terrains={
-            f: TileTerrainCfg(root=root, family=f, levels=levels, size=size)
-            for f in families
+            f: TileTerrainCfg(root=root, family=f, levels=roster.levels, size=size)
+            for f in roster.families
         },
     )

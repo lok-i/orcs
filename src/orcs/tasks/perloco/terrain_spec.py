@@ -27,6 +27,7 @@ import numpy as np
 
 __all__ = [
     "BoxSpec", "HFieldSpec", "TileSpec", "ClipSpec", "TerrainMotionSource",
+    "box_from_vertices",
 ]
 
 
@@ -102,9 +103,11 @@ class ClipSpec:
     """(T, 4) root orientation, wxyz."""
     joint_pos: np.ndarray
     """(T, J) joint positions in `joint_names` order."""
-    joint_names: tuple[str, ...]
-    """Source joint order. Staging permutes by NAME, never by position — a
-    source that renames a joint should fail loudly, not silently transpose."""
+    joint_names: tuple[str, ...] | None
+    """Source joint order; staging permutes by NAME, so a renamed joint fails
+    loudly instead of silently transposing the robot. `None` = the source
+    ships no names and is already in IsaacLab order — an assumption, and the
+    bone-length audit is what checks it."""
     fps: float
     family: str
     level: float
@@ -130,3 +133,40 @@ class TerrainMotionSource(Protocol):
     def tiles(self) -> Iterable[TileSpec]: ...
 
     def clips(self) -> Iterable[ClipSpec]: ...
+
+
+def box_from_vertices(
+    verts: np.ndarray,
+    scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> BoxSpec:
+    """A z-extruded rectangle's vertices -> an exact oriented box.
+
+    Shared by every source: OmniRetarget ships them as `.obj`, GRAIL inside
+    `.usd`, and both reduce to the same 4 unique xy corners, which give the
+    half-extents and the yaw directly.
+
+    Orthogonality is asserted, not assumed — a future asset that is a general
+    hexahedron must fail here rather than silently become a wrong box.
+    """
+    v = verts * np.asarray(scale, float) + np.asarray(offset, float)
+    z0, z1 = float(v[:, 2].min()), float(v[:, 2].max())
+    xy = np.unique(np.round(v[:, :2], 6), axis=0)
+    if len(xy) != 4:
+        raise ValueError(f"not a z-extruded rectangle: {len(xy)} xy corners")
+
+    p0, rest = xy[0], xy[1:]
+    order = np.argsort(np.linalg.norm(rest - p0, axis=1))
+    e1, e2 = rest[order[0]] - p0, rest[order[1]] - p0
+    n1, n2 = np.linalg.norm(e1), np.linalg.norm(e2)
+    ortho = abs(float(e1 @ e2)) / (n1 * n2)
+    if ortho > 1e-3:
+        raise ValueError(f"box edges not orthogonal (err={ortho:.2e})")
+
+    cx, cy = xy.mean(axis=0)
+    yaw = float(np.arctan2(e1[1], e1[0]))
+    return BoxSpec(
+        pos=(float(cx), float(cy), 0.5 * (z0 + z1)),
+        quat=(float(np.cos(yaw / 2)), 0.0, 0.0, float(np.sin(yaw / 2))),
+        half=(float(n1 / 2), float(n2 / 2), float(0.5 * (z1 - z0))),
+    )

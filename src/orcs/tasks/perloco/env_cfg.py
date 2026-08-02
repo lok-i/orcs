@@ -1,21 +1,21 @@
-"""PerLoco env config — frozen SONIC WBC adapter over a staged terrain grid.
+"""PerLoco envs — frozen SONIC WBC adapter over a staged terrain grid.
 
-Perceptive Locomotion: the scene is ONE sub-terrain grid built from staged
-(terrain, motion) pairs, each env stands on one tile, and the clips it tracks
-are the ones staged against that tile. The adapter's conditioning stream is a
-terrain height scan where uolm's is object kinematics — that one swap is the
-task.
+One factory per source, side by side, sharing `_core`. Not one factory with a
+`source=` switch: the sources differ in the things a switch hides (grid axes,
+tile size, episode length), and a branch per difference is how a factory turns
+into a maze.
 
-Single factory:
+  omni_env_cfg()    OmniRetarget robot-terrain — climb, z_scale = difficulty
+  grail_env_cfg()   GRAIL curb — no difficulty axis, one row
 
-  perloco_env_cfg(agent="sonic"|"tara", play=False, ...)
+What they SHARE is the point: robot, action, sensors, obs, rewards,
+terminations, agent. A policy trained on one loads into the other unchanged,
+because the height scan is 187 rays either way.
 
-**Memory.** mjlab replicates the whole model `nworld = num_envs` times, so
-robots never share a world and terrain contact is always 1 robot x terrain,
-never n x n. What every world DOES carry is the full grid — 145 tiles is ~415
-static box geoms, and static pairs are culled in broadphase, so the cost is
-model size (once) rather than contacts (per step). Boxes are what keep that
-true: the same terrain as meshes or heightfields would be the whole budget.
+Memory: mjlab replicates the model `nworld = num_envs`, so robots never share a
+world and terrain contact is always 1 robot x terrain. Every world does carry
+the whole grid, but statics are culled in broadphase — cost is model size once,
+not contacts per step. Boxes are what keep that true.
 """
 
 from __future__ import annotations
@@ -42,103 +42,79 @@ from orcs.core.paths import DATA_ROOT
 from orcs.tasks.perloco import mdp
 from orcs.tasks.perloco.mdp.commands import TerrainMotionCommandCfg
 from orcs.tasks.perloco.observation_cfgs import ObsCtx, sonic_obs, tara_obs
+from orcs.tasks.perloco.roster import Roster, load_roster
 from orcs.tasks.perloco.sensors import (
     PERLOCO_KILL_BODIES,
     TERRAIN_CONTACT_SENSOR_NAME,
     terrain_contact_sensor,
     terrain_scan_sensor,
 )
-from orcs.tasks.perloco.terrain import (
-    TILE_SIZE,
-    staged_roster,
-    terrain_generator_cfg,
-)
+from orcs.tasks.perloco.terrain import TILE_SIZE, terrain_generator_cfg
 
-DEFAULT_SOURCE = "omni"
-"""Staged source under `data/terrain_motions/`. A second source is a second
-registration, not a second code path — see `sources/`."""
+GRAIL_TILE_SIZE = (12.0, 12.0)
+"""GRAIL curbs are not centred on their own origin — they run x: 0 -> 5.6 m,
+so placing one at the tile centre needs 2x that to stay off the neighbour
+(measured: box half-footprint 5.61 m, reference pelvis travel 4.25 m).
+Recentring geometry AND motion by the same offset at staging would let this
+drop to ~7 m; it is not done because shifting staged data is a change that
+has to be re-verified, and static geoms are not what costs walltime."""
+
+__all__ = ["omni_env_cfg", "grail_env_cfg", "staged_root"]
 
 _MOTION_PAD_EPS_SEC = 2.0
-"""Post-motion hold padding (episode — not the motion — owns resets)."""
+"""Post-motion hold padding — the episode, not the motion, owns resets."""
+
+_P = {"command_name": "motion"}
 
 
-def staged_root(source: str = DEFAULT_SOURCE):
+def staged_root(source: str):
     return DATA_ROOT / "terrain_motions" / source
 
 
 @lru_cache(maxsize=None)
-def _resolve(
-    source: str, families: tuple[str, ...] | None, levels: tuple[float, ...] | None,
-    excludes: tuple[str, ...],
-) -> tuple[tuple[str, ...], tuple[float, ...], str, int]:
-    """(families, levels, first clip, longest clip in frames) — cached per roster.
-
-    The roster is resolved ONCE and handed to both the terrain builder and the
-    command, so the grid axes and the clip index space cannot disagree.
-    """
-    from orcs.core.data.scan import scan_flat
-
+def _resolve(source: str, roster_path: str | None) -> tuple[Roster, str, int]:
+    """(roster, first clip, longest clip in frames), cached per roster."""
     root = staged_root(source)
-    fam, lvl = staged_roster(root, families, levels)
-    files = scan_flat(str(root), excludes or None)
+    roster = load_roster(source, root, roster_path)
+    files = [f for k in roster.tile_keys
+             for f in sorted((root / k).glob("sample*/motion.npz"))
+             if not roster.clips.get(k) or f.parent.name in roster.clips[k]]
+    if not files:
+        raise FileNotFoundError(f"roster selected no clips under {root}")
     max_len = max(int(np.load(f)["joint_pos"].shape[0]) for f in files)
-    return fam, lvl, files[0], max_len
+    return roster, str(files[0]), max_len
 
 
-# ---------------------------------------------------------------------------
-# THE factory
-# ---------------------------------------------------------------------------
-
-def perloco_env_cfg(
+def _core(
+    source: str,
+    roster: Roster,
+    motion_file: str,
+    max_clip_len: int,
     *,
-    agent: str = "sonic",
-    play: bool = False,
-    source: str = DEFAULT_SOURCE,
-    families: tuple[str, ...] | None = None,
-    levels: tuple[float, ...] | None = None,
-    exclude_motions: tuple[str, ...] = (),
-    scan_frame: str = "pelvis",
-    tile_size: tuple[float, float] = TILE_SIZE,
-    num_steps_per_env: int = 24,
-    robot_cfg: Callable[[], EntityCfg] | None = None,
-    kill_bodies: tuple[str, ...] = PERLOCO_KILL_BODIES,
-    kill_exclude: tuple[str, ...] = (),
+    agent: str,
+    play: bool,
+    scan_frame: str,
+    tile_size: tuple[float, float],
+    num_steps_per_env: int,
+    robot_cfg: Callable[[], EntityCfg] | None,
+    kill_bodies: tuple[str, ...],
+    kill_exclude: tuple[str, ...],
 ) -> ManagerBasedRlEnvCfg:
-    """THE Orcs-PerLoco env config factory.
-
-    agent="sonic": frozen SONIC base + LoRA adapter (3-stream obs). THE task.
-    agent="tara":  tabula rasa, from-scratch MLP (2-stream obs) — the
-                   no-frozen-base floor to measure the adapter against.
-
-    Injection points for a downstream consumer (§ethos: adapt, don't fork):
-      families/levels  restrict the grid to a sub-roster (must stay
-                       rectangular — see `terrain.staged_roster`).
-      scan_frame       which body the height scan hangs off. An open design
-                       question, not a settled default — see `sensors.py`.
-      robot_cfg        the G1 variant to build on (physics is identical across
-                       variants; this picks the visual set).
-      kill_bodies      which robot geoms on the terrain end the episode.
-                       Default is the ROOT ALONE: climbing loads hands, knees
-                       and forearms onto terrain by design.
-    """
+    """Everything both sources agree on."""
     assert agent in ("sonic", "tara"), f"unknown agent {agent!r}"
-
-    fam, lvl, motion_file, max_clip_len = _resolve(
-        source, families, levels, tuple(exclude_motions))
     root = staged_root(source)
-    _p = {"command_name": "motion"}
 
     cfg = ManagerBasedRlEnvCfg(
         scene=SceneCfg(
             terrain=TerrainEntityCfg(
                 terrain_type="generator",
                 terrain_generator=terrain_generator_cfg(
-                    root, fam, lvl, size=tile_size),
+                    root, roster, size=tile_size),
             ),
             num_envs=1,
         ),
-        observations={},  # set below
-        actions={},       # set below (SONIC profile)
+        observations={},
+        actions={},
         commands={},
         events={
             "reset_default": EventTermCfg(
@@ -151,7 +127,7 @@ def perloco_env_cfg(
                 params={"num_steps_per_env": num_steps_per_env},
             ),
         },
-        rewards={},       # filled below
+        rewards={},
         terminations={
             "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
             "illegal_contact": TerminationTermCfg(
@@ -160,38 +136,32 @@ def perloco_env_cfg(
         },
         viewer=ViewerConfig(
             origin_type=ViewerConfig.OriginType.WORLD,
-            distance=6.0,
-            elevation=-20.0,
-            azimuth=135.0,
+            distance=6.0, elevation=-20.0, azimuth=135.0,
         ),
-        # Terrain is boxes, so contacts are box-box: cheap, few, and bounded by
-        # the robot's own geom count rather than by the grid's.
+        # Terrain is boxes, so contacts are box-box: few, cheap, and bounded by
+        # the robot's geom count rather than the grid's.
         sim=SimulationCfg(
-            nconmax=100,
-            njmax=300,
+            nconmax=100, njmax=300,
             mujoco=MujocoCfg(timestep=0.005, iterations=10, ls_iterations=20),
         ),
         decimation=4,
-        episode_length_s=10.0,  # overwritten below from the dataset
+        episode_length_s=10.0,  # set below from the dataset
     )
 
-    # ── SONIC robot + action (flat-hand G1, hip_pitch regroup, MJ-order) ──
     robot = profile.robot_cfg(base=(robot_cfg or get_g1_flat_hand_cfg)())
     cfg.scene.entities["robot"] = robot
     cfg.actions["joint_pos"] = profile.action_cfg(robot)
-
-    cfg.scene.sensors = (cfg.scene.sensors or ()) + (
+    cfg.scene.sensors = (
         terrain_contact_sensor(kill_bodies, kill_exclude),
         terrain_scan_sensor(scan_frame, debug_vis=play),
     )
 
-    # ── motion command: clips masked by the tile the env stands on ──
     cfg.commands["motion"] = TerrainMotionCommandCfg(
         motion_file=motion_file,
         dataset_dir=str(root),
-        exclude_motions=exclude_motions or None,
-        families=fam,
-        levels=lvl,
+        tile_keys=roster.tile_keys,
+        n_rows=roster.n_rows,
+        clips=roster.clips,
         future_steps=5,
         resampling_time_range=(1e9, 1e9),
         debug_vis=True,
@@ -200,64 +170,110 @@ def perloco_env_cfg(
         joint_position_range=(0.0, 0.0),
     )
 
-    # episode = longest clip + ε hold padding (episode owns resets)
     step_dt = cfg.sim.mujoco.timestep * cfg.decimation
     cfg.episode_length_s = max_clip_len * step_dt + _MOTION_PAD_EPS_SEC
     cfg.terminations.update({
-        # Anchor tubes are BACK (uolm drops them): with no object dragging the
-        # root off the reference, a robot far from its anchor is simply failing
-        # to track, and letting it run wastes the episode. Loose enough for the
-        # large vertical excursions climbing produces.
+        # Anchor tubes are ON here (uolm drops them): with no object dragging
+        # the root off the reference, a robot far from its anchor is simply
+        # failing to track. Loose enough for climbing's vertical excursions.
         "bad_anchor_pos": TerminationTermCfg(
-            func=mdp.bad_anchor_pos, params={**_p, "threshold": 0.4}),
+            func=mdp.bad_anchor_pos, params={**_P, "threshold": 0.4}),
         "bad_anchor_ori": TerminationTermCfg(
-            func=mdp.bad_anchor_ori, params={**_p, "threshold": 0.8}),
+            func=mdp.bad_anchor_ori, params={**_P, "threshold": 0.8}),
         "exceeded_motion": TerminationTermCfg(
             func=mdp.exceeded_motion_by_eps, time_out=True,
-            params={**_p, "epsilon_steps": int(_MOTION_PAD_EPS_SEC / step_dt)}),
+            params={**_P, "epsilon_steps": int(_MOTION_PAD_EPS_SEC / step_dt)}),
     })
 
-    # ── rewards: pure motion tracking (no object, so no object terms) ──
+    # Pure motion tracking — no object, so no object terms.
     cfg.rewards = {
         "root_pos": RewardTermCfg(
             func=tracking_rewards.motion_global_anchor_position_error_exp,
-            weight=0.5, params={**_p, "std": 0.3}),
+            weight=0.5, params={**_P, "std": 0.3}),
         "root_ori": RewardTermCfg(
             func=tracking_rewards.motion_global_anchor_orientation_error_exp,
-            weight=0.5, params={**_p, "std": 0.4}),
+            weight=0.5, params={**_P, "std": 0.4}),
         "body_pos": RewardTermCfg(
             func=tracking_rewards.motion_relative_body_position_error_exp,
-            weight=1.0, params={**_p, "std": 0.3}),
+            weight=1.0, params={**_P, "std": 0.3}),
         "body_ori": RewardTermCfg(
             func=tracking_rewards.motion_relative_body_orientation_error_exp,
-            weight=1.0, params={**_p, "std": 0.4}),
+            weight=1.0, params={**_P, "std": 0.4}),
         "body_lin_vel": RewardTermCfg(
             func=tracking_rewards.motion_global_body_linear_velocity_error_exp,
-            weight=1.0, params={**_p, "std": 1.0}),
+            weight=1.0, params={**_P, "std": 1.0}),
         "body_ang_vel": RewardTermCfg(
             func=tracking_rewards.motion_global_body_angular_velocity_error_exp,
-            weight=1.0, params={**_p, "std": 3.14}),
+            weight=1.0, params={**_P, "std": 3.14}),
         "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
         "joint_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     }
 
-    # ── obs: 3-stream (frozen base) or 2-stream (tabula rasa) ──
-    ctx = ObsCtx(p=_p)
+    ctx = ObsCtx(p=_P)
     cfg.observations = tara_obs(ctx) if agent == "tara" else sonic_obs(ctx)
 
     if play:
         _play_overrides(cfg)
-
     return cfg
 
 
-def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
-    """Play-mode overrides: no corruption, no anneal, no tracking kills.
+def omni_env_cfg(
+    *,
+    agent: str = "sonic",
+    play: bool = False,
+    roster: str | None = None,
+    scan_frame: str = "pelvis",
+    tile_size: tuple[float, float] = TILE_SIZE,
+    num_steps_per_env: int = 24,
+    robot_cfg: Callable[[], EntityCfg] | None = None,
+    kill_bodies: tuple[str, ...] = PERLOCO_KILL_BODIES,
+    kill_exclude: tuple[str, ...] = (),
+) -> ManagerBasedRlEnvCfg:
+    """OmniRetarget robot-terrain: climb families x z_scale levels.
 
-    The tracking kills go so a `--agent initial` rollout survives long enough
-    to SEE where it fails; the terrain kill (`illegal_contact`) stays, because
-    a pelvis on the ground is exactly what you want to notice.
+    `roster` swaps `rosters/omni.toml` for another file — the only supported way
+    to change which tiles a run sees, and how an eval isolates a subset on
+    byte-identical infrastructure.
     """
+    r, motion_file, max_len = _resolve("omni", roster)
+    return _core(
+        "omni", r, motion_file, max_len,
+        agent=agent, play=play, scan_frame=scan_frame, tile_size=tile_size,
+        num_steps_per_env=num_steps_per_env, robot_cfg=robot_cfg,
+        kill_bodies=kill_bodies, kill_exclude=kill_exclude,
+    )
+
+
+def grail_env_cfg(
+    *,
+    agent: str = "sonic",
+    play: bool = False,
+    roster: str | None = None,
+    scan_frame: str = "pelvis",
+    tile_size: tuple[float, float] = GRAIL_TILE_SIZE,
+    num_steps_per_env: int = 24,
+    robot_cfg: Callable[[], EntityCfg] | None = None,
+    kill_bodies: tuple[str, ...] = PERLOCO_KILL_BODIES,
+    kill_exclude: tuple[str, ...] = (),
+) -> ManagerBasedRlEnvCfg:
+    """GRAIL curb: one terrain per column, ONE row — there is no difficulty axis.
+
+    Staged under a single `level_0.00` rather than a faked difficulty: a row
+    axis that does not mean height is a curriculum that promotes nothing.
+    """
+    r, motion_file, max_len = _resolve("grail", roster)
+    return _core(
+        "grail", r, motion_file, max_len,
+        agent=agent, play=play, scan_frame=scan_frame, tile_size=tile_size,
+        num_steps_per_env=num_steps_per_env, robot_cfg=robot_cfg,
+        kill_bodies=kill_bodies, kill_exclude=kill_exclude,
+    )
+
+
+def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
+    """No corruption, no anneal, no tracking kills — so a rollout survives long
+    enough to SHOW where it fails. `illegal_contact` stays: a pelvis on the
+    ground is exactly what you want to notice."""
     cfg.observations["policy"].enable_corruption = False
     cfg.events.pop("policy_update_counter", None)
     for k in ("bad_anchor_pos", "bad_anchor_ori"):

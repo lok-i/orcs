@@ -1,26 +1,21 @@
 """TerrainMotionCommand — clips masked by the tile the env stands on.
 
-uolm masks clips by which OBJECT a world simulates; perloco masks by which
-TILE it stands on. Same hook, one difference that decides the whole design:
+uolm masks clips by which OBJECT a world simulates; perloco by which TILE it
+stands on. Same hook, one difference that decides the design:
 
     uolm      env -> object   `sim.world_to_variant`, FIXED for the run
     perloco   env -> tile     `terrain_{types,levels}`, MOVES at runtime
 
-`terrain_types` (the family column) is fixed at build, but `terrain_levels`
-(the difficulty row) is what a terrain curriculum promotes — mjlab mutates it
-in `TerrainEntity.update_env_origins` on reset. So the mask is read fresh in
-`_clip_allowance` at every reset and **never cached**: a cached map would keep
-a promoted env sampling the clips of the tile it no longer stands on, which
-does not crash, does not log, and quietly trains tracking against the wrong
-terrain.
-
-Tile indexing is `col * n_rows + row`, over the SAME sorted roster
-`orcs.tasks.perloco.terrain` builds the grid from — see `staged_roster`.
+The column is fixed at build but the row is what a curriculum promotes (mjlab
+mutates `terrain_levels` in `update_env_origins` on reset). So the env->tile
+lookup is read fresh every reset and **never cached** — a cached map keeps a
+promoted env sampling its old tile's clips, which does not crash, does not log,
+and quietly trains tracking against the wrong terrain.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,11 +32,8 @@ __all__ = ["TerrainMotionCommand", "TerrainMotionCommandCfg"]
 
 
 def _tile_key(sample_dir: Path) -> str:
-    """`<root>/<family>/level_<L>/sampleN` -> `<family>/level_<L>`.
-
-    The staged PATH is the tile<->clip pairing; there is no manifest to read
-    and therefore none to desync.
-    """
+    """`.../<family>/level_<L>/sampleN` -> `<family>/level_<L>`. The staged
+    PATH is the pairing, so there is no manifest to desync."""
     return f"{sample_dir.parent.parent.name}/{sample_dir.parent.name}"
 
 
@@ -55,25 +47,18 @@ class TerrainMotionCommand(MultiClipMotionCommand):
     cfg: TerrainMotionCommandCfg
 
     def _build_loader(self) -> ConcatMotionLoader:
-        """Load the library in TILE order, and remember each clip's tile.
-
-        Tile-major ordering is not required for correctness (the mask is
-        explicit) but it makes `clip_tile` contiguous, so the printed summary
-        and any per-tile diagnostic read in grid order.
-        """
-        by_tile = scan_grouped(
-            str(self.cfg.dataset_dir), _tile_key,
-            exclude_motions=list(self.cfg.exclude_motions or ()),
-        )
+        """Load in TILE order, remembering each clip's tile."""
+        by_tile = scan_grouped(str(self.cfg.dataset_dir), _tile_key)
         motion_files: list[str] = []
         clip_tile: list[int] = []
         for tile_idx, key in enumerate(self.cfg.tile_keys):
-            files = by_tile.get(key)
+            files = by_tile.get(key, [])
+            if keep := self.cfg.clips.get(key):
+                files = [f for f in files if Path(f).parent.name in keep]
             if not files:
                 raise FileNotFoundError(
-                    f"tile {key!r} is in the grid but has no clips — an env "
-                    f"would spawn on it with nothing to track. Restage, or "
-                    f"narrow families=/levels=.")
+                    f"tile {key!r} is in the grid with no clips — an env would "
+                    f"spawn on it with nothing to track. Widen the roster.")
             motion_files.extend(files)
             clip_tile.extend([tile_idx] * len(files))
 
@@ -89,25 +74,21 @@ class TerrainMotionCommand(MultiClipMotionCommand):
                 "(TerrainEntityCfg(terrain_type='generator')) — without one "
                 "there is no env->tile map to mask clips by.")
         self._terrain = terrain
-        self._n_rows = len(self.cfg.levels)
-
         n_tiles = len(self.cfg.tile_keys)
-        # (n_tiles, n_clips) — one row per tile, 1.0 on its own clips. Built
-        # once (the tile->clip map IS static); it is the env->TILE lookup that
-        # must stay live.
+        # tile -> its clips. Static; the env->TILE lookup is what stays live.
         self._tile_mask = torch.zeros(
             n_tiles, self.motion.n_clips, device=self.device)
         self._tile_mask[self._clip_tile, torch.arange(
             self.motion.n_clips, device=self.device)] = 1.0
 
-        rows, cols = self._n_rows, n_tiles // self._n_rows
-        print(f"[perloco] {cols} families x {rows} levels = {n_tiles} tiles, "
+        cols = n_tiles // self.cfg.n_rows
+        print(f"[perloco] {cols} x {self.cfg.n_rows} = {n_tiles} tiles, "
               f"{self.motion.n_clips} clips "
               f"({self.motion.n_clips / n_tiles:.1f} per tile)")
 
     def _env_tile(self, env_ids: torch.Tensor) -> torch.Tensor:
         """(n,) tile index for each env, READ LIVE from the terrain entity."""
-        return (self._terrain.terrain_types[env_ids] * self._n_rows
+        return (self._terrain.terrain_types[env_ids] * self.cfg.n_rows
                 + self._terrain.terrain_levels[env_ids])
 
     def _clip_allowance(self, env_ids: torch.Tensor) -> torch.Tensor:
@@ -119,19 +100,14 @@ class TerrainMotionCommand(MultiClipMotionCommand):
 class TerrainMotionCommandCfg(MultiClipMotionCommandCfg):
     """Clip library keyed to the sub-terrain grid.
 
-    `families`/`levels` must be the SAME sorted roster the terrain generator
-    was built from (both come from `terrain.staged_roster`) — they are what
-    turns mjlab's `(terrain_level, terrain_type)` back into a staged directory.
+    `tile_keys` and `n_rows` come from the same `Roster` the grid was built
+    from — that is what turns mjlab's `(terrain_level, terrain_type)` back into
+    a staged directory.
     """
 
-    families: tuple[str, ...] = ()
-    levels: tuple[float, ...] = ()
-
-    @property
-    def tile_keys(self) -> tuple[str, ...]:
-        """Tile index -> `<family>/level_<L>`, family-major (`col * n_rows + row`)."""
-        return tuple(f"{f}/level_{level:.2f}"
-                     for f in self.families for level in self.levels)
+    tile_keys: tuple[str, ...] = ()
+    n_rows: int = 1
+    clips: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def build(self, env: ManagerBasedRlEnv) -> TerrainMotionCommand:
         return TerrainMotionCommand(self, env)

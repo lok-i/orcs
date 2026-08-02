@@ -11,9 +11,8 @@ Layout (as shipped by the HF dataset, unmodified):
 Two facts make this the source to build on:
 
 1. **The terrain IS boxes.** Every `box<K>.obj` is a z-extruded rectangle at
-   arbitrary yaw — 8 vertices, 12 faces. Recovering `(pos, quat_z, half)` from
-   it is exact, not an approximation (measured orthogonality error ~1e-6), so
-   no mesh, no convex decomposition, no heightfield bake.
+   arbitrary yaw, recovered exactly by `terrain_spec.box_from_vertices` — no
+   mesh, no convex decomposition, no heightfield bake.
 2. **The pairing is in the filename.** `climb_05_z_scale_1.0.npz` pairs with
    `climb_05/multi_boxes_z_scale_1.0.urdf`. 145 clips, 29 families x 5
    z-scales, exactly one clip per tile — the dataset was built for the grid we
@@ -41,7 +40,12 @@ from pathlib import Path
 
 import numpy as np
 
-from orcs.tasks.perloco.terrain_spec import BoxSpec, ClipSpec, TileSpec
+from orcs.tasks.perloco.terrain_spec import (
+    BoxSpec,
+    ClipSpec,
+    TileSpec,
+    box_from_vertices,
+)
 
 __all__ = ["OmniRetargetSource"]
 
@@ -50,51 +54,16 @@ _ROBOT_URDF = "models/g1/g1_29dof.urdf"
 _JOINT_RE = re.compile(r'joint name="([^"]+)" type="(?!fixed)([^"]+)"')
 
 
-def _obj_vertices(text: str) -> np.ndarray:
+def _obj_verts(text: str) -> np.ndarray:
     return np.array([[float(x) for x in ln.split()[1:4]]
                      for ln in text.splitlines() if ln.startswith("v ")])
-
-
-def _box_from_obj(
-    verts: np.ndarray,
-    scale: tuple[float, float, float],
-    offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
-) -> BoxSpec:
-    """8-vertex z-extruded rectangle -> an exact oriented box.
-
-    The xy footprint is a rotated rectangle, so its 4 unique corners give both
-    half-extents and the yaw directly. Orthogonality is asserted rather than
-    assumed — if a future asset is a general hexahedron this must fail, not
-    silently return a wrong box.
-    """
-    v = verts * np.asarray(scale, dtype=np.float64) + np.asarray(offset, dtype=np.float64)
-    z0, z1 = float(v[:, 2].min()), float(v[:, 2].max())
-    xy = np.unique(np.round(v[:, :2], 6), axis=0)
-    if len(xy) != 4:
-        raise ValueError(f"not a z-extruded rectangle: {len(xy)} xy corners")
-
-    p0 = xy[0]
-    rest = xy[1:]
-    order = np.argsort(np.linalg.norm(rest - p0, axis=1))
-    e1, e2 = rest[order[0]] - p0, rest[order[1]] - p0
-    n1, n2 = np.linalg.norm(e1), np.linalg.norm(e2)
-    ortho = abs(float(e1 @ e2)) / (n1 * n2)
-    if ortho > 1e-3:
-        raise ValueError(f"box edges not orthogonal (err={ortho:.2e})")
-
-    cx, cy = xy.mean(axis=0)
-    yaw = float(np.arctan2(e1[1], e1[0]))
-    return BoxSpec(
-        pos=(float(cx), float(cy), 0.5 * (z0 + z1)),
-        quat=(float(np.cos(yaw / 2)), 0.0, 0.0, float(np.sin(yaw / 2))),
-        half=(float(n1 / 2), float(n2 / 2), float(0.5 * (z1 - z0))),
-    )
 
 
 class OmniRetargetSource:
     """OmniRetarget robot-terrain, read in place (the zip is never extracted)."""
 
     name = "omni"
+    default_root = "OmniRetarget_Dataset"
 
     def __init__(
         self,
@@ -174,7 +143,7 @@ class OmniRetargetSource:
                         "unimplemented because no shipped asset needs it")
             obj = urdf.parent / mesh.get("filename")
             scale = tuple(float(x) for x in mesh.get("scale", "1 1 1").split())
-            boxes.append(_box_from_obj(_obj_vertices(obj.read_text()), scale, xyz))
+            boxes.append(box_from_vertices(_obj_verts(obj.read_text()), scale, xyz))
         if not boxes:
             raise ValueError(f"{urdf}: no mesh geometry found")
         return tuple(boxes)

@@ -1,0 +1,18 @@
+# GRAIL curb. Grid = families x levels = 8 x 1.
+# Stage these first:
+#   python scripts/stage_terrain_motions.py --source grail --families <the list below>
+
+# One column per curb. 4-10 takes each, so unlike omni a tile holds MANY clips.
+families = [
+  "curb_000", "curb_017", "curb_033", "curb_099",
+  "curb_111", "curb_130", "curb_150", "curb_177",
+]
+
+# GRAIL has no difficulty axis, so there is one row and it is named 0.0 rather
+# than faked into a curriculum. Do not "improve" this by binning curb height
+# until the binning is measured — a row that does not mean height promotes
+# nothing.
+levels = [0.0]
+
+# [clips]
+# "curb_000/level_0.00" = ["sample0", "sample3"]

@@ -1,0 +1,14 @@
+# OmniRetarget robot-terrain. Grid = families x levels = 3 x 3.
+# "*" for either axis means "everything staged" (29 x 5 = 145 tiles).
+
+# The three shortest curbs (box top 0.475 m) with the shortest clips.
+families = ["climb_16", "climb_17", "climb_18"]
+
+# z_scale — real obstacle height, so the row axis is honest difficulty.
+# NOT 0.8/0.9: those are the easiest to climb but the retargeting sinks feet
+# there (min ankle -0.059 m at 0.8, vs +0.002 m at 1.0). Clean beats easy.
+levels = [1.0, 1.1, 1.2]
+
+# Optional per-tile clip whitelist; a tile absent here uses all its clips.
+# [clips]
+# "climb_16/level_1.00" = ["sample1"]
