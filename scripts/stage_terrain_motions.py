@@ -326,18 +326,15 @@ def main() -> None:
     dt = 1.0 / args.fps
     total = 0
     for clip in src.clips():
-        # `joint_names=None` means the source is already IL-ordered.
         try:
-            perm = (None if clip.joint_names is None
-                    else [list(clip.joint_names).index(n) for n in fk.il_names])
+            perm = [list(clip.joint_names).index(n) for n in fk.il_names]
         except ValueError as e:
             raise ValueError(
                 f"{clip.name}: source joints do not cover the IsaacLab set "
                 f"({e}). Source order: {clip.joint_names}") from None
 
         state = _resample(clip, args.fps, device)
-        if perm is not None:
-            state["joint_pos"] = state["joint_pos"][:, perm]
+        state["joint_pos"] = state["joint_pos"][:, perm]
         vel = _velocities(state, dt)
         bodies = fk(state, vel)
 

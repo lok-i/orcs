@@ -15,11 +15,15 @@ The terrain is 6-quad boxes packed one after another in the point array — 2-5
 per curb, yaw-free, exact. Geometry is identical across a terrain's takes, so
 one TILE holds several clips and the tile mask does real work.
 
-Joint order is IsaacLab's, matching `data/retargeted_motions` (GRAIL's
-visualization docs). Nothing ships joint NAMES, so `joint_names=None` says
-"already IL order" — where OmniRetarget reads its names off disk and is
-permuted by name. An assumption, so staging's bone-length audit is what
-actually checks it.
+`dof` is **MuJoCo actuator order**, NOT IsaacLab: GRAIL's retargeter writes
+`model.actuator(i) -> qpos[i+7]` (`grail/retargeting/retarget.py`), and only 2
+of 29 slots coincide with IL. The dataset ships no joint names, so the order is
+spelled out below and staging permutes by name like every other source.
+
+Do not replace `_JOINT_NAMES` with "it is already IL" — that was tried, and 27
+of 29 joints were silently transposed. A bone-length audit did not catch it
+(a span is mostly fixed link geometry; the joint-dependent part is centimetres)
+and the arms flailed while the legs looked fine.
 """
 
 from __future__ import annotations
@@ -39,6 +43,23 @@ from orcs.tasks.perloco.terrain_spec import (
 __all__ = ["GrailSource"]
 
 _VERTS_PER_BOX = 24  # 6 quads, unshared corners
+
+_JOINT_NAMES = (
+    # MuJoCo XML / actuator order, verbatim from GRAIL's own retargeter
+    # (`grail/retargeting/retarget.py`, the `init_config` dict it writes into
+    # `qpos[i + 7]`). Asserted against the robot spec at staging time.
+    "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+    "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+    "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+    "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+    "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+    "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint", "left_elbow_joint",
+    "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
+    "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint", "right_elbow_joint",
+    "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
+)
 _LEVEL = 0.0
 """GRAIL has no difficulty axis. One row, stated rather than faked — a row that
 does not mean obstacle height is a curriculum that promotes nothing."""
@@ -126,7 +147,7 @@ class GrailSource:
                 root_pos=np.asarray(r["root_trans_offset"], float),
                 root_quat=quat_xyzw[:, [3, 0, 1, 2]],  # xyzw -> wxyz
                 joint_pos=np.asarray(r["dof"], float),
-                joint_names=None,  # no names shipped: already IL order
+                joint_names=_JOINT_NAMES,
                 fps=float(r["fps"]),
                 family=family,
                 level=_LEVEL,

@@ -103,11 +103,14 @@ class ClipSpec:
     """(T, 4) root orientation, wxyz."""
     joint_pos: np.ndarray
     """(T, J) joint positions in `joint_names` order."""
-    joint_names: tuple[str, ...] | None
-    """Source joint order; staging permutes by NAME, so a renamed joint fails
-    loudly instead of silently transposing the robot. `None` = the source
-    ships no names and is already in IsaacLab order — an assumption, and the
-    bone-length audit is what checks it."""
+    joint_names: tuple[str, ...]
+    """Source joint order. REQUIRED, and staging permutes by name.
+
+    There is deliberately no "already in the right order" escape hatch: it
+    existed for one commit, GRAIL used it, and 27 of 29 joints were silently
+    transposed. A source that cannot read its names off disk spells them out
+    (see `sources/grail.py`); an unverifiable claim beats a wrong one only when
+    it is written down."""
     fps: float
     family: str
     level: float

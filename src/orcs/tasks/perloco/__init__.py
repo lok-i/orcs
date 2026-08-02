@@ -1,16 +1,20 @@
 """Register the PerLoco (Perceptive Locomotion) tasks with mjlab.
 
-Task ids read `Orcs-<Task>-<Agent>` — the AGENT is always named, never a
-default hiding in a bare id.
+Task ids read `Orcs-<Task>-<Source>-<Agent>` — the AGENT is always named, never
+a default hiding in a bare id.
 
-  Orcs-PerLoco-AdaptSonic          OmniRetarget climb. THE task.
-  Orcs-PerLoco-TaRa                its no-frozen-base floor
-  Orcs-PerLoco-AdaptSonic-Grail    GRAIL curb
-  Orcs-PerLoco-TaRa-Grail          its floor
+  Orcs-PerLoco-OmRe-AdaptSonic    OmniRetarget climb. THE task.
+  Orcs-PerLoco-OmRe-TaRa          its no-frozen-base floor
+  Orcs-PerLoco-Grail-AdaptSonic   GRAIL curb
+  Orcs-PerLoco-Grail-TaRa         its floor
 
 One source per task, not one task spanning both — the grids differ in shape
-(omni has a z_scale difficulty axis, GRAIL has none). What does NOT differ is
+(OmRe has a z_scale difficulty axis, GRAIL has none). What does NOT differ is
 the obs, so a checkpoint crosses between them unchanged.
+
+The SOURCE is in the id because provenance is what changes code: reader, file
+format, joint order, conventions. The TERRAIN TYPE is not — curb and stair are
+the same reader and the same env, so they are a roster line, not a task.
 
 Registration needs staged data (`scripts/stage_terrain_motions.py`). Absent, it
 is SKIPPED, never raised — an incomplete checkout must not break `import orcs`
@@ -31,10 +35,10 @@ SKIP_REASON: str | None = None
 # The agents come from `orcs.core.rl` — a task picks one and names its
 # experiment, it never declares PPO. See that module's docstring.
 _TASKS = (
-    ("Orcs-PerLoco-AdaptSonic", omni_env_cfg, "sonic", "orcs_perloco"),
-    ("Orcs-PerLoco-TaRa", omni_env_cfg, "tara", "orcs_perloco_tara"),
-    ("Orcs-PerLoco-AdaptSonic-Grail", grail_env_cfg, "sonic", "orcs_perloco_grail"),
-    ("Orcs-PerLoco-TaRa-Grail", grail_env_cfg, "tara", "orcs_perloco_grail_tara"),
+    ("Orcs-PerLoco-OmRe-AdaptSonic", omni_env_cfg, "sonic", "orcs_perloco_omre"),
+    ("Orcs-PerLoco-OmRe-TaRa", omni_env_cfg, "tara", "orcs_perloco_omre_tara"),
+    ("Orcs-PerLoco-Grail-AdaptSonic", grail_env_cfg, "sonic", "orcs_perloco_grail"),
+    ("Orcs-PerLoco-Grail-TaRa", grail_env_cfg, "tara", "orcs_perloco_grail_tara"),
 )
 
 _AGENT = {"sonic": adapt_sonic_agent_cfg, "tara": tara_agent_cfg}
