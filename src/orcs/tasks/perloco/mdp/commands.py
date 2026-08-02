@@ -123,16 +123,18 @@ class TerrainMotionCommand(MultiClipMotionCommand):
         return self._tile_mask[self._env_tile(env_ids)]
 
     def _debug_vis_impl(self, visualizer) -> None:
-        """Robot ghost (base) + the human it was retargeted from, on top.
+        """Robot ghost in robot space; the human skeleton alone in smpl space.
 
-        uolm draws the skeleton INSTEAD of the ghost — its smpl clips carry a
-        placeholder motion.npz. Here both are real, so drawing both is the
-        retargeting diff: skeleton and ghost apart is a bad retarget, ghost and
-        robot apart is a bad policy.
+        Both references are real here (unlike uolm, whose smpl clips carry a
+        placeholder motion.npz), so the ghost CAN be drawn alongside — uncomment
+        the guard and the pair reads as a retargeting diff: skeleton vs ghost is
+        the retarget, ghost vs robot is the policy. Off by default because two
+        overlapping humanoids is one too many to look at.
         """
-        super()._debug_vis_impl(visualizer)
         if self.cfg.command_space != "smpl":
+            super()._debug_vis_impl(visualizer)
             return
+        # super()._debug_vis_impl(visualizer)  # <- green G1 ghost, on top
         origins = self._env.scene.env_origins
         for batch in visualizer.get_env_indices(self.num_envs):
             t = self.time_steps[batch]
