@@ -3,7 +3,9 @@ humanoid control, and the machinery to distill them into deployable students.
 
 orcs itself is not a task. Three layers, no upward imports:
 
-  core     agnostic infra — paths, mjlab compat. No robot/task semantics.
+  core     robot-generic, task-blind infra — paths, mjlab compat, clip
+           discovery + timeline, the multi-clip motion command, obs atoms,
+           the PPO spine. Knows joints/bodies/clips; never objects or terrains.
   assets   robots + objects as mjlab entity cfgs (g1, objects).
   tasks    one self-registering sub-package per task:
              tasks.uolm   Uni-Object Loco-Manipulation

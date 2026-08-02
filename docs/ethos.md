@@ -64,7 +64,14 @@ and PPO only moves the adapter. Verify this claim, don't trust it:
 ```
 src/orcs/
 ├── __init__.py   registry point: import each task, wire the mjlab shim
-├── core/         agnostic infra. paths, mjlab compat. zero semantics.
+├── core/         robot-generic, task-blind infra
+│   ├── paths · deps · _mjlab_compat      no semantics at all
+│   ├── data/     scan (clip discovery) · loader (concatenated timeline)
+│   ├── mdp/      commands (MultiClipMotionCommand) · observations
+│   │             · terminations · events
+│   ├── obs.py    group plumbing + robot-only term bundles
+│   ├── rl.py     PPO runner spine + actor builders
+│   └── sensors.py  robot<->terrain contact + kill-body vocabulary
 ├── assets/       robots + objects as mjlab entity cfgs. g1.py, objects.py
 └── tasks/        one self-registering package per task
     └── uolm/     env_cfg · rl_cfg · robustness · smpl_data · mdp/
@@ -74,7 +81,7 @@ Import rules — enforced by review, not tooling:
 
 | layer | may import | must never import |
 |---|---|---|
-| `core` | stdlib, mjlab | `orcs.assets`, `orcs.tasks` |
+| `core` | stdlib, mjlab, mocke | `orcs.assets`, `orcs.tasks` |
 | `assets` | `orcs.core` | `orcs.tasks` |
 | `tasks` | `orcs.core`, `orcs.assets`, sibling-free | another task |
 | `__init__` | everything (the only wiring point) | — |
@@ -83,9 +90,20 @@ Two rules earn their keep:
 
 1. **No `__file__` depth math.** Every path comes from `orcs.core.paths`. Moving
    a module can never silently orphan a dataset.
-2. **`core` stays task-blind.** The mjlab compat shim needs a task's command cfg,
-   so it takes it as an argument — `apply(multi_clip_cfgs=...)`, wired in
+2. **`core` is robot-generic and task-blind.** It may know what a joint, a body,
+   a clip and a reference are. It must **not** know what an *object* or a
+   *terrain* is — the moment a name in `core` mentions one, it belongs to the
+   task that has one. The mjlab compat shim needs a task's command cfg, so it
+   takes it as an argument — `apply(multi_clip_cfgs=...)`, wired in
    `orcs/__init__.py`. Core never reaches upward.
+
+   > **Amended 2026-08-02.** Rule 2 used to read "zero semantics". That held only
+   > while core carried no terms, which held only while there was one task. The
+   > second task (perloco) needs the same proprio bundle, the same runner spine,
+   > the same RSI/annealing/freeze machinery — and §4 forbids it importing uolm to
+   > get them, which is the pressure working as intended. So core now carries
+   > robot semantics, and the line moved to where it can actually be checked:
+   > grep `core/` for "object" or "terrain".
 
 ## 5. task slots
 

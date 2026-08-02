@@ -1,13 +1,16 @@
-"""ObjectMotionCommand — multi-clip motion tracking with object state.
+"""ObjectMotionCommand — the OBJECT half of multi-clip motion tracking.
 
-Extends mjlab's MotionCommand with:
-  1. Concatenated multi-clip loader with object tracking (_ConcatMotionLoader)
-  2. Reference state init (RSI) for both robot AND object
-  3. N-step future reference accessors (robot + object)
-  4. Phase annealing curriculum (init near end → init at start)
-  5. Object goal from final clip frame
-  6. Last-frame freeze: past the clip end the reference holds still; resets
-     come from episode events only (steady-state hold + truncation backup)
+The clip library, robot RSI, phase annealing, last-frame freeze and the N-step
+robot reference accessors are task-blind and live in
+:class:`orcs.core.mdp.commands.MultiClipMotionCommand`. What this file adds is
+everything that mentions an object:
+
+  1. object tracking on the same timeline (_ConcatMotionLoader's extra channels)
+  2. object RSI, conditional on init phase and reference contact
+  3. object goal from the final clip frame + the `at_goal` metric
+  4. N-step future OBJECT reference accessors
+  5. omni mode: env->object identity, so an env samples only ITS object's clips
+  6. the ghost/goal/SMPL debug viz
 
 Functionally 1:1 with fcrl's ObjectMotionCommand, built on mjlab.
 """
@@ -15,26 +18,28 @@ Functionally 1:1 with fcrl's ObjectMotionCommand, built on mjlab.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import mujoco
 import numpy as np
 import torch
-from mjlab.tasks.tracking.mdp.commands import MotionCommand, MotionCommandCfg
 from mjlab.utils.lab_api.math import (
     matrix_from_quat,
     quat_error_magnitude,
     quat_from_euler_xyz,
     quat_mul,
-    sample_uniform,
 )
 
+from orcs.core.data.loader import ConcatMotionLoader
 from orcs.core.data.scan import (
-    last_scan,
     load_field_or_make_zeros,
     motion_dirs,
     scan_flat,
+)
+from orcs.core.mdp.commands import (
+    MultiClipMotionCommand,
+    MultiClipMotionCommandCfg,
+    sample_se3,
 )
 from orcs.tasks.uolm.mdp.contact_schedule import ContactSchedule
 from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
@@ -44,16 +49,9 @@ if TYPE_CHECKING:
 
 __all__ = ["ObjectMotionCommandCfg", "ObjectMotionCommand", "motion_dirs"]
 
-# Joint/body order maps — canonical copies live in mocke.mdp.joint_maps.
-from mocke.mdp.joint_maps import (  # noqa: E402
-    G1_TRACKED_BODIES as _G1_TRACKED_BODIES,
-)
-from mocke.mdp.joint_maps import (
-    G1_TRACKED_BODY_NAMES as _G1_BODY_NAMES,
-)
-from mocke.mdp.joint_maps import (
-    IL2MJ as _IL2MJ,
-)
+# Body-name roster for the tracked-body cfg default — canonical copy lives in
+# mocke.mdp.joint_maps. The IL->MJ joint permutation and the tracked-body slice
+# are applied by core's ConcatMotionLoader, not here.
 
 _VIZ_FRAME_SCALE = 0.45  # goal/ref frame axis length (m)
 
@@ -64,20 +62,6 @@ _SMPL_PARENTS = (
 )
 _SMPL_GHOST_COLOR = (0.2, 0.8, 0.9, 0.6)
 
-_IL_BODY_IDS = [idx for _, idx in _G1_TRACKED_BODIES]
-
-_SE3_KEYS = ("x", "y", "z", "roll", "pitch", "yaw")
-
-
-def _sample_se3(
-    ranges: dict[str, tuple[float, float]], n: int, device
-) -> torch.Tensor:
-    """(n, 6) uniform samples from a {x..yaw} -> (lo, hi) dict; missing keys = 0."""
-    lims = torch.tensor(
-        [ranges.get(k, (0.0, 0.0)) for k in _SE3_KEYS], device=device)
-    return sample_uniform(lims[:, 0], lims[:, 1], (n, 6), device=device)
-
-
 # ---------------------------------------------------------------------------
 # Concatenated multi-clip motion loader
 # ---------------------------------------------------------------------------
@@ -87,209 +71,145 @@ _scan_flat_dataset = scan_flat
 downstream consumer (vibe's ONNX export) imports this name from here."""
 
 
-class _ConcatMotionLoader:
-    """All demo clips concatenated into one timeline.
+class _ConcatMotionLoader(ConcatMotionLoader):
+    """The robot timeline (core) + uolm's three extra channels.
 
-    MotionLoader-compatible interface (joint_pos, body_pos_w, etc.) so
-    MotionCommand properties (ghost viz, body tracking) work unchanged.
-    Adds object tracking and per-clip boundaries for frame clamping.
+    object tracking   obj_{pos,quat,lin_vel,ang_vel} from object_motion.npz
+    SMPL reference    smpl_{joints,root_quat,joints_viz} from smpl_motion.npz
+    contact schedule  ContactSchedule — the single source of contact truth;
+                      the richer (T,N,N) narrowphase matrix subsumes the
+                      deprecated scalar object_motion.npz["contact"] flag
+                      (== object_robot_contact_any)
 
-    `motion_files=None` scans `dataset_dir` flat (single-object layout);
-    an explicit list (omni: object-grouped order from
-    `get_motion_files_for_objects`) is loaded verbatim — clip index i
-    corresponds to motion_files[i].
+    All three ride the same concatenated timeline as the robot arrays, so a
+    global frame index addresses every channel.
     """
 
-    def __init__(
-        self,
-        dataset_dir: str | list[str],
-        device: str | torch.device,
-        contact_graph_body_names: tuple[str, ...] | None = None,
-        motion_files: list[str] | None = None,
-    ) -> None:
-        root = dataset_dir  # display only (for the max_len message below)
-        if motion_files is None:
-            motion_files = _scan_flat_dataset(dataset_dir)
+    tag = "uolm"
 
-        all_jp: list[torch.Tensor] = []
-        all_jv: list[torch.Tensor] = []
-        all_bp: list[torch.Tensor] = []
-        all_bq: list[torch.Tensor] = []
-        all_blv: list[torch.Tensor] = []
-        all_bav: list[torch.Tensor] = []
-        all_sj: list[torch.Tensor] = []
-        all_sq: list[torch.Tensor] = []
-        all_sv: list[torch.Tensor] = []
-        all_op: list[torch.Tensor] = []
-        all_oq: list[torch.Tensor] = []
-        all_olv: list[torch.Tensor] = []
-        all_oav: list[torch.Tensor] = []
-        clip_lengths: list[int] = []
+    def _init_extra(self, contact_graph_body_names=None) -> None:
+        self._contact_graph_body_names = contact_graph_body_names
+        self._all_sj: list[torch.Tensor] = []
+        self._all_sq: list[torch.Tensor] = []
+        self._all_sv: list[torch.Tensor] = []
+        self._all_op: list[torch.Tensor] = []
+        self._all_oq: list[torch.Tensor] = []
+        self._all_olv: list[torch.Tensor] = []
+        self._all_oav: list[torch.Tensor] = []
+        self._clip_lengths: list[int] = []
 
-        for mf_str in motion_files:
-            mf = Path(mf_str)
-            sample_dir = mf.parent
-            d = np.load(mf)
-            T = d["joint_pos"].shape[0]
+    def _load_extra(self, sample_dir, npz, n_frames: int) -> None:
+        device = str(self.device)
+        T = n_frames
 
-            def _t(a: np.ndarray) -> torch.Tensor:
-                return torch.tensor(a, dtype=torch.float32, device=device)
+        # SMPL human reference (smpl mode; zeros when absent).
+        # Contract: smpl_joints RAW (y-up, root-centered — encoder-exact,
+        # SONIC never converts them); smpl_root_quat_w z-up/wxyz/base-rot
+        # removed; smpl_joints_viz_w optional z-up world (ghost only).
+        sf = sample_dir / "smpl_motion.npz"
+        sd = np.load(sf) if sf.exists() else None
+        sj, _ = load_field_or_make_zeros(sd, "smpl_joints", (T, 24, 3), device)
+        sq, exist = load_field_or_make_zeros(sd, "smpl_root_quat_w", (T, 4), device)
+        if not exist:
+            sq[:, 0] = 1.0
+        # ghost-only z-up world track; falls back to the raw joints
+        sv, exist = load_field_or_make_zeros(
+            sd, "smpl_joints_viz_w", (T, 24, 3), device)
+        self._all_sj.append(sj)
+        self._all_sq.append(sq)
+        self._all_sv.append(sv if exist else sj)
 
-            all_jp.append(_t(d["joint_pos"])[:, _IL2MJ])
-            all_jv.append(_t(d["joint_vel"])[:, _IL2MJ])
-            all_bp.append(_t(d["body_pos_w"][:, _IL_BODY_IDS]))
-            all_bq.append(_t(d["body_quat_w"][:, _IL_BODY_IDS]))
-            all_blv.append(_t(d["body_lin_vel_w"][:, _IL_BODY_IDS]))
-            all_bav.append(_t(d["body_ang_vel_w"][:, _IL_BODY_IDS]))
+        of = sample_dir / "object_motion.npz"
+        od = np.load(of) if of.exists() else None
+        obp, _ = load_field_or_make_zeros(od, "obj_pos_w", (T, 3), device)
+        obq, exist = load_field_or_make_zeros(od, "obj_quat_w", (T, 4), device)
+        if not exist:
+            obq[:, 0] = 1.0
+        oblv, _ = load_field_or_make_zeros(od, "obj_lin_vel_w", (T, 3), device)
+        obav, _ = load_field_or_make_zeros(od, "obj_ang_vel_w", (T, 3), device)
 
-            # SMPL human reference (smpl mode; zeros when absent).
-            # Contract: smpl_joints RAW (y-up, root-centered — encoder-exact,
-            # SONIC never converts them); smpl_root_quat_w z-up/wxyz/base-rot
-            # removed; smpl_joints_viz_w optional z-up world (ghost only).
-            sf = sample_dir / "smpl_motion.npz"
-            sd = np.load(sf) if sf.exists() else None
-            sj, _ = load_field_or_make_zeros(
-                sd, "smpl_joints", (T, 24, 3), str(device))
-            sq, exist = load_field_or_make_zeros(
-                sd, "smpl_root_quat_w", (T, 4), str(device))
-            if not exist:
-                sq[:, 0] = 1.0
-            # ghost-only z-up world track; falls back to the raw joints
-            sv, exist = load_field_or_make_zeros(
-                sd, "smpl_joints_viz_w", (T, 24, 3), str(device))
-            all_sj.append(sj)
-            all_sq.append(sq)
-            all_sv.append(sv if exist else sj)
+        self._all_op.append(obp)
+        self._all_oq.append(obq)
+        self._all_olv.append(oblv)
+        self._all_oav.append(obav)
+        self._clip_lengths.append(T)
 
-            of = sample_dir / "object_motion.npz"
-            if of.exists():
-                od = np.load(of)
-            else:
-                od = None
-            obp, _ = load_field_or_make_zeros(od, "obj_pos_w", (T, 3), str(device))
-            obq, exist = load_field_or_make_zeros(od, "obj_quat_w", (T, 4), str(device))
-            if not exist:
-                obq[:, 0] = 1.0
-            oblv, _ = load_field_or_make_zeros(od, "obj_lin_vel_w", (T, 3), str(device))
-            obav, _ = load_field_or_make_zeros(od, "obj_ang_vel_w", (T, 3), str(device))
-
-            all_op.append(obp)
-            all_oq.append(obq)
-            all_olv.append(oblv)
-            all_oav.append(obav)
-
-            clip_lengths.append(T)
-
-        # contact schedule: the single source of contact truth. richer (T,N,N)
-        # narrowphase matrix, name-queryable; subsumes the deprecated scalar
-        # `object_motion.npz["contact"]` flag (== object_robot_contact_any).
-        self.contact = ContactSchedule(motion_files, clip_lengths, device)
+    def _finalize_extra(self) -> None:
+        self.contact = ContactSchedule(
+            self.motion_files, self._clip_lengths, self.device)
 
         # per-body contact-graph node vector, concatenated onto the same
         # timeline as obj_pos (only if a reward asks for it).
+        names = self._contact_graph_body_names
         self.obj_bodywise_contact: torch.Tensor | None = (
             torch.cat([
-                self.contact.body_object_contacts(i, contact_graph_body_names)
-                for i in range(len(motion_files))
+                self.contact.body_object_contacts(i, names)
+                for i in range(len(self.motion_files))
             ])  # (T_tot, K)
-            if contact_graph_body_names else None
+            if names else None
         )
 
         # (T_tot,) ANY-robot-body<->object contact — gates the conditional
         # object RSI (twist rand only where the robot has control-authority).
         self.obj_contact_any = torch.cat([
             self.contact.object_robot_contact_any(i)
-            for i in range(len(motion_files))
+            for i in range(len(self.motion_files))
         ])
 
-        # ── MotionLoader-compatible tensors ──
-        self.joint_pos = torch.cat(all_jp)           # (T_tot, 29)
-        self.joint_vel = torch.cat(all_jv)           # (T_tot, 29)
-        self.body_pos_w = torch.cat(all_bp)          # (T_tot, 14, 3)
-        self.body_quat_w = torch.cat(all_bq)         # (T_tot, 14, 4)
-        self.body_lin_vel_w = torch.cat(all_blv)     # (T_tot, 14, 3)
-        self.body_ang_vel_w = torch.cat(all_bav)     # (T_tot, 14, 3)
-        self.time_step_total: int = self.joint_pos.shape[0]
-
         # ── SMPL human reference (smpl command space) ──
-        self.smpl_joints = torch.cat(all_sj)         # (T_tot, 24, 3) RAW (encoder)
-        self.smpl_root_quat = torch.cat(all_sq)      # (T_tot, 4) z-up, wxyz
-        self.smpl_joints_viz = torch.cat(all_sv)     # (T_tot, 24, 3) z-up world (ghost)
+        self.smpl_joints = torch.cat(self._all_sj)     # (T_tot, 24, 3) RAW (encoder)
+        self.smpl_root_quat = torch.cat(self._all_sq)  # (T_tot, 4) z-up, wxyz
+        self.smpl_joints_viz = torch.cat(self._all_sv)  # (T_tot, 24, 3) z-up world
 
         # ── object tracking ──
-        self.obj_pos = torch.cat(all_op)             # (T_tot, 3)
-        self.obj_quat = torch.cat(all_oq)            # (T_tot, 4)
-        self.obj_lin_vel = torch.cat(all_olv)        # (T_tot, 3)
-        self.obj_ang_vel = torch.cat(all_oav)        # (T_tot, 3)
-
-        # ── clip boundaries (for frame clamping) ──
-        self.clip_lengths = torch.tensor(
-            clip_lengths, device=device, dtype=torch.long
-        )
-        self.clip_offsets = torch.zeros(
-            len(clip_lengths), device=device, dtype=torch.long
-        )
-        if len(clip_lengths) > 1:
-            self.clip_offsets[1:] = self.clip_lengths[:-1].cumsum(0)
-        self.clip_ends = self.clip_offsets + self.clip_lengths  # exclusive end
-        self.n_clips: int = len(clip_lengths)
-        self.max_clip_length: int = int(self.clip_lengths.max().item())
-
-        # MOTION = one demo folder; CLIP = one `sampleN` take of it (a motion
-        # holds 1..200+). `n_clips` is what the timeline is made of; the
-        # exclusion tally is per kind because the two are not interchangeable.
-        n_motions = len({Path(f).parent.parent for f in motion_files})
-        dropped = [  # scan-wide (exclusion precedes the object-roster filter)
-            f"{len(v)} {k[len('excluded_'):].rstrip('s')}{'s' * (len(v) > 1)}"
-            for k in ("excluded_motions", "excluded_clips")
-            if (v := last_scan.get(k))
-        ]
-        print(
-            f"[uolm] {self.n_clips} clips from {n_motions} motions, "
-            f"{self.time_step_total} frames, max_len={self.max_clip_length}"
-            + (f", dropped {' + '.join(dropped)}" if dropped else "")
-            + f" — {root}"
-        )
+        self.obj_pos = torch.cat(self._all_op)         # (T_tot, 3)
+        self.obj_quat = torch.cat(self._all_oq)        # (T_tot, 4)
+        self.obj_lin_vel = torch.cat(self._all_olv)    # (T_tot, 3)
+        self.obj_ang_vel = torch.cat(self._all_oav)    # (T_tot, 3)
 
 
 # ---------------------------------------------------------------------------
 # ObjectMotionCommand
 # ---------------------------------------------------------------------------
 
-class ObjectMotionCommand(MotionCommand):
+class ObjectMotionCommand(MultiClipMotionCommand):
     """MotionCommand + object tracking, multi-clip loader, RSI, phase annealing."""
 
     cfg: ObjectMotionCommandCfg
 
-    def __init__(self, cfg: ObjectMotionCommandCfg, env: ManagerBasedRlEnv):
-        super().__init__(cfg, env)
+    def _build_loader(self) -> _ConcatMotionLoader:
+        """The clip library, object-keyed in omni mode.
 
-        # Replace single-file MotionLoader with concatenated multi-clip loader.
-        # Omni mode (ordered_object_names set): dataset_dir is the multi-dataset
-        # root, clips are object-keyed (each sample's metadata.json) and loaded
-        # grouped in object order, so clip->object is a repeat_interleave.
+        Omni (ordered_object_names set): dataset_dir is the multi-dataset root,
+        clips are object-keyed (each sample's metadata.json) and loaded grouped
+        in object order, so clip->object is a repeat_interleave. Flat otherwise.
+        """
+        cfg = self.cfg
         if cfg.ordered_object_names:
             files_by_obj, files_ordered = get_motion_files_for_objects(
                 list(cfg.ordered_object_names), cfg.dataset_dir,
                 exclude_motions=list(cfg.exclude_motions or ()),
             )
             counts = [len(files_by_obj[n]) for n in cfg.ordered_object_names]
-            clip_object_ids = torch.repeat_interleave(
+            self._clip_object_ids = torch.repeat_interleave(
                 torch.arange(len(counts), device=self.device),
                 torch.tensor(counts, device=self.device),
             )
         else:
             # flat scan honors exclude_motions (folder- or sample-level)
             files_ordered = (
-                _scan_flat_dataset(cfg.dataset_dir, cfg.exclude_motions)
+                scan_flat(cfg.dataset_dir, cfg.exclude_motions)
                 if cfg.exclude_motions else None
             )
-            clip_object_ids = None
-        self.motion = _ConcatMotionLoader(
+            self._clip_object_ids = None
+        return _ConcatMotionLoader(
             cfg.dataset_dir, self.device,
             contact_graph_body_names=cfg.contact_graph_body_names,
             motion_files=files_ordered,
         )
+
+    def _init_task(self) -> None:
+        cfg, env = self.cfg, self._env
 
         # Object entity in the scene
         self.object = env.scene[cfg.object_entity_name]
@@ -297,8 +217,9 @@ class ObjectMotionCommand(MotionCommand):
         # Omni mode: env->object identity from the sim's per-world variant
         # table (single source of truth — VariantEntityCfg assignment, fixed
         # at sim init). Variant order == ordered_object_names order by
-        # construction (orcs.assets), so the table IS the
-        # object-id map. _clip_allowed masks clip sampling per env.
+        # construction (orcs.assets), so the table IS the object-id map.
+        # Caching is sound here precisely BECAUSE it is fixed at sim init — a
+        # task whose identity map moves at runtime must not copy this.
         if cfg.ordered_object_names:
             w2v = env.sim.world_to_variant.get(cfg.object_entity_name)
             assert w2v is not None, (
@@ -309,23 +230,13 @@ class ObjectMotionCommand(MotionCommand):
             self._env_object_ids = w2v.to(device=self.device, dtype=torch.long)
             assert int(self._env_object_ids.max()) < len(cfg.ordered_object_names)
             self._clip_allowed = (
-                clip_object_ids[None, :]
+                self._clip_object_ids[None, :]
                 == torch.arange(len(cfg.ordered_object_names),
                                 device=self.device)[:, None]
             )  # (n_objects, n_clips)
         else:
             self._env_object_ids = None
             self._clip_allowed = None
-
-        # Per-env clip tracking
-        self._clip_ids = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device
-        )
-        # Steps spent frozen at the clip's last frame (feeds
-        # `exceeded_motion_by_eps`; the episode — not the motion — owns resets).
-        self._steps_past_end = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device
-        )
 
         # Object goal: final-frame orientation per env (set at reset)
         self._object_goal_pos = torch.zeros(
@@ -336,11 +247,6 @@ class ObjectMotionCommand(MotionCommand):
         )
         self._object_goal_quat[:, 0] = 1.0
 
-        # Phase annealing: _init_phase_max ∈ [0,1] caps WHERE envs can
-        # start (not where they end — clips always run to natural end).
-        self._init_phase_max: float = 1.0
-        self.metrics["init_phase_max"] = torch.zeros(self.num_envs, device=self.device)
-
         # Object tracking metrics
         self.metrics["error_object_pos"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_object_ori"] = torch.zeros(self.num_envs, device=self.device)
@@ -349,108 +255,25 @@ class ObjectMotionCommand(MotionCommand):
         self.metrics["error_object_ori_goal"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["at_goal"] = torch.zeros(self.num_envs, device=self.device)
 
-    # ── sampling ──
+    def _clip_allowance(self, env_ids: torch.Tensor) -> torch.Tensor | None:
+        """Omni mode: each env samples only clips of ITS object."""
+        if self._clip_allowed is None:
+            return None
+        return self._clip_allowed[self._env_object_ids[env_ids]].float()
 
-    def _sample_init_frame(
-        self, env_ids: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Sample per-env (clip_id, init_frame) with phase annealing.
-
-        _init_phase_max restricts WHERE the episode can START.
-        Clips always run to their natural boundary.
-        Omni mode: each env samples only clips of ITS object (_clip_allowed).
-        """
-        n = len(env_ids)
-        L = self.motion.max_clip_length
-
-        allowed = (
-            self._clip_allowed[self._env_object_ids[env_ids]].float()
-            if self._clip_allowed is not None else None
-        )  # (n, n_clips) | None
-
-        # Force frame 0: pick a clip uniformly (within allowance), init at start.
-        if self.cfg.start_from_zero:
-            if allowed is None:
-                clip_ids = torch.randint(
-                    self.motion.n_clips, (n,), device=self.device
-                )
-            else:
-                clip_ids = torch.multinomial(allowed, 1).squeeze(1)
-            return clip_ids, self.motion.clip_offsets[clip_ids]
-
-        # Init-sampling mask: [0, _init_phase_max * clip_length) per clip
-        if self._init_phase_max < 1.0:
-            init_lens = (
-                self.motion.clip_lengths.float() * self._init_phase_max
-            ).long().clamp(min=1)
-            frame_indices = torch.arange(L, device=self.device).unsqueeze(0)
-            init_mask = frame_indices < init_lens.unsqueeze(1)
-        else:
-            frame_indices = torch.arange(L, device=self.device).unsqueeze(0)
-            init_mask = frame_indices < self.motion.clip_lengths.unsqueeze(1)
-
-        # Pick clip weighted by init length (within allowance), then uniform frame
-        clip_weights = init_mask.sum(dim=1).float()
-        if allowed is None:
-            clip_ids = torch.multinomial(clip_weights, n, replacement=True)
-        else:
-            clip_ids = torch.multinomial(
-                clip_weights[None, :] * allowed, 1
-            ).squeeze(1)
-        clip_lens = init_mask[clip_ids].sum(dim=1).float()
-        local_frames = (torch.rand(n, device=self.device) * clip_lens).long()
-        local_frames = local_frames.clamp(max=clip_lens.long() - 1)
-
-        global_steps = self.motion.clip_offsets[clip_ids] + local_frames
-        return clip_ids, global_steps
-
-    def _resample_command(self, env_ids: torch.Tensor) -> None:
-        """Sample new clip + frame, RSI robot + object, set goal."""
-        clip_ids, global_steps = self._sample_init_frame(env_ids)
-        self._clip_ids[env_ids] = clip_ids
-        self.time_steps[env_ids] = global_steps
-        self._steps_past_end[env_ids] = 0
-
+    def _reset_task(
+        self,
+        env_ids: torch.Tensor,
+        clip_ids: torch.Tensor,
+        t: torch.Tensor,
+        origins: torch.Tensor,
+    ) -> None:
+        """Object goal + object RSI. Runs after the robot's RSI, so the RNG
+        draw order (robot pose/twist/joint, then object) is unchanged."""
         # Goal = object pose at actual clip end
         clip_end_frames = self.motion.clip_ends[clip_ids] - 1
         self._object_goal_pos[env_ids] = self.motion.obj_pos[clip_end_frames]
         self._object_goal_quat[env_ids] = self.motion.obj_quat[clip_end_frames]
-
-        # RSI: write robot state to sim (MotionCommand pattern with randomization)
-        origins = self._env.scene.env_origins[env_ids]
-        t = self.time_steps[env_ids]
-
-        root_pos = self.motion.body_pos_w[t, 0] + origins
-        root_ori = self.motion.body_quat_w[t, 0].clone()
-        root_lin_vel = self.motion.body_lin_vel_w[t, 0].clone()
-        root_ang_vel = self.motion.body_ang_vel_w[t, 0].clone()
-        joint_pos = self.motion.joint_pos[t].clone()
-        joint_vel = self.motion.joint_vel[t]
-
-        # Robot pose/twist/joint randomization (same as base MotionCommand),
-        # joints clamped to soft limits.
-        s = _sample_se3(self.cfg.pose_range, len(env_ids), self.device)
-        root_pos = root_pos + s[:, 0:3]
-        root_ori = quat_mul(quat_from_euler_xyz(s[:, 3], s[:, 4], s[:, 5]),
-                            root_ori)
-
-        s = _sample_se3(self.cfg.velocity_range, len(env_ids), self.device)
-        root_lin_vel = root_lin_vel + s[:, 0:3]
-        root_ang_vel = root_ang_vel + s[:, 3:6]
-
-        joint_pos = joint_pos + sample_uniform(
-            lower=self.cfg.joint_position_range[0],
-            upper=self.cfg.joint_position_range[1],
-            size=joint_pos.shape,
-            device=joint_pos.device,
-        )
-        limits = self.robot.data.soft_joint_pos_limits[env_ids]
-        joint_pos = joint_pos.clamp(limits[..., 0], limits[..., 1])
-
-        self._write_reference_state_to_sim(
-            env_ids, root_pos, root_ori, root_lin_vel, root_ang_vel,
-            joint_pos, joint_vel,
-        )
 
         # RSI: object, randomization conditional on init phase (fcrl parity).
         #   clip start           -> pose rand (placement uncertainty; frame 0
@@ -469,7 +292,7 @@ class ObjectMotionCommand(MotionCommand):
         if self.cfg.object_init_pose_range:
             m = at_clip_start
             if m.any():
-                s = _sample_se3(
+                s = sample_se3(
                     self.cfg.object_init_pose_range, int(m.sum()), self.device)
                 obj_pos[m] = obj_pos[m] + s[:, 0:3]
                 obj_quat[m] = quat_mul(
@@ -477,7 +300,7 @@ class ObjectMotionCommand(MotionCommand):
         if self.cfg.object_in_contact_velocity_range:
             m = ~at_clip_start & (self.motion.obj_contact_any[t] > 0.5)
             if m.any():
-                s = _sample_se3(
+                s = sample_se3(
                     self.cfg.object_in_contact_velocity_range, int(m.sum()),
                     self.device)
                 obj_lin_vel[m] = obj_lin_vel[m] + s[:, 0:3]
@@ -487,48 +310,23 @@ class ObjectMotionCommand(MotionCommand):
             [obj_pos, obj_quat, obj_lin_vel, obj_ang_vel], dim=-1)
         self.object.write_root_state_to_sim(obj_state, env_ids=env_ids)
 
-    # ── step ──
-
-    def _update_command(self) -> None:
-        # Phase annealing: _init_phase_max 1→0 over N policy updates.
-        if self.cfg.init_phase_anneal_iterations > 0 and hasattr(
-            self._env, "policy_update_count"
-        ):
-            k = self._env.policy_update_count
-            self._init_phase_max = max(
-                0.0, 1.0 - k / self.cfg.init_phase_anneal_iterations
-            )
-        self.metrics["init_phase_max"][:] = self._init_phase_max
+    def _update_task(self) -> None:
+        """RobotObjectContactGraph: per-body demo-vs-actual contact disparity
+        |ref - live|, averaged over envs (logged whenever a graph sensor is
+        configured, whatever contact reward, if any, is live)."""
+        if not (self.cfg.contact_graph_body_names
+                and self.cfg.contact_graph_sensor_name):
+            return
         log = self._env.extras.setdefault("log", {})
-        log["PhaseAnnealing/init_phase_max"] = self._init_phase_max
-
-        # RobotObjectContactGraph: per-body demo-vs-actual contact disparity
-        # |ref - live|, averaged over envs (logged whenever a graph sensor is
-        # configured, whatever contact reward, if any, is live).
-        if self.cfg.contact_graph_body_names and self.cfg.contact_graph_sensor_name:
-            sensor = self._env.scene.sensors[self.cfg.contact_graph_sensor_name]
-            force = torch.norm(sensor.data.force, dim=-1)  # (N, K) sensor order
-            cols = [sensor.primary_names.index(b)
-                    for b in self.cfg.contact_graph_body_names]
-            live = (force[:, cols] > self.cfg.contact_force_threshold).float()
-            disparity = (self.object_bodywise_contact - live).abs().mean(dim=0)
-            for k, body in enumerate(self.cfg.contact_graph_body_names):
-                log[f"RobotObjectContactGraph/{body}"] = disparity[k].item()
-            log["RobotObjectContactGraph/mean"] = disparity.mean().item()
-
-        # Advance frame, freeze at the clip's last frame (fcrl parity): the
-        # episode — not the motion — owns resets. Past the boundary the
-        # reference holds still, so the policy must stabilize into a
-        # steady-state hold and `exceeded_motion_by_eps` truncates (time_out
-        # → V(s') bootstraps) after ε frozen steps. Resampling happens only
-        # via env reset (CommandTerm.reset → _resample_command).
-        self.time_steps += 1
-        clip_last = self.motion.clip_ends[self._clip_ids] - 1
-        overrun = self.time_steps > clip_last
-        self._steps_past_end += overrun.long()
-        self.time_steps = torch.minimum(self.time_steps, clip_last)
-
-        self.update_relative_body_poses()
+        sensor = self._env.scene.sensors[self.cfg.contact_graph_sensor_name]
+        force = torch.norm(sensor.data.force, dim=-1)  # (N, K) sensor order
+        cols = [sensor.primary_names.index(b)
+                for b in self.cfg.contact_graph_body_names]
+        live = (force[:, cols] > self.cfg.contact_force_threshold).float()
+        disparity = (self.object_bodywise_contact - live).abs().mean(dim=0)
+        for k, body in enumerate(self.cfg.contact_graph_body_names):
+            log[f"RobotObjectContactGraph/{body}"] = disparity[k].item()
+        log["RobotObjectContactGraph/mean"] = disparity.mean().item()
 
     def _update_metrics(self) -> None:
         super()._update_metrics()
@@ -552,16 +350,6 @@ class ObjectMotionCommand(MotionCommand):
             (self.metrics["error_object_pos_goal"] < self.cfg.success_pos_threshold)
             & (self.metrics["error_object_ori_goal"] < self.cfg.success_ori_threshold)
         ).float()
-
-    # ── command (N-step, matches WBC IL convention) ──
-
-    @property
-    def command(self) -> torch.Tensor:
-        """N-step [joint_pos, joint_vel] — matches the WBC generated_commands."""
-        return torch.cat([
-            self.motion_joint_pos_future.reshape(self._env.num_envs, -1),
-            self.motion_joint_vel_future.reshape(self._env.num_envs, -1),
-        ], dim=1)
 
     # ── reference accessors (for tracking rewards) ──
 
@@ -603,45 +391,7 @@ class ObjectMotionCommand(MotionCommand):
         """Object goal quaternion. (B, 4)."""
         return self._object_goal_quat
 
-    # ── N-step future reference (for phase-conditioned obs) ──
-
-    def future_frames(self, steps: int, skip: int = 1) -> torch.Tensor:
-        """(B, steps) future time indices at ``skip`` spacing, clamped within clip boundaries.
-
-        Shared accessor with ``mocke.mdp.FutureMotionCommand`` — obs terms
-        that own their window shape (e.g. the SONIC tokenizer) are duck-typed on it.
-        """
-        offsets = torch.arange(steps, device=self.device) * skip
-        indices = self.time_steps[:, None] + offsets[None, :]  # (B, steps)
-        clip_ends = self.motion.clip_ends[self._clip_ids]  # (B,)
-        return indices.clamp(max=(clip_ends - 1)[:, None])
-
-    def _future_time_indices(self) -> torch.Tensor:
-        """(B, N) future time indices, clamped within clip boundaries."""
-        return self.future_frames(self.cfg.future_steps)
-
-    @property
-    def motion_anchor_pos_w_future(self) -> torch.Tensor:
-        """Future N-step anchor position, world frame. (B, N, 3)."""
-        idx = self._future_time_indices()
-        ai = self.motion_anchor_body_index
-        return self.motion.body_pos_w[idx, ai] + self._env.scene.env_origins[:, None, :]
-
-    @property
-    def motion_anchor_quat_w_future(self) -> torch.Tensor:
-        """Future N-step anchor quaternion. (B, N, 4)."""
-        ai = self.motion_anchor_body_index
-        return self.motion.body_quat_w[self._future_time_indices(), ai]
-
-    @property
-    def motion_joint_pos_future(self) -> torch.Tensor:
-        """Future N-step reference joint positions. (B, N, J)."""
-        return self.motion.joint_pos[self._future_time_indices()]
-
-    @property
-    def motion_joint_vel_future(self) -> torch.Tensor:
-        """Future N-step reference joint velocities. (B, N, J)."""
-        return self.motion.joint_vel[self._future_time_indices()]
+    # ── N-step future object reference (robot ones are inherited) ──
 
     @property
     def motion_object_pos_w_future(self) -> torch.Tensor:
@@ -789,26 +539,22 @@ class ObjectMotionCommand(MotionCommand):
 # ---------------------------------------------------------------------------
 
 @dataclass(kw_only=True)
-class ObjectMotionCommandCfg(MotionCommandCfg):
-    """MotionCommandCfg + multi-clip object tracking.
+class ObjectMotionCommandCfg(MultiClipMotionCommandCfg):
+    """MultiClipMotionCommandCfg + object tracking.
 
-    entity_name = "robot" for MotionCommand (ghost viz, body tracking).
-    object_entity_name: the scene entity to track/RSI ("object", unified).
+    The clip-library fields (`dataset_dir`, `exclude_motions`, `future_steps`,
+    the tracked-body/anchor defaults, phase annealing, `start_from_zero`) are
+    inherited from core. Everything below mentions an object.
     """
 
-    entity_name: str = "robot"
     object_entity_name: str = "object"
+    """The scene entity to track and RSI ("object", unified)."""
 
     # Robot-motion space of the reference: "robot" = retargeted G1 clips drive
     # tracking (rewards, ghost); "smpl" = human SMPL clips drive the SONIC smpl
     # tokenizer (loader expects smpl_motion.npz per sample; motion.npz then
     # only seeds RSI/wrists) — object plumbing identical in both.
     command_space: Literal["robot", "smpl"] = "robot"
-
-    # Multi-clip dataset root, or a list of motion folders (replaces the
-    # single motion_file after init). Depth-invariant either way — see
-    # `motion_dirs`.
-    dataset_dir: str | list[str] = ""
 
     # Omni mode: spawn-order object names (must match the scene's
     # VariantEntityCfg variant order — orcs.assets preserves it).
@@ -817,10 +563,6 @@ class ObjectMotionCommandCfg(MotionCommandCfg):
     # assigned object (env->object read from sim.world_to_variant).
     # None -> single-object flat scan (e.g. the repose cube task).
     ordered_object_names: tuple[str, ...] | None = None
-    # Motions/clips to skip — same grammar in both modes, see
-    # `demo_loader.matches_exclude`: "<motion>" or "<dataset>/<motion>" drops a
-    # whole motion; append "/<sampleN>" to drop that one clip of it.
-    exclude_motions: tuple[str, ...] | None = None
 
     # Conditional object RSI randomization ({x..yaw} -> (lo, hi) dicts):
     #   object_init_pose_range        — applied only at clip-start inits
@@ -834,16 +576,6 @@ class ObjectMotionCommandCfg(MotionCommandCfg):
     object_init_pose_range: dict[str, tuple[float, float]] | None = None
     object_in_contact_velocity_range: dict[str, tuple[float, float]] | None = None
 
-    # N-step future reference lookahead
-    future_steps: int = 5
-
-    # MotionCommand defaults — 14 tracked bodies
-    anchor_body_name: str = "pelvis"
-    body_names: tuple[str, ...] = _G1_BODY_NAMES
-    # NOTE: base-class adaptive sampling is NOT wired to the multi-clip
-    # sampler; pinned to "start" (per-clip adaptive sampling = future PR).
-    sampling_mode: Literal["adaptive", "uniform", "start"] = "start"
-
     # contact-graph reward: robot bodies (contact-legend link names) whose
     # per-body object-contact reference is loaded as `command.object_bodywise_contact`.
     # Single source of column order for ref + live. None -> not loaded.
@@ -852,15 +584,6 @@ class ObjectMotionCommandCfg(MotionCommandCfg):
     # RobotObjectContactGraph logging (ref-vs-live disparity). None -> not logged.
     contact_graph_sensor_name: str | None = None
     contact_force_threshold: float = 0.1
-
-    # Phase annealing: init_phase_max 1→0 over N policy updates.
-    # Caps WHERE envs can start; clips always run to natural end.
-    # 0 = disabled (init anywhere).
-    init_phase_anneal_iterations: int = 0
-
-    # Always init at frame 0 (init_phase=0), ignoring the [0, init_phase_max)
-    # sampling window. Set True for play so every clip runs from its start.
-    start_from_zero: bool = False
 
     # Success thresholds for the `at_goal` metric (pos AND ori, fcrl parity)
     success_pos_threshold: float = 0.15
