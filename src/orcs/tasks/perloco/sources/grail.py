@@ -12,8 +12,10 @@ and the staging pipeline stay identical:
   25 Hz, ours is 50                    (staging resamples; nothing to do here)
 
 The terrain is 6-quad boxes packed one after another in the point array — 2-5
-per curb, yaw-free, exact. Geometry is identical across a terrain's takes, so
-one TILE holds several clips and the tile mask does real work.
+per curb, exact, and validated against `gen_terrain.py`'s own parameter ranges.
+Geometry is identical across a terrain's takes, so one TILE holds several clips
+and the tile mask does real work. It is yawed by `_TERRAIN_YAW` into the
+motion's frame; see there.
 
 `dof` is **MuJoCo actuator order**, NOT IsaacLab: GRAIL's retargeter writes
 `model.actuator(i) -> qpos[i+7]` (`grail/retargeting/retarget.py`), and only 2
@@ -28,6 +30,7 @@ and the arms flailed while the legs looked fine.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -43,6 +46,30 @@ from orcs.tasks.perloco.terrain_spec import (
 __all__ = ["GrailSource"]
 
 _VERTS_PER_BOX = 24  # 6 quads, unshared corners
+
+_TERRAIN_YAW = -math.pi / 2
+"""Yaw applied to terrain geometry to bring it into the MOTION's frame.
+
+The USD mesh is authored in the generator's frame — curbs march along +x
+(`gen_terrain.py` advances `cursor_x`) — while the retargeted motion walks
+along -y. Measured over all 63 curb clips: the angle between the curb line and
+the robot's travel is 89.9 deg median, 0% parallel. A frame convention, not
+per-clip noise, so it is a constant.
+
+The TERRAIN is rotated rather than the motion because the motion is upstream
+data that other checks are calibrated against, and this is a static transform
+with no velocities to re-derive.
+"""
+
+
+def _yaw(b: BoxSpec, a: float) -> BoxSpec:
+    """Rotate a yaw-only box about the tile origin."""
+    c, s = math.cos(a), math.sin(a)
+    x, y, z = b.pos
+    w0, _, _, z0 = b.quat  # sources are yaw-only; asserted by box_from_vertices
+    h = math.atan2(z0, w0) + a / 2
+    return BoxSpec(pos=(c * x - s * y, s * x + c * y, z),
+                   quat=(math.cos(h), 0.0, 0.0, math.sin(h)), half=b.half)
 
 _JOINT_NAMES = (
     # MuJoCo XML / actuator order, verbatim from GRAIL's own retargeter
@@ -120,7 +147,7 @@ class GrailSource:
             raise ValueError(
                 f"{usd.name}: {len(v)} verts is not a whole number of "
                 f"{_VERTS_PER_BOX}-vertex boxes")
-        return tuple(box_from_vertices(v[i:i + _VERTS_PER_BOX])
+        return tuple(_yaw(box_from_vertices(v[i:i + _VERTS_PER_BOX]), _TERRAIN_YAW)
                      for i in range(0, len(v), _VERTS_PER_BOX))
 
     # ── the protocol ──
