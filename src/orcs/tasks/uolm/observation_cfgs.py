@@ -164,7 +164,9 @@ def tokenizer_groups(mode: str = "g1", command_name: str = "motion") -> dict:
     return profile.extra_obs_groups(command_name, mode=mode)
 
 
-def augmentation_group(c: ObsCtx) -> ObservationGroupCfg:
+def augmentation_group(
+    c: ObsCtx, *, frame: str = "env", identity: bool = True
+) -> ObservationGroupCfg:
     """The adapter's conditioning stream — ObjKin feedback + sys1 feedforward.
 
     feedback:    env-frame object kinematics + object identity + robot root
@@ -180,11 +182,22 @@ def augmentation_group(c: ObsCtx) -> ObservationGroupCfg:
 
     THE extension seam: a vision consumer replaces this one group and inherits
     the frozen base, the critic, rewards and terminations unchanged.
+
+    `frame="base"` + `identity=False` is the pre-2026-08-01 layout, kept for a
+    consumer whose ObjKin group is the PRIVILEGED TWIN of a vision group rather
+    than an end in itself (vibe's repose): there the two groups must differ in
+    exactly one thing — the object-state pair — or the exteroception A/B stops
+    being controlled. Odometry and object identity have no image-side twin, so
+    they cannot join that group. uolm has no such twin and takes the default.
     """
+    assert frame in ("env", "base"), f"unknown frame {frame!r}"
+    state = (object_state_w_terms(c.obj) if frame == "env"
+             else object_state_terms(c.obj))
+    extra = ({**object_identity_terms(c.p, c.obj), **robot_root_state_terms(c.p)}
+             if identity else {"base_lin_vel": _T(mdp.base_lin_vel)})
     return _grp({
-        **object_state_w_terms(c.obj),
-        **object_identity_terms(c.p, c.obj),
-        **robot_root_state_terms(c.p),
+        **state,
+        **extra,
         **object_goal_terms(c.p),
         **robot_motion_cmd_terms(c.p),
     })
