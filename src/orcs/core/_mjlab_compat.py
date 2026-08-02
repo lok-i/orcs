@@ -34,35 +34,77 @@ from mjlab.tasks.tracking.mdp.commands import MotionCommandCfg
 _PATCHED_SCRIPTS = ("mjlab.scripts.train", "mjlab.scripts.play")
 
 
-def _single_file_sentinel(multi_clip_cfgs: tuple[type, ...]) -> type:
+def _single_file_sentinel(base: type, multi_clip_cfgs: tuple[type, ...]) -> type:
     """Build the scripts' ``MotionCommandCfg`` stand-in.
 
     ``isinstance`` is True only for *single-file* tracking cfgs — anything in
     ``multi_clip_cfgs`` reports False. An empty tuple is a no-op passthrough.
+
+    ``base`` is whatever the script currently holds under that name, so this
+    *chains*: a sibling package's sentinel (e.g. vibe's, which excludes only its
+    own multi-clip cfg) keeps its exclusions and ours are added on top.
     """
 
     class _SingleFileMotionMeta(type):
         def __instancecheck__(cls, obj: object) -> bool:
-            return isinstance(obj, MotionCommandCfg) and not isinstance(
-                obj, multi_clip_cfgs
-            )
+            return isinstance(obj, base) and not isinstance(obj, multi_clip_cfgs)
 
     class _SingleFileMotionCfg(metaclass=_SingleFileMotionMeta):
         """Drop-in for the scripts' ``MotionCommandCfg`` isinstance target."""
 
+    _SingleFileMotionCfg._orcs_excludes = multi_clip_cfgs  # type: ignore[attr-defined]
     return _SingleFileMotionCfg
+
+
+def _install_sentinels(multi_clip_cfgs: tuple[type, ...]) -> None:
+    """(Re)install the sentinel on each patched script, chaining on what's there."""
+    for name in _PATCHED_SCRIPTS:
+        mod = importlib.import_module(name)
+        current = getattr(mod, "MotionCommandCfg", MotionCommandCfg)
+        if getattr(current, "_orcs_excludes", None) == multi_clip_cfgs:
+            continue  # ours already on top
+        mod.MotionCommandCfg = _single_file_sentinel(  # type: ignore[attr-defined]
+            current, multi_clip_cfgs
+        )
 
 
 def apply(multi_clip_cfgs: tuple[type, ...] = ()) -> None:
     """Patch mjlab in place. ``multi_clip_cfgs``: task command cfgs that own
     their own dataset and must escape mjlab's single-file motion resolution."""
-    sentinel = _single_file_sentinel(multi_clip_cfgs)
-    for name in _PATCHED_SCRIPTS:
-        mod = importlib.import_module(name)
-        mod.MotionCommandCfg = sentinel  # type: ignore[attr-defined]
+    _install_sentinels(multi_clip_cfgs)
+    _patch_entrypoints_reinstall(multi_clip_cfgs)
     _patch_play_init_agent()
     _muffle_mesh_support_warning()
     _patch_put_data_nccdmax()
+
+
+def _patch_entrypoints_reinstall(multi_clip_cfgs: tuple[type, ...]) -> None:
+    """Re-install the sentinel at ``run_train`` / ``run_play`` call time.
+
+    Import-time patching alone loses a race: mjlab loads task entry points
+    alphabetically, so any sibling package installed in the same venv (today:
+    ``vibe``) applies its own sentinel *after* ours and clobbers it — its
+    exclusion list doesn't include orcs's cfgs, so mjlab re-classifies UOLM as a
+    single-file tracking task and hands the runner ``registry_name`` (TypeError).
+    Both scripts resolve ``run_*`` as a module global at call time, so wrapping
+    them lets us land last regardless of import order.
+    """
+    import functools
+
+    for name in _PATCHED_SCRIPTS:
+        mod = importlib.import_module(name)
+        fn_name = "run_train" if name.endswith("train") else "run_play"
+        fn = getattr(mod, fn_name)
+        if getattr(fn, "_orcs_reinstall", False):
+            continue
+
+        @functools.wraps(fn)
+        def wrapper(*args, __fn=fn, **kwargs):
+            _install_sentinels(multi_clip_cfgs)
+            return __fn(*args, **kwargs)
+
+        wrapper._orcs_reinstall = True  # type: ignore[attr-defined]
+        setattr(mod, fn_name, wrapper)
 
 
 def _patch_put_data_nccdmax() -> None:
