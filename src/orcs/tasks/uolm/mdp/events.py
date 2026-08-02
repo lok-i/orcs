@@ -1,7 +1,8 @@
-"""Event terms — policy-update counter + contact-gated object perturbation.
+"""Event terms — contact-gated object perturbation.
 
-RSI lives in ObjectMotionCommand (wired via the command cfg fields);
-generic resets/pushes come from mjlab stock mdp.
+RSI lives in ObjectMotionCommand (wired via the command cfg fields); generic
+resets/pushes come from mjlab stock mdp; `PolicyUpdateCounter` is task-blind
+and lives in :mod:`orcs.core.mdp.events`, re-exported here.
 """
 
 from __future__ import annotations
@@ -12,37 +13,12 @@ from mjlab.envs.mdp.events import push_by_setting_velocity
 from mjlab.managers.manager_base import ManagerTermBase
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from orcs.core.mdp.events import PolicyUpdateCounter  # noqa: F401 — moved to core
+
 __all__ = [
     "PolicyUpdateCounter",
     "PerturbObjectInRobotContact",
 ]
-
-
-class PolicyUpdateCounter(ManagerTermBase):
-    """Derives ``env.policy_update_count`` from ``env.common_step_counter``.
-
-    Fires every env step (interval 0) and writes a single int on the env
-    instance so any manager term can read ``env.policy_update_count``.
-    """
-
-    def __init__(self, cfg, env):
-        super().__init__(env)
-        self._num_steps_per_env: int = cfg.params["num_steps_per_env"]
-        self._init_count: int = cfg.params.get("init_policy_update_count", 0)
-        env.policy_update_count = self._init_count
-
-    def __call__(
-        self, env, env_ids,
-        num_steps_per_env: int = 0,
-        init_policy_update_count: int = 0,
-    ):
-        del num_steps_per_env, init_policy_update_count
-        env.policy_update_count = (
-            self._init_count + env.common_step_counter // self._num_steps_per_env
-        )
-
-    def reset(self, env_ids=None):
-        pass
 
 
 # ---------------------------------------------------------------------------

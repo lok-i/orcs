@@ -1,11 +1,11 @@
 """UOLM sensor configs — what the env can measure.
 
-Two sensors, both contact:
+The object-filtered contact graph lives here (it mentions an object). The
+terrain kill-switch and the kill-body vocabulary are task-blind and live in
+:mod:`orcs.core.sensors`; they are re-exported so a uolm reader still sees one
+sensor surface.
 
-  object_contact_graph    per-body robot<->object contact (the contact-graph nodes)
-  torso_terrain_contact   the fall kill-switch
-
-`_CONTACT_GRAPH_BODY_NAMES` is the single source of column order — 1:1 with the
+`CONTACT_GRAPH_BODY_NAMES` is the single source of column order — 1:1 with the
 demo `contact_matrix.npz` legend names, and shared by the reference
 (`bodywise_contact_cmd`), the live read (`bodywise_saturated_force`), and the
 `object_contact_consistency` reward.
@@ -15,6 +15,14 @@ from __future__ import annotations
 
 from mjlab.sensor import ContactSensorCfg
 from mjlab.sensor.contact_sensor import ContactMatch
+
+from orcs.core.sensors import (  # noqa: F401 — uolm's public sensor surface
+    LOCOMANIP_KILL_BODIES,
+    ROOT_KILL_BODIES,
+    STRICT_KILL_BODIES,
+    TERRAIN_CONTACT_SENSOR_NAME,
+    terrain_contact_sensor,
+)
 
 CONTACT_GRAPH_BODY_NAMES = (
     "pelvis", "torso_link",
@@ -29,23 +37,12 @@ HAND_BODY_NAMES = ("left_wrist_yaw_link", "right_wrist_yaw_link")
 """Hand subset of the graph nodes — hand contact == control-authority over the
 object, so it gates the contact-conditional object perturbation."""
 
-TERRAIN_CONTACT_SENSOR_NAME = "torso_terrain_contact"
-
-LOCOMANIP_KILL_BODIES = ("pelvis_collision", "torso_collision", ".*shoulder.*_collision")
-"""Upper-body core only. Loco-manipulation legitimately kneels and braces
-(knees, thighs, forearms down while lifting), so "everything but feet" would
-terminate on normal behavior."""
-
-UOLM_KILL_BODIES = ("pelvis_collision",)
+UOLM_KILL_BODIES = ROOT_KILL_BODIES
 """fcrl parity (2026-08-01): the root link ALONE. Carrying a 9.6 kg tire, a
 torso or shoulder brush with the ground is a recoverable state, not a fall —
 killing on it truncates episodes before the goal earns credit. Narrower than
 LOCOMANIP_KILL_BODIES on purpose; that constant stays as-is for consumers
 (vibe's repose) whose kill set was never in question."""
-
-STRICT_KILL_BODIES = (".*_collision",)
-"""Everything but the feet — for tasks where no ground contact beyond the feet
-is expected. Pair with ``exclude=(".*foot.*",)``."""
 
 
 def object_contact_graph_sensor(
@@ -72,18 +69,4 @@ def object_contact_graph_sensor(
             entity=object_entity),
         fields=("found", "force"),
         reduce="netforce",
-    )
-
-
-def terrain_contact_sensor(
-    pattern: tuple[str, ...] = LOCOMANIP_KILL_BODIES,
-    exclude: tuple[str, ...] = (),
-) -> ContactSensorCfg:
-    """Robot<->terrain contact on the bodies whose touchdown ends the episode."""
-    return ContactSensorCfg(
-        name=TERRAIN_CONTACT_SENSOR_NAME,
-        primary=ContactMatch(
-            mode="geom", pattern=pattern, exclude=exclude or None, entity="robot"),
-        secondary=ContactMatch(mode="geom", pattern="terrain"),
-        fields=("found",),
     )

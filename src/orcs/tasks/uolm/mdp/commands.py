@@ -30,13 +30,14 @@ from mjlab.utils.lab_api.math import (
     sample_uniform,
 )
 
-from orcs.tasks.uolm.mdp.contact_schedule import ContactSchedule
-from orcs.tasks.uolm.mdp.demo_loader import (
-    get_motion_files_for_objects,
+from orcs.core.data.scan import (
     last_scan,
     load_field_or_make_zeros,
-    matches_exclude,
+    motion_dirs,
+    scan_flat,
 )
+from orcs.tasks.uolm.mdp.contact_schedule import ContactSchedule
+from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -81,65 +82,9 @@ def _sample_se3(
 # Concatenated multi-clip motion loader
 # ---------------------------------------------------------------------------
 
-def motion_dirs(dataset_dir: str | list[str]) -> list[Path]:
-    """Motion folders (each holds sampleX/motion.npz), found DEPTH-INVARIANTLY.
-
-    `dataset_dir` is one root (str/Path) or a list of paths; each path may be a
-    motion folder itself OR any ancestor of them — the omni root whose subdirs
-    are motions, a root grouping objects-then-motions, or an explicit list of
-    motion folders (the custom layout). We locate every `sampleX/motion.npz`
-    beneath each root and take its grandparent as the motion folder, so the two
-    layouts differ only in nesting depth and both just work. Sorted by path;
-    deduped, first occurrence wins (preserves list order across roots).
-    """
-    roots = ([Path(dataset_dir)] if isinstance(dataset_dir, (str, Path))
-             else [Path(d) for d in dataset_dir])
-    seen: dict[Path, None] = {}
-    for root in roots:
-        for mf in sorted(root.rglob("motion.npz")):
-            seen.setdefault(mf.parent.parent, None)  # <motion>/<sampleX>/motion.npz
-    return list(seen)
-
-
-def _scan_flat_dataset(
-    dataset_dir: str | list[str],
-    exclude_motions: tuple[str, ...] | None = None,
-) -> list[str]:
-    """<motion>/<sampleX>/motion.npz walk — the single-object layout.
-
-    `dataset_dir` is a root (subdirs = motion folders) or a list of motion
-    folders. `exclude_motions` grammar: see `demo_loader.matches_exclude`.
-    Fills `demo_loader.last_scan`; the summary is printed by the loader.
-    """
-    excl = set(exclude_motions or ())
-    excl_motions: list[str] = []
-    excl_clips: list[str] = []
-    motion_files: list[str] = []
-    for motion_dir in motion_dirs(dataset_dir):
-        dataset = motion_dir.parent.name
-        if matches_exclude(excl, dataset, motion_dir.name):
-            excl_motions.append(f"{dataset}/{motion_dir.name}")
-            continue
-        sample_dirs = sorted(
-            (d for d in motion_dir.iterdir()
-             if d.is_dir() and d.name.startswith("sample")),
-            key=lambda d: int("".join(filter(str.isdigit, d.name)) or "0"),
-        )
-        for sample_dir in sample_dirs:
-            mf = sample_dir / "motion.npz"
-            if not mf.exists():
-                continue
-            if matches_exclude(excl, dataset, motion_dir.name, sample_dir.name):
-                excl_clips.append(
-                    f"{dataset}/{motion_dir.name}/{sample_dir.name}")
-                continue
-            motion_files.append(str(mf))
-    last_scan.clear()
-    last_scan.update(excluded_motions=excl_motions, excluded_clips=excl_clips,
-                     no_metadata=[])
-    if not motion_files:
-        raise FileNotFoundError(f"No motion.npz under {dataset_dir}")
-    return motion_files
+_scan_flat_dataset = scan_flat
+"""Deprecated alias for :func:`orcs.core.data.scan.scan_flat` — kept because a
+downstream consumer (vibe's ONNX export) imports this name from here."""
 
 
 class _ConcatMotionLoader:

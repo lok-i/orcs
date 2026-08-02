@@ -1,78 +1,31 @@
-"""PPO runner configs — the privileged-agent spine.
+"""PPO runner configs — uolm's agents.
 
   sonic_agent_cfg()    frozen SONIC base + LoRA adapter on the decoder
   tara_agent_cfg()     tabula rasa MLP, from scratch — the no-frozen-base floor
   sidecar_agent_cfg()  frozen textop WBC + action-residual sidecar
 
-`_runner()` is THE single source of runner/algo/critic defaults (iterations, PPO
-hyperparams, obs routing); every factory sets only its actor. A downstream
-consumer (vibe) imports `_runner` and the distribution dicts rather than
-re-declaring them — the spine is shared, the actor is not.
+The runner/algo/critic spine and the actor builders are task-blind and live in
+:mod:`orcs.core.rl`; this file only names experiments and picks actors. The
+underscored aliases below are re-exported because a downstream consumer (vibe)
+imports them from here — the spine is shared, the actor is not.
 """
 
 from __future__ import annotations
 
-from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
-from mocke import PRETRAINED_DIR
+from mjlab.rl import RslRlOnPolicyRunnerCfg
 
-_SONIC_CKPT = str(PRETRAINED_DIR / "sonic/last_ported.pt")
-_WBC_CKPT = str(PRETRAINED_DIR / "textop/model_75000_ported.pt")
-# untracked — regenerate: python scripts/port_sonic_checkpoint.py --smpl (in mocke)
-_SMPL_CKPT = str(PRETRAINED_DIR / "sonic/smpl_ported.pt")
-
-_CRITIC_HIDDEN = (512, 256, 128)
-_WBC_HIDDEN = (2048, 1024, 512)
-
-# Adapter agents: std FROZEN at the base ckpt's converged per-dim values
-# (sonic 0.30-0.50). learn_std=False keeps std_param an nn.Parameter
-# (requires_grad=False), so the base checkpoint still loads over init_std —
-# but PPO can never inflate it. Empirically (2026-07 runs) a learnable std
-# blows up to ~1.0 within ~1k updates, wrecking base tracking while the LoRA
-# delta_w diffuses (sqrt-t growth) instead of converging.
-_DIST_BASE_BAND = {
-    "class_name": "GaussianDistribution",
-    "init_std": 1.0,  # overwritten per-dim by base_checkpoint at load
-    "std_type": "scalar",
-    "learn_std": False,
-}
-# From-scratch agents DO learn std — there is no competent base band to stay
-# inside, and action-space exploration is the whole job.
-_DIST_LEARNABLE = {
-    "class_name": "GaussianDistribution",
-    "init_std": 1.0,
-    "std_type": "scalar",
-}
-
-_NUM_STEPS_PER_ENV = 24
-_MAX_ITERATIONS = 60_000
-_SAVE_INTERVAL = 1500
-
-
-def _runner(experiment_name: str) -> RslRlOnPolicyRunnerCfg:
-    """Common runner cfg: adaptive-KL PPO (byte-identical to mjlab's stock G1
-    tracking algo) + MLP critic."""
-    return RslRlOnPolicyRunnerCfg(
-        experiment_name=experiment_name,
-        num_steps_per_env=_NUM_STEPS_PER_ENV,
-        max_iterations=_MAX_ITERATIONS,
-        save_interval=_SAVE_INTERVAL,
-        obs_groups={"actor": ("policy",), "critic": ("critic",)},
-        critic=RslRlModelCfg(
-            hidden_dims=_CRITIC_HIDDEN,
-            obs_normalization=True,
-            activation="elu",
-        ),
-        algorithm=RslRlPpoAlgorithmCfg(
-            clip_param=0.2,
-            entropy_coef=0.005,
-            learning_rate=1e-3,
-            schedule="adaptive",
-            gamma=0.99,
-            lam=0.95,
-            desired_kl=0.01,
-            max_grad_norm=1.0,
-        ),
-    )
+from orcs.core.rl import CRITIC_HIDDEN as _CRITIC_HIDDEN  # noqa: F401
+from orcs.core.rl import DIST_BASE_BAND as _DIST_BASE_BAND  # noqa: F401
+from orcs.core.rl import DIST_LEARNABLE as _DIST_LEARNABLE  # noqa: F401
+from orcs.core.rl import MAX_ITERATIONS as _MAX_ITERATIONS  # noqa: F401
+from orcs.core.rl import NUM_STEPS_PER_ENV as _NUM_STEPS_PER_ENV  # noqa: F401
+from orcs.core.rl import SAVE_INTERVAL as _SAVE_INTERVAL  # noqa: F401
+from orcs.core.rl import SMPL_CKPT as _SMPL_CKPT  # noqa: F401
+from orcs.core.rl import SONIC_CKPT as _SONIC_CKPT  # noqa: F401
+from orcs.core.rl import WBC_CKPT as _WBC_CKPT  # noqa: F401
+from orcs.core.rl import WBC_HIDDEN as _WBC_HIDDEN  # noqa: F401
+from orcs.core.rl import mlp_actor, sidecar_actor, sonic_adapter_actor
+from orcs.core.rl import runner as _runner  # noqa: F401 — consumer-facing
 
 
 def sonic_agent_cfg(
@@ -84,21 +37,10 @@ def sonic_agent_cfg(
 ) -> RslRlOnPolicyRunnerCfg:
     """Frozen SONIC base + LoRA adapter on the decoder (augmentation stream)."""
     cfg = _runner(experiment_name)
-    cfg.actor = {  # type: ignore[assignment]
-        "class_name": "rsl_rl.models.SonicWithAdapterModel",
-        "distribution_cfg": _DIST_BASE_BAND,
-        "adapter_obs_group": "augmentation",
-        "rank": rank,
-        "alpha": alpha,
-        "base_checkpoint": base_checkpoint,
-        "freeze_base": True,
-    }
+    cfg.actor = sonic_adapter_actor(  # type: ignore[assignment]
+        rank=rank, alpha=alpha, base_checkpoint=base_checkpoint)
     return cfg
 
-
-# ---------------------------------------------------------------------------
-# TaRa — tabula rasa, from-scratch MLP (the no-frozen-base floor)
-# ---------------------------------------------------------------------------
 
 def tara_agent_cfg(experiment_name: str = "orcs_uolm_tara") -> RslRlOnPolicyRunnerCfg:
     """From-scratch MLP over the 2-stream layout (uolm_env_cfg(agent="tara")).
@@ -107,18 +49,9 @@ def tara_agent_cfg(experiment_name: str = "orcs_uolm_tara") -> RslRlOnPolicyRunn
     differs is initialization + what is trainable, not capacity.
     """
     cfg = _runner(experiment_name)
-    cfg.actor = RslRlModelCfg(
-        hidden_dims=_WBC_HIDDEN,
-        obs_normalization=True,
-        activation="elu",
-        distribution_cfg=_DIST_LEARNABLE,
-    )
+    cfg.actor = mlp_actor(_WBC_HIDDEN)
     return cfg
 
-
-# ---------------------------------------------------------------------------
-# Sidecar — frozen textop WBC + action residual
-# ---------------------------------------------------------------------------
 
 def sidecar_agent_cfg(
     experiment_name: str = "orcs_uolm_sidecar",
@@ -134,19 +67,6 @@ def sidecar_agent_cfg(
     rsl_rl has no sonic sidecar model.
     """
     cfg = _runner(experiment_name)
-    cfg.actor = {  # type: ignore[assignment]
-        "class_name": "rsl_rl.models.ModularNormMLPWithSidecarModel",
-        "hidden_dims": list(_WBC_HIDDEN),
-        "activation": "elu",
-        "obs_normalization": True,
-        "distribution_cfg": _DIST_LEARNABLE,
-        "sidecar_obs_group": "augmentation",
-        "sidecar_hidden_dims": list(sidecar_hidden_dims),
-        "sidecar_activation": "elu",
-        "sidecar_output_scale": 1.0,
-        "sidecar_output_bound": "tanh",
-        "condition_on_base_output": True,
-        "base_checkpoint": base_checkpoint,
-        "freeze_base": True,
-    }
+    cfg.actor = sidecar_actor(  # type: ignore[assignment]
+        sidecar_hidden_dims=sidecar_hidden_dims, base_checkpoint=base_checkpoint)
     return cfg
