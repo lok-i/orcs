@@ -168,9 +168,32 @@ class _Fk:
             self.tracked.append((il_idx, self.robot.body_names.index(name)))
         self.il_names = il_joint_names(self.mj_joint_names)
 
+        # THE guard against a joint-order scramble, and it has to be by NAME.
+        # A "rigid span" check cannot do this job: a span that is rigid is
+        # invariant to ANY joint values, wrong ones included. What must hold is
+        # the permutation identity the runtime loader relies on — applying
+        # IL2MJ to an IL-ordered array yields MuJoCo order.
+        permuted = [self.il_names[i] for i in IL2MJ]
+        if permuted != self.mj_joint_names:
+            bad = [(k, a, b) for k, (a, b) in
+                   enumerate(zip(permuted, self.mj_joint_names, strict=True)) if a != b]
+            raise AssertionError(
+                "IL2MJ does not map this robot's IL order onto its MuJoCo "
+                f"order; first mismatches (slot, got, want): {bad[:3]}")
+
     def __call__(self, state: dict, vel: dict) -> dict:
-        """(T, ...) MJ-ordered state -> IL-ordered body arrays."""
+        """IL-ordered state -> IL-ordered body arrays.
+
+        `joint_pos`/`joint_vel` arrive in **IsaacLab** order (what motion.npz
+        means) and are permuted to **MuJoCo** order on the way into the sim —
+        `IL2MJ` is exactly the permutation the runtime loader applies. Getting
+        this backwards runs FK on scrambled joints: legs and torso still look
+        plausible because several IL and MJ slots coincide, and the only loud
+        symptom is a limb whose length is not constant.
+        """
         n = state["root_pos"].shape[0]
+        joint_pos_mj = state["joint_pos"][:, IL2MJ]
+        joint_vel_mj = vel["joint_vel"][:, IL2MJ]
         out = {k: np.zeros((n, _N_IL_BODIES, d), dtype=np.float32)
                for k, d in (("body_pos_w", 3), ("body_quat_w", 4),
                             ("body_lin_vel_w", 3), ("body_ang_vel_w", 3))}
@@ -188,8 +211,8 @@ class _Fk:
 
             jp = self.robot.data.default_joint_pos.clone()
             jv = self.robot.data.default_joint_vel.clone()
-            jp[:k] = state["joint_pos"][lo:hi]
-            jv[:k] = vel["joint_vel"][lo:hi]
+            jp[:k] = joint_pos_mj[lo:hi]
+            jv[:k] = joint_vel_mj[lo:hi]
             self.robot.write_joint_state_to_sim(jp, jv)
 
             self.sim.forward()
@@ -206,6 +229,14 @@ class _Fk:
                 a = arr[:k].detach().cpu().numpy()
                 for il_row, sim_col in self.tracked:
                     out[key][lo:hi, il_row] = a[:, sim_col]
+        # Root round-trip: the pelvis body must land exactly where we asked.
+        # Catches a bad root write / frame convention, which FK alone hides.
+        err = float(np.abs(out["body_pos_w"][:, dict(G1_TRACKED_BODIES)["pelvis"]]
+                           - state["root_pos"].cpu().numpy()).max())
+        if err > 1e-4:
+            raise AssertionError(
+                f"FK sanity: pelvis body position differs from the commanded "
+                f"root position by {err:.2e} m")
         return out
 
 
