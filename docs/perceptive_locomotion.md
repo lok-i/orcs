@@ -134,7 +134,7 @@ That one rule is what keeps three sources from becoming three code paths.
 ```
 
 ```python
-# core/data/terrain_spec.py — tile-local frame, metres, z=0 at ground
+# tasks/perloco/terrain_spec.py — tile-local frame, metres, z=0 at ground
 @dataclass(frozen=True)
 class BoxSpec:    pos: Vec3; quat: Vec4; half: Vec3
 
@@ -240,9 +240,8 @@ src/orcs/core/
 ├── paths.py · deps.py · _mjlab_compat.py          unchanged
 ├── data/
 │   ├── scan.py          motion_dirs · matches_exclude · scan_grouped(root)
-│   ├── loader.py        ConcatMotionLoader — robot timeline + clip bounds;
-│   │                    `_load_extra(sample_dir, T)` hook for per-task channels
-│   └── terrain_spec.py  Box/HField/Tile/ClipSpec · TerrainMotionSource
+│   └── loader.py        ConcatMotionLoader — robot timeline + clip bounds;
+│                        `_load_extra(sample_dir, npz, T)` hook for task channels
 ├── mdp/
 │   ├── commands.py      MultiClipMotionCommand — RSI + rand, phase anneal,
 │   │                    last-frame freeze, N-step future, masked clip sampling, ghost
@@ -260,12 +259,13 @@ src/orcs/tasks/perloco/
 ├── rl_cfg.py            actors only, over core.rl._runner
 ├── sensors.py           height_scan · foot_height_scan · terrain contact
 ├── terrain.py           TileTerrainCfg(SubTerrainCfg) — tile.json → boxes [+ hfield]
+├── terrain_spec.py      Box/HField/Tile/ClipSpec · TerrainMotionSource
+├── sources/{omni,grail,instinct}.py   pure readers, no sim/torch/mjlab
 ├── mdp/commands.py      TerrainMotionCommand(MultiClipMotionCommand)
 └── readme.md            stage → visualize → curate → play → train
 
 scripts/
 ├── stage_terrain_motions.py   --source omni|grail|instinct → data/terrain_motions/
-├── sources/{omni,grail,instinct}.py
 └── view_terrain_motions.py    viser: tiles + clip playback + keep/drop curation
 ```
 
