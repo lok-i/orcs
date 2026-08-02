@@ -11,6 +11,7 @@ Output layout, which IS the tile<->clip pairing (no manifest to desync):
 
     <out>/<family>/level_<L>/tile.json            terrain geometry, tile-local
     <out>/<family>/level_<L>/sample<N>/motion.npz orcs-native, IL order, 50 Hz
+    <out>/<family>/level_<L>/sample<N>/smpl_motion.npz  --smpl only
     <out>/<family>/level_<L>/sample<N>/metadata.json
 
 `<family>` becomes a sub-terrain grid COLUMN and `<L>` a ROW, which is exactly
@@ -60,7 +61,7 @@ from mocke.sonic import profile
 from orcs.assets import get_g1_flat_hand_cfg
 from orcs.core.paths import DATA_ROOT
 from orcs.tasks.perloco.sources import SOURCES
-from orcs.tasks.perloco.terrain_spec import ClipSpec, TileSpec
+from orcs.tasks.perloco.terrain_spec import ClipSpec, SmplSpec, TileSpec
 
 _N_IL_BODIES = 37
 """Row count of `body_*_w`, matching the existing retargeted dataset. Only the
@@ -90,8 +91,34 @@ def il_joint_names(mj_joint_names: list[str]) -> list[str]:
 # resampling + velocities (mjlab csv_to_npz conventions)
 # ---------------------------------------------------------------------------
 
-def _resample(clip: ClipSpec, out_fps: float, device: str) -> dict:
-    """Lerp position/joints, slerp orientation, onto an `out_fps` grid."""
+def _lerp(a: torch.Tensor, i0: torch.Tensor, i1: torch.Tensor,
+          blend: torch.Tensor) -> torch.Tensor:
+    b = blend.reshape(-1, *([1] * (a.dim() - 1)))
+    return a[i0] * (1 - b) + a[i1] * b
+
+
+def _slerp(q: torch.Tensor, i0: torch.Tensor, i1: torch.Tensor,
+           blend: torch.Tensor) -> torch.Tensor:
+    out = torch.zeros(len(i0), 4, device=q.device)
+    for k in range(len(i0)):
+        out[k] = quat_slerp(q[i0[k]], q[i1[k]], float(blend[k]))
+    return out
+
+
+def _grid(n_in: int, phase: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    """Fractional phase in [0,1] -> (i0, i1, blend) into an n_in-frame array."""
+    f = phase * (n_in - 1)
+    i0 = f.floor().long()
+    return i0, torch.minimum(i0 + 1, torch.tensor(n_in - 1, device=f.device)), f - i0
+
+
+def _resample(clip: ClipSpec, out_fps: float, device: str) -> tuple[dict, torch.Tensor]:
+    """Lerp position/joints, slerp orientation, onto an `out_fps` grid.
+
+    Returns the phase vector too: every other channel of the clip resamples
+    onto the SAME phase, which is the only alignment that survives a source
+    whose reference and retarget have different durations (GRAIL's do).
+    """
     pos = torch.as_tensor(clip.root_pos, dtype=torch.float32, device=device)
     quat = torch.as_tensor(clip.root_quat, dtype=torch.float32, device=device)
     jnt = torch.as_tensor(clip.joint_pos, dtype=torch.float32, device=device)
@@ -101,17 +128,23 @@ def _resample(clip: ClipSpec, out_fps: float, device: str) -> dict:
     times = torch.arange(0, duration, 1.0 / out_fps, device=device,
                          dtype=torch.float32)
     phase = times / duration
-    i0 = (phase * (n_in - 1)).floor().long()
-    i1 = torch.minimum(i0 + 1, torch.tensor(n_in - 1, device=device))
-    blend = (phase * (n_in - 1) - i0).unsqueeze(1)
-
-    quat_out = torch.zeros(len(times), 4, device=device)
-    for k in range(len(times)):
-        quat_out[k] = quat_slerp(quat[i0[k]], quat[i1[k]], float(blend[k]))
+    i0, i1, blend = _grid(n_in, phase)
     return {
-        "root_pos": pos[i0] * (1 - blend) + pos[i1] * blend,
-        "root_quat": quat_out,
-        "joint_pos": jnt[i0] * (1 - blend) + jnt[i1] * blend,
+        "root_pos": _lerp(pos, i0, i1, blend),
+        "root_quat": _slerp(quat, i0, i1, blend),
+        "joint_pos": _lerp(jnt, i0, i1, blend),
+    }, phase
+
+
+def _resample_smpl(smpl: SmplSpec, phase: torch.Tensor, device: str) -> dict:
+    """The human reference onto the robot clip's phase grid. See `SmplSpec`."""
+    j, v, q = (torch.as_tensor(a, dtype=torch.float32, device=device)
+               for a in (smpl.joints, smpl.joints_viz, smpl.root_quat))
+    i0, i1, blend = _grid(j.shape[0], phase)
+    return {
+        "smpl_joints": _lerp(j, i0, i1, blend),
+        "smpl_root_quat_w": _slerp(q, i0, i1, blend),
+        "smpl_joints_viz_w": _lerp(v, i0, i1, blend),
     }
 
 
@@ -262,8 +295,12 @@ def _write_tile(out_root: Path, tile: TileSpec) -> None:
 
 
 def _write_clip(sample_dir: Path, clip: ClipSpec, state: dict, vel: dict,
-                bodies: dict, fps: float, il_names: list[str]) -> int:
+                bodies: dict, fps: float, il_names: list[str],
+                smpl: dict | None = None) -> int:
     sample_dir.mkdir(parents=True, exist_ok=True)
+    if smpl is not None:  # the -Smpl command space; contract in core.data.smpl
+        np.savez(sample_dir / "smpl_motion.npz",
+                 **{k: v.cpu().numpy().astype(np.float32) for k, v in smpl.items()})
     body_names = [""] * _N_IL_BODIES
     for name, il_idx in G1_TRACKED_BODIES:
         body_names[il_idx] = name
@@ -301,6 +338,8 @@ def main() -> None:
     ap.add_argument("--fps", type=float, default=50.0)
     ap.add_argument("--batch", type=int, default=256, help="FK frames per forward")
     ap.add_argument("--device", default="cuda:0")
+    ap.add_argument("--smpl", action="store_true",
+                    help="also stage the SMPL-X human reference (grail only)")
     args = ap.parse_args()
 
     root = args.root or DATA_ROOT / SOURCES[args.source].default_root
@@ -308,6 +347,7 @@ def main() -> None:
         root,
         families=tuple(args.families) if args.families else None,
         levels=tuple(args.levels) if args.levels else None,
+        **({"smpl": True} if args.smpl else {}),
     )
     out_root = args.out / src.name
     device = args.device if torch.cuda.is_available() else "cpu"
@@ -333,15 +373,16 @@ def main() -> None:
                 f"{clip.name}: source joints do not cover the IsaacLab set "
                 f"({e}). Source order: {clip.joint_names}") from None
 
-        state = _resample(clip, args.fps, device)
+        state, phase = _resample(clip, args.fps, device)
         state["joint_pos"] = state["joint_pos"][:, perm]
         vel = _velocities(state, dt)
         bodies = fk(state, vel)
+        smpl = _resample_smpl(clip.smpl, phase, device) if clip.smpl else None
 
         n = per_tile.get(clip.tile_key, 0)
         per_tile[clip.tile_key] = n + 1
         frames = _write_clip(out_root / clip.tile_key / f"sample{n}", clip,
-                             state, vel, bodies, args.fps, fk.il_names)
+                             state, vel, bodies, args.fps, fk.il_names, smpl)
         total += frames
         print(f"[stage] {clip.tile_key}/sample{n}  {clip.name}  {frames} frames")
 

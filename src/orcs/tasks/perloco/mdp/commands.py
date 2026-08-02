@@ -17,12 +17,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import torch
+from mjlab.utils.lab_api.math import matrix_from_quat
 
 from orcs.core.data.loader import ConcatMotionLoader
 from orcs.core.data.scan import scan_grouped
+from orcs.core.data.smpl import draw_smpl_ghost, load_smpl_channels
 from orcs.core.mdp.commands import MultiClipMotionCommand, MultiClipMotionCommandCfg
 
 if TYPE_CHECKING:
@@ -38,7 +40,32 @@ def _tile_key(sample_dir: Path) -> str:
 
 
 class _TileMotionLoader(ConcatMotionLoader):
+    """The robot timeline (core) + the SMPL human it was retargeted from.
+
+    Loaded unconditionally, zeros when a clip has no `smpl_motion.npz`: the
+    channel costs (T, 24, 3) floats and gating it on `command_space` would put
+    the loader's shape at the mercy of a cfg field it never sees.
+    """
+
     tag = "perloco"
+
+    def _init_extra(self) -> None:
+        self._sj: list[torch.Tensor] = []
+        self._sq: list[torch.Tensor] = []
+        self._sv: list[torch.Tensor] = []
+
+    def _load_extra(self, sample_dir: Path, npz, n_frames: int) -> None:
+        for dst, src in zip(
+            (self._sj, self._sq, self._sv),
+            load_smpl_channels(sample_dir, n_frames, str(self.device)),
+            strict=True,
+        ):
+            dst.append(src)
+
+    def _finalize_extra(self) -> None:
+        self.smpl_joints = torch.cat(self._sj)      # (T_tot, 24, 3) y-up, RAW
+        self.smpl_root_quat = torch.cat(self._sq)   # (T_tot, 4) z-up, wxyz
+        self.smpl_joints_viz = torch.cat(self._sv)  # (T_tot, 24, 3) z-up world
 
 
 class TerrainMotionCommand(MultiClipMotionCommand):
@@ -95,6 +122,28 @@ class TerrainMotionCommand(MultiClipMotionCommand):
         """(n, n_clips) — the clips staged against the tile this env is on."""
         return self._tile_mask[self._env_tile(env_ids)]
 
+    def _debug_vis_impl(self, visualizer) -> None:
+        """Robot ghost (base) + the human it was retargeted from, on top.
+
+        uolm draws the skeleton INSTEAD of the ghost — its smpl clips carry a
+        placeholder motion.npz. Here both are real, so drawing both is the
+        retargeting diff: skeleton and ghost apart is a bad retarget, ghost and
+        robot apart is a bad policy.
+        """
+        super()._debug_vis_impl(visualizer)
+        if self.cfg.command_space != "smpl":
+            return
+        origins = self._env.scene.env_origins
+        for batch in visualizer.get_env_indices(self.num_envs):
+            t = self.time_steps[batch]
+            draw_smpl_ghost(
+                visualizer,
+                self.motion.smpl_joints_viz[t].cpu().numpy()
+                + origins[batch].cpu().numpy(),
+                matrix_from_quat(self.motion.smpl_root_quat[t]).cpu().numpy(),
+                label=f"smpl_{batch}",
+            )
+
 
 @dataclass(kw_only=True)
 class TerrainMotionCommandCfg(MultiClipMotionCommandCfg):
@@ -108,6 +157,10 @@ class TerrainMotionCommandCfg(MultiClipMotionCommandCfg):
     tile_keys: tuple[str, ...] = ()
     n_rows: int = 1
     clips: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    command_space: Literal["robot", "smpl"] = "robot"
+    """Which reference the frozen SONIC encoder reads. Viz-relevant here only —
+    the tokenizer obs term is what actually switches (see `env_cfg`), and the
+    robot half is loaded either way because the rewards track it either way."""
 
     def build(self, env: ManagerBasedRlEnv) -> TerrainMotionCommand:
         return TerrainMotionCommand(self, env)

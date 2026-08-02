@@ -26,8 +26,8 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 __all__ = [
-    "BoxSpec", "HFieldSpec", "TileSpec", "ClipSpec", "TerrainMotionSource",
-    "box_from_vertices",
+    "BoxSpec", "HFieldSpec", "TileSpec", "ClipSpec", "SmplSpec",
+    "TerrainMotionSource", "box_from_vertices",
 ]
 
 
@@ -86,6 +86,29 @@ class TileSpec:
 
 
 @dataclass(frozen=True)
+class SmplSpec:
+    """The human reference behind a retargeted clip. Frames + contract:
+    `orcs.core.data.smpl`.
+
+    Its own frame count, deliberately. A retargeter is free to re-time what it
+    retargets, and GRAIL does: 241 recon frames @ 30 Hz become 250 robot frames
+    @ 25 Hz — the SAME path (xy arclength 4.625 vs 4.614 m) played 1.245x
+    slower. So the two are aligned by PHASE, and staging resamples this onto
+    the robot clip's grid. Aligning by real time instead lands 0.74 m off the
+    root, against 0.13 m for phase (which is retargeting error: SMPL root vs
+    G1 pelvis). A +-12-frame shift sweep finds no lag, so phase is exact, not
+    merely better.
+    """
+
+    joints: np.ndarray
+    """(S, 24, 3) SMPL-native y-up, root-centred, root rotation applied."""
+    root_quat: np.ndarray
+    """(S, 4) wxyz, z-up world, SMPL base rot removed."""
+    joints_viz: np.ndarray
+    """(S, 24, 3) z-up world, tile-local — same frame as `ClipSpec.root_pos`."""
+
+
+@dataclass(frozen=True)
 class ClipSpec:
     """One motion, in the source's own joint order and rate.
 
@@ -114,6 +137,8 @@ class ClipSpec:
     fps: float
     family: str
     level: float
+    smpl: SmplSpec | None = None
+    """The human this clip was retargeted from, when the source ships it."""
     meta: dict = field(default_factory=dict)
     """Provenance carried into the staged metadata.json. Never read at runtime."""
 

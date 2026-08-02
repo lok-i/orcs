@@ -102,9 +102,14 @@ def policy_group() -> ObservationGroupCfg:
     return _grp(profile.policy_obs_terms(), corrupt=True)
 
 
-def tokenizer_groups(command_name: str = "motion") -> dict:
-    """The frozen SONIC encoder's reference-window stream. Owned by mocke."""
-    return profile.extra_obs_groups(command_name, mode="g1")
+def tokenizer_groups(command_name: str = "motion", mode: str = "g1") -> dict:
+    """The frozen SONIC encoder's reference-window stream. Owned by mocke.
+
+    mode="g1" reads the retargeted G1 clip, "smpl" the human it came from —
+    different encoder, different ported ckpt, same group name and same
+    everything downstream.
+    """
+    return profile.extra_obs_groups(command_name, mode=mode)
 
 
 def augmentation_group(c: ObsCtx) -> ObservationGroupCfg:
@@ -158,11 +163,11 @@ def critic_group(c: ObsCtx) -> ObservationGroupCfg:
 # Agent layouts — one per agent architecture
 # ---------------------------------------------------------------------------
 
-def sonic_obs(c: ObsCtx) -> dict[str, ObservationGroupCfg]:
+def sonic_obs(c: ObsCtx, mode: str = "g1") -> dict[str, ObservationGroupCfg]:
     """3-stream (frozen base): SONIC policy + tokenizer / augmentation / critic."""
     return {
         "policy": policy_group(),
-        **tokenizer_groups(c.p["command_name"]),
+        **tokenizer_groups(c.p["command_name"], mode),
         "augmentation": augmentation_group(c),
         "critic": critic_group(c),
     }

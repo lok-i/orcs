@@ -36,6 +36,7 @@ from orcs.core.data.scan import (
     motion_dirs,
     scan_flat,
 )
+from orcs.core.data.smpl import draw_smpl_ghost, load_smpl_channels
 from orcs.core.mdp.commands import (
     MultiClipMotionCommand,
     MultiClipMotionCommandCfg,
@@ -55,12 +56,6 @@ __all__ = ["ObjectMotionCommandCfg", "ObjectMotionCommand", "motion_dirs"]
 
 _VIZ_FRAME_SCALE = 0.45  # goal/ref frame axis length (m)
 
-# SMPL kinematic tree (24 joints, standard SMPL order: 0=pelvis .. 22/23=hands)
-_SMPL_PARENTS = (
-    -1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19,
-    20, 21,
-)
-_SMPL_GHOST_COLOR = (0.2, 0.8, 0.9, 0.6)
 
 # ---------------------------------------------------------------------------
 # Concatenated multi-clip motion loader
@@ -102,22 +97,10 @@ class _ConcatMotionLoader(ConcatMotionLoader):
         device = str(self.device)
         T = n_frames
 
-        # SMPL human reference (smpl mode; zeros when absent).
-        # Contract: smpl_joints RAW (y-up, root-centered — encoder-exact,
-        # SONIC never converts them); smpl_root_quat_w z-up/wxyz/base-rot
-        # removed; smpl_joints_viz_w optional z-up world (ghost only).
-        sf = sample_dir / "smpl_motion.npz"
-        sd = np.load(sf) if sf.exists() else None
-        sj, _ = load_field_or_make_zeros(sd, "smpl_joints", (T, 24, 3), device)
-        sq, exist = load_field_or_make_zeros(sd, "smpl_root_quat_w", (T, 4), device)
-        if not exist:
-            sq[:, 0] = 1.0
-        # ghost-only z-up world track; falls back to the raw joints
-        sv, exist = load_field_or_make_zeros(
-            sd, "smpl_joints_viz_w", (T, 24, 3), device)
+        sj, sq, sv = load_smpl_channels(sample_dir, T, device)
         self._all_sj.append(sj)
         self._all_sq.append(sq)
-        self._all_sv.append(sv if exist else sj)
+        self._all_sv.append(sv)
 
         of = sample_dir / "object_motion.npz"
         od = np.load(of) if of.exists() else None
@@ -407,27 +390,14 @@ class ObjectMotionCommand(MultiClipMotionCommand):
     # ── debug viz: ghost robot + object ──
 
     def _debug_vis_smpl(self, visualizer, batch: int) -> None:
-        """SMPL human ghost — 24-joint stick figure from the reference clip
-        (no body model / LBS; spheres + parent-child bones, z-up world)."""
-        origin = self._env.scene.env_origins[batch].cpu().numpy()
-        joints = (
-            self.motion.smpl_joints_viz[self.time_steps[batch]].cpu().numpy() + origin
-        )  # (24, 3)
-        for j, parent in enumerate(_SMPL_PARENTS):
-            visualizer.add_sphere(
-                center=joints[j], radius=0.03, color=_SMPL_GHOST_COLOR,
-                label=f"smpl_{batch}_j{j}",
-            )
-            if parent >= 0:
-                visualizer.add_cylinder(
-                    start=joints[parent], end=joints[j], radius=0.012,
-                    color=_SMPL_GHOST_COLOR, label=f"smpl_{batch}_b{j}",
-                )
-        rot = matrix_from_quat(
-            self.motion.smpl_root_quat[self.time_steps[batch]]).cpu().numpy()
-        visualizer.add_frame(
-            position=joints[0], rotation_matrix=rot,
-            scale=0.25, label=f"smpl_root_frame_{batch}", axis_radius=0.004,
+        """SMPL human ghost — the reference stick figure, z-up world."""
+        t = self.time_steps[batch]
+        draw_smpl_ghost(
+            visualizer,
+            self.motion.smpl_joints_viz[t].cpu().numpy()
+            + self._env.scene.env_origins[batch].cpu().numpy(),
+            matrix_from_quat(self.motion.smpl_root_quat[t]).cpu().numpy(),
+            label=f"smpl_{batch}",
         )
 
     def _debug_vis_impl(self, visualizer) -> None:

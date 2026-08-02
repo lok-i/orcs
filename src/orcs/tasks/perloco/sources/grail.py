@@ -11,6 +11,11 @@ and the staging pipeline stay identical:
   root_rot is **xyzw**, ours is wxyz   (q0 ~ (0,0,+-.7,+-.7) = upright + yaw)
   25 Hz, ours is 50                    (staging resamples; nothing to do here)
 
+`recon/<take>.pkl` holds the SMPL-X human the robot clip was retargeted FROM,
+read only under `--smpl` (a body-model forward pass is not free). Its frames,
+and why it aligns to the robot by phase rather than by real time, are in
+`sources/smplx_fk.py` and `terrain_spec.SmplSpec`.
+
 The terrain is 6-quad boxes packed one after another in the point array — 2-5
 per curb, exact, and validated against `gen_terrain.py`'s own parameter ranges.
 Geometry is identical across a terrain's takes, so one TILE holds several clips
@@ -36,9 +41,11 @@ from pathlib import Path
 
 import numpy as np
 
+from orcs.core.paths import DEPS_ROOT
 from orcs.tasks.perloco.terrain_spec import (
     BoxSpec,
     ClipSpec,
+    SmplSpec,
     TileSpec,
     box_from_vertices,
 )
@@ -104,9 +111,11 @@ class GrailSource:
         families: tuple[str, ...] | None = None,
         levels: tuple[float, ...] | None = None,
         categories: tuple[str, ...] = ("curb", "stair1", "stair2"),
+        smpl: bool = False,
     ) -> None:
         del levels  # no difficulty axis
         self.root = Path(root)
+        self.smpl = smpl
         self.families = set(families) if families else None
         self.categories = tuple(
             c for c in categories if (self.root / c / "robot").is_dir()
@@ -161,6 +170,15 @@ class GrailSource:
             seen.add(family)
             yield TileSpec(family=family, level=_LEVEL, boxes=self._boxes_of(stem))
 
+    def _smpl_of(self, pkl: Path) -> SmplSpec | None:
+        """The `recon/` SMPL-X take behind a `robot/` clip, same stem."""
+        from orcs.tasks.perloco.sources.smplx_fk import SMPLX_DIR, smpl_channels
+
+        recon = pkl.parent.parent / "recon" / pkl.name
+        if not recon.exists():
+            raise FileNotFoundError(f"--smpl asked for, but no recon at {recon}")
+        return SmplSpec(*smpl_channels(recon, DEPS_ROOT / SMPLX_DIR))
+
     def clips(self) -> Iterable[ClipSpec]:
         import joblib
 
@@ -178,6 +196,7 @@ class GrailSource:
                 fps=float(r["fps"]),
                 family=family,
                 level=_LEVEL,
+                smpl=self._smpl_of(pkl) if self.smpl else None,
                 meta={"source": f"grail/{stem.split('__')[0]}",
                       "take": stem, "clip_key": key, "src_fps": float(r["fps"])},
             )

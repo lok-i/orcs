@@ -72,7 +72,9 @@ def staged_root(source: str):
 
 
 @lru_cache(maxsize=None)
-def _resolve(source: str, roster_path: str | None) -> tuple[Roster, str, int]:
+def _resolve(
+    source: str, roster_path: str | None, need_smpl: bool = False
+) -> tuple[Roster, str, int]:
     """(roster, first clip, longest clip in frames), cached per roster."""
     root = staged_root(source)
     roster = load_roster(source, root, roster_path)
@@ -81,6 +83,14 @@ def _resolve(source: str, roster_path: str | None) -> tuple[Roster, str, int]:
              if not roster.clips.get(k) or f.parent.name in roster.clips[k]]
     if not files:
         raise FileNotFoundError(f"roster selected no clips under {root}")
+    # Checked HERE, not in the loader: an unstaged SMPL half loads as zeros,
+    # which the encoder consumes without complaint and the reward never sees.
+    if need_smpl and (bad := [f for f in files
+                              if not (f.parent / "smpl_motion.npz").exists()]):
+        raise FileNotFoundError(
+            f"{len(bad)}/{len(files)} selected clips have no smpl_motion.npz "
+            f"(e.g. {bad[0].parent}) — restage with "
+            f"`stage_terrain_motions.py --source {source} --smpl`")
     max_len = max(int(np.load(f)["joint_pos"].shape[0]) for f in files)
     return roster, str(files[0]), max_len
 
@@ -99,9 +109,13 @@ def _core(
     robot_cfg: Callable[[], EntityCfg] | None,
     kill_bodies: tuple[str, ...],
     kill_exclude: tuple[str, ...],
+    command_space: str = "robot",
 ) -> ManagerBasedRlEnvCfg:
     """Everything both sources agree on."""
     assert agent in ("sonic", "tara"), f"unknown agent {agent!r}"
+    assert command_space in ("robot", "smpl"), f"unknown space {command_space!r}"
+    assert not (agent == "tara" and command_space == "smpl"), (
+        "the smpl command space IS the SONIC smpl encoder — no tabula-rasa variant")
     root = staged_root(source)
 
     cfg = ManagerBasedRlEnvCfg(
@@ -162,6 +176,7 @@ def _core(
         tile_keys=roster.tile_keys,
         n_rows=roster.n_rows,
         clips=roster.clips,
+        command_space=command_space,
         future_steps=5,
         resampling_time_range=(1e9, 1e9),
         debug_vis=True,
@@ -210,7 +225,10 @@ def _core(
     }
 
     ctx = ObsCtx(p=_P)
-    cfg.observations = tara_obs(ctx) if agent == "tara" else sonic_obs(ctx)
+    # command_space "robot"/"smpl" -> mocke's encoder mode "g1"/"smpl"
+    cfg.observations = (
+        tara_obs(ctx) if agent == "tara"
+        else sonic_obs(ctx, "smpl" if command_space == "smpl" else "g1"))
 
     if play:
         _play_overrides(cfg)
@@ -247,6 +265,7 @@ def omni_env_cfg(
 def grail_env_cfg(
     *,
     agent: str = "sonic",
+    command_space: str = "robot",
     play: bool = False,
     roster: str | None = None,
     scan_frame: str = "pelvis",
@@ -260,13 +279,21 @@ def grail_env_cfg(
 
     Staged under a single `level_0.00` rather than a faked difficulty: a row
     axis that does not mean height is a curriculum that promotes nothing.
+
+    `command_space="smpl"` swaps ONLY what the frozen encoder reads — the human
+    SMPL-X recon instead of the retargeted G1 clip — and with it the ported
+    ckpt. Rewards, RSI, terminations, adapter and critic are untouched, because
+    GRAIL ships both halves of every take. (uolm's `-Smpl` is rollout-only for
+    exactly the opposite reason: its SMPL clips have no robot retarget, so its
+    motion.npz is a placeholder and there is nothing to reward.)
     """
-    r, motion_file, max_len = _resolve("grail", roster)
+    r, motion_file, max_len = _resolve("grail", roster, command_space == "smpl")
     return _core(
         "grail", r, motion_file, max_len,
         agent=agent, play=play, scan_frame=scan_frame, tile_size=tile_size,
         num_steps_per_env=num_steps_per_env, robot_cfg=robot_cfg,
         kill_bodies=kill_bodies, kill_exclude=kill_exclude,
+        command_space=command_space,
     )
 
 
