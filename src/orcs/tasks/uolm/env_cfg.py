@@ -50,8 +50,8 @@ from orcs.tasks.uolm.sensors import (
     CONTACT_GRAPH_BODY_NAMES,
     CONTACT_GRAPH_SENSOR_NAME,
     HAND_BODY_NAMES,
-    LOCOMANIP_KILL_BODIES,
     TERRAIN_CONTACT_SENSOR_NAME,
+    UOLM_KILL_BODIES,
     object_contact_graph_sensor,
     terrain_contact_sensor,
 )
@@ -135,7 +135,7 @@ def uolm_env_cfg(
     collision: Collision | Mapping[str, Collision] | None = None,
     num_steps_per_env: int = 24,
     robot_cfg: Callable[[], EntityCfg] | None = None,
-    kill_bodies: tuple[str, ...] = LOCOMANIP_KILL_BODIES,
+    kill_bodies: tuple[str, ...] = UOLM_KILL_BODIES,
     kill_exclude: tuple[str, ...] = (),
 ) -> ManagerBasedRlEnvCfg:
     """THE Orcs-Uolm-AdaptSonic env config factory (SONIC augment layout, MoTr rewards).
@@ -154,9 +154,10 @@ def uolm_env_cfg(
                   variants, so this only picks the visual set (a consumer with
                   a camera wants out-of-frame meshes demoted).
       kill_bodies which robot geoms ending up on the terrain terminate the
-                  episode. Loco-manip default is the upper-body core only;
-                  pass STRICT_KILL_BODIES + exclude for a task where nothing
-                  but the feet should touch down.
+                  episode. Default is the root link alone (UOLM_KILL_BODIES,
+                  fcrl parity); pass LOCOMANIP_KILL_BODIES for the upper-body
+                  core, or STRICT_KILL_BODIES + exclude for a task where
+                  nothing but the feet should touch down.
     """
     assert agent in ("sonic", "tara"), f"unknown agent {agent!r}"
     assert not (agent == "tara" and command_space == "smpl"), (
@@ -277,15 +278,17 @@ def uolm_env_cfg(
     # episode = longest clip + ε hold padding (episode owns resets)
     step_dt = cfg.sim.mujoco.timestep * cfg.decimation
     cfg.episode_length_s = max_clip_len * step_dt + _MOTION_PAD_EPS_SEC
+    # OBJECT tracking tubes only — fcrl parity (2026-08-01). The robot anchor
+    # kills (`bad_anchor_{pos,ori}`) are the pure-tracking layer's and fcrl's
+    # uolm dropped them: under loco-manip the object legitimately drags the
+    # root off the reference, so an anchor tube kills recoverable states and
+    # truncates every episode before the goal earns credit. `bad_object_ori`
+    # is back to fcrl's 0.6 (0.8 let the object tumble past recovery).
     cfg.terminations.update({
-        "bad_anchor_pos": TerminationTermCfg(
-            func=mdp.bad_anchor_pos, params={**_p, "threshold": 0.3}),
-        "bad_anchor_ori": TerminationTermCfg(
-            func=mdp.bad_anchor_ori, params={**_p, "threshold": 0.8}),
         "bad_object_pos": TerminationTermCfg(
             func=mdp.bad_object_pos, params={**_p, "threshold": 0.3}),
         "bad_object_ori": TerminationTermCfg(
-            func=mdp.bad_object_ori, params={**_p, "threshold": 0.8}),
+            func=mdp.bad_object_ori, params={**_p, "threshold": 0.6}),
         "exceeded_motion": TerminationTermCfg(
             func=mdp.exceeded_motion_by_eps, time_out=True,
             params={**_p, "epsilon_steps": int(_MOTION_PAD_EPS_SEC / step_dt)}),
@@ -343,8 +346,7 @@ def uolm_env_cfg(
         cfg.rewards = {}
         cfg.observations["critic"].terms.pop("reward_vec")
         cfg.events.pop("virtual_object_force")
-        for k in ("bad_anchor_pos", "bad_anchor_ori",
-                  "bad_object_pos", "bad_object_ori"):
+        for k in ("bad_object_pos", "bad_object_ori"):
             cfg.terminations.pop(k)
     else:
         # ── robustness domain: state (isr + pushes) + param (physical DR) ──
@@ -365,6 +367,6 @@ def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
     cfg.observations["policy"].enable_corruption = False
     for event in ("policy_update_counter", "virtual_object_force"):
         cfg.events.pop(event, None)
-    for k in ("bad_anchor_pos", "bad_anchor_ori", "bad_object_pos", "bad_object_ori"):
+    for k in ("bad_object_pos", "bad_object_ori"):
         cfg.terminations.pop(k, None)
     cfg.commands["motion"].start_from_zero = True

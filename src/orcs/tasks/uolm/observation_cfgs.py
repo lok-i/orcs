@@ -89,11 +89,64 @@ def object_state_terms(obj: SceneEntityCfg) -> dict:
 
     Base frame, not world: info-parity with an FPV image stream, since world
     frame needs odometry — unavailable on hw and un-decodable from images.
+
+    NOT what the privileged uolm agents read (that is `object_state_w_terms`);
+    this atom exists for the DEPLOYABLE side — a vision consumer's aux
+    prediction target, which is ego-observable-only by contract. Do not
+    "unify" the two: the frame difference IS the privilege boundary.
     """
     return {
         "object_pose_b": _T(mdp.object_pose_b, {"object_cfg": obj}),
         "object_twist_b": _T(mdp.object_twist_b, {"object_cfg": obj}),
     }
+
+
+def object_state_w_terms(obj: SceneEntityCfg) -> dict:
+    """Privileged object state, ENV frame (fcrl parity) — pose + twist.
+
+    Env frame, not base: the task goal (`object_goal_*`) is an env-frame
+    constant, so a base-frame object state cannot be differenced against it
+    without odometry. Mixing the two silently made the goal channel
+    unactionable (2026-08-01) — every privileged pose in one group now shares
+    one frame, and `robot_root_pos_env` supplies the odometry that closes it.
+    """
+    return {
+        "object_pos_w": _T(mdp.object_pos_w_obs, {"object_cfg": obj}),
+        "object_ori_mat6d_w": _T(mdp.object_ori_mat6d_w, {"object_cfg": obj}),
+        "object_lin_vel_w": _T(mdp.object_lin_vel_w_obs, {"object_cfg": obj}),
+        "object_ang_vel_w": _T(mdp.object_ang_vel_w_obs, {"object_cfg": obj}),
+    }
+
+
+def robot_root_state_terms(p: dict) -> dict:
+    """Privileged robot-root state: env-frame position + body-frame twist.
+
+    Orientation is already in `proprio_terms`/the frozen base's stream, so only
+    the odometry half lives here.
+    """
+    del p
+    return {
+        "robot_root_pos_env": _T(mdp.robot_root_pos_env),
+        "robot_root_lin_vel_b": _T(mdp.base_lin_vel),
+        "robot_root_ang_vel_b": _T(mdp.base_ang_vel),
+    }
+
+
+def object_identity_terms(p: dict, obj: SceneEntityCfg, *, desc: bool = False) -> dict:
+    """Which object this world is simulating.
+
+    One-hot over the roster (fcrl streamed a scalar index; one-hot avoids the
+    false ordinal). The roster spans 0.56-9.6 kg with one clip each, so without
+    it the CRITIC has to average V over K indistinguishable regimes — that, not
+    the actor, is why this term is load-bearing.
+
+    `desc=True` adds the roster-free inertial descriptor — the axis that
+    survives a roster change. Off by default: one variable at a time.
+    """
+    terms = {"object_id": _T(mdp.object_id_onehot, p)}
+    if desc:
+        terms["object_desc"] = _T(mdp.object_inertial_desc, {"object_cfg": obj})
+    return terms
 
 
 # ---------------------------------------------------------------------------
@@ -114,16 +167,24 @@ def tokenizer_groups(mode: str = "g1", command_name: str = "motion") -> dict:
 def augmentation_group(c: ObsCtx) -> ObservationGroupCfg:
     """The adapter's conditioning stream — ObjKin feedback + sys1 feedforward.
 
-    feedback:    base-frame object kinematics + robot root lin vel.
+    feedback:    env-frame object kinematics + object identity + robot root
+                 (env-frame pos, body-frame twist).  fcrl parity.
     feedforward: task goal (fixed per episode) + sys1 command stream
-                 {l, v, w}_cmd_t.
+                 {l, v, w}_cmd_t (orcs addition — robot-state language, and
+                 already frame-clean).
+
+    ONE frame for every pose in the group. The 2026-08-01 regression was a
+    base-frame object state sharing a group with an env-frame goal and no root
+    pose at all: `goal ⊖ object` was not computable from the stream, so the
+    goal reward and the goal obs were both dead channels.
 
     THE extension seam: a vision consumer replaces this one group and inherits
     the frozen base, the critic, rewards and terminations unchanged.
     """
     return _grp({
-        **object_state_terms(c.obj),
-        "base_lin_vel": _T(mdp.base_lin_vel),
+        **object_state_w_terms(c.obj),
+        **object_identity_terms(c.p, c.obj),
+        **robot_root_state_terms(c.p),
         **object_goal_terms(c.p),
         **robot_motion_cmd_terms(c.p),
     })
@@ -145,12 +206,14 @@ def critic_group(c: ObsCtx) -> ObservationGroupCfg:
         # bundle 1Aug2026 (no state estimator on hw), but the critic never
         # deploys — dropping it there was a pure value-function downgrade.
         "base_lin_vel": _T(mdp.base_lin_vel),
+        # env-frame root position — the odometry half of the privileged root
+        # state (fcrl's robot_root_pos_w). Same reason as in `augmentation`:
+        # without it an env-frame goal is not reachable-relative.
+        "robot_root_pos_env": _T(mdp.robot_root_pos_env),
         "actions": _T(mdp.last_action),
-        # object state (env frame)
-        "object_pos_w": _T(mdp.object_pos_w_obs, {"object_cfg": c.obj}),
-        "object_ori_mat6d_w": _T(mdp.object_ori_mat6d_w, {"object_cfg": c.obj}),
-        "object_lin_vel_w": _T(mdp.object_lin_vel_w_obs, {"object_cfg": c.obj}),
-        "object_ang_vel_w": _T(mdp.object_ang_vel_w_obs, {"object_cfg": c.obj}),
+        # object state (env frame) + which object this world is
+        **object_state_w_terms(c.obj),
+        **object_identity_terms(c.p, c.obj),
         # object goal (full pose; ori-only tasks pop object_goal_pos)
         **object_goal_terms(c.p),
         # object reference trajectory (N-step future, body frame)
@@ -196,14 +259,18 @@ def tara_obs(c: ObsCtx) -> dict[str, ObservationGroupCfg]:
     No frozen base, so the actor must be handed the motion reference itself —
     `tracking_ref_terms` is what the WBC's tokenizer stream would otherwise
     carry. Everything else is the same augmentation content the adapter reads,
-    flattened into one stream.
+    flattened into one stream — env frame included, or the baseline would be
+    solving a strictly harder problem than the thing it is a baseline for.
     """
     return {
         "policy": _grp({
             **tracking_ref_terms(c.p),
             **proprio_terms(),
+            "base_lin_vel": _T(mdp.base_lin_vel),
+            "robot_root_pos_env": _T(mdp.robot_root_pos_env),
             "actions": _T(mdp.last_action),
-            **object_state_terms(c.obj),
+            **object_state_w_terms(c.obj),
+            **object_identity_terms(c.p, c.obj),
             **object_goal_terms(c.p),
             **robot_motion_cmd_terms(c.p),
         }, corrupt=True),

@@ -20,6 +20,9 @@ from mocke.mdp.observations import (  # noqa: F401 — re-exported into `mdp.*`
 __all__ = [
     "object_pose_b",
     "object_twist_b",
+    "robot_root_pos_env",
+    "object_id_onehot",
+    "object_inertial_desc",
     # tracking obs (ObjectMotionCommand)
     "object_pos_w_obs",
     "object_ori_mat6d_w",
@@ -73,6 +76,70 @@ def object_twist_b(
     lin_vel_b = quat_apply_inverse(robot_quat, obj.data.root_link_lin_vel_w)
     ang_vel_b = quat_apply_inverse(robot_quat, obj.data.root_link_ang_vel_w)
     return torch.cat([lin_vel_b, ang_vel_b], dim=-1)
+
+def robot_root_pos_env(
+    env: ManagerBasedRlEnv,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),  # noqa: B008
+) -> torch.Tensor:
+    """Robot root position in env frame (world - env_origin) -> (B, 3).
+
+    The odometry channel that makes an env-frame goal actionable: without it
+    an env-frame `object_goal_pos` and an env-frame `object_pos_w` are two
+    absolutes the network can difference, but neither is reachable relative to
+    the robot. Privileged (no state estimator on hw) — augmentation/critic only.
+    """
+    robot = env.scene[robot_cfg.name]
+    return robot.data.root_link_pos_w - env.scene.env_origins
+
+
+# ---------------------------------------------------------------------------
+# Object identity — which of the K variants this world is simulating
+# ---------------------------------------------------------------------------
+
+def object_id_onehot(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+    """One-hot over the omni roster -> (B, K), K = len(ordered_object_names).
+
+    fcrl streamed the raw scalar index; one-hot instead, because a scalar
+    imposes an ordinal metric the roster does not have (a tire is not "between"
+    a trashcan and a plasticbox). Per-env constant — `world_to_variant` is fixed
+    for the run.
+
+    Single-object (non-omni) envs have no roster: returns a (B, 1) constant, so
+    the term is shape-stable and the group layout does not branch.
+    """
+    cmd = _get_omni_cmd(env, command_name)
+    ids = cmd._env_object_ids
+    if ids is None:
+        return torch.ones(env.num_envs, 1, device=env.device)
+    k = len(cmd.cfg.ordered_object_names)
+    return torch.nn.functional.one_hot(ids, num_classes=k).float()
+
+
+def object_inertial_desc(
+    env: ManagerBasedRlEnv,
+    object_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Roster-free object descriptor: [log m, r_gyr(3)] -> (B, 4).
+
+    The generalizing twin of `object_id_onehot`: one-hot hard-codes K and dies
+    on the next roster (the sugar sets are ~100 variations each), whereas mass
+    and radius of gyration (r = sqrt(I_principal / m)) describe an object the
+    policy has never seen. Read once from the per-world model, so it tracks the
+    variant AND the mass DR.
+
+    OFF by default — it is a second variable, not a free lunch. Turn it on only
+    with the one-hot A/B already banked.
+    """
+    obj = env.scene[object_cfg.name]
+    idx = obj.data.indexing.body_ids
+    model = obj.data.model
+    mass = model.body_mass[:, idx].sum(-1, keepdim=True).to(env.device)  # (W, 1)
+    inertia = model.body_inertia[:, idx].sum(-2).to(env.device)          # (W, 3)
+    desc = torch.cat(
+        [torch.log(mass.clamp_min(1e-6)),
+         (inertia / mass.clamp_min(1e-6)).clamp_min(0.0).sqrt()], dim=-1)
+    return desc.expand(env.num_envs, 4) if desc.shape[0] == 1 else desc
+
 
 # ---------------------------------------------------------------------------
 # Tracking obs (ObjectMotionCommand)

@@ -36,6 +36,13 @@ LOCOMANIP_KILL_BODIES = ("pelvis_collision", "torso_collision", ".*shoulder.*_co
 (knees, thighs, forearms down while lifting), so "everything but feet" would
 terminate on normal behavior."""
 
+UOLM_KILL_BODIES = ("pelvis_collision",)
+"""fcrl parity (2026-08-01): the root link ALONE. Carrying a 9.6 kg tire, a
+torso or shoulder brush with the ground is a recoverable state, not a fall —
+killing on it truncates episodes before the goal earns credit. Narrower than
+LOCOMANIP_KILL_BODIES on purpose; that constant stays as-is for consumers
+(vibe's repose) whose kill set was never in question."""
+
 STRICT_KILL_BODIES = (".*_collision",)
 """Everything but the feet — for tasks where no ground contact beyond the feet
 is expected. Pair with ``exclude=(".*foot.*",)``."""
