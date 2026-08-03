@@ -38,9 +38,20 @@ from orcs.tasks.uolm.mdp.commands import ObjectMotionCommandCfg
 # lock wins — drift becomes a printed line, never a silent bug. See core/deps.py.
 _deps.check()
 
-# Let mjlab's train/play tolerate task-owned multi-clip motion commands. EVERY
-# orcs multi-clip cfg goes in this tuple: the sentinel is one global, so a task
-# missing from it gets re-classified as single-file the moment another package
-# patches after us.
-_apply_mjlab_compat(
-    multi_clip_cfgs=(ObjectMotionCommandCfg, TerrainMotionCommandCfg))
+MULTI_CLIP_CFGS = (ObjectMotionCommandCfg, TerrainMotionCommandCfg)
+"""Every orcs command cfg that owns a multi-clip library — **public, because a
+consumer needs it.**
+
+mjlab's train/play gate on `isinstance(cmd, MotionCommandCfg)` and force the
+single-file `--motion-file` path; the compat shim installs a sentinel that
+reports False for these. That sentinel is **one global**, so whoever patches
+LAST decides for every task in the process. A downstream package that patches
+after us (it imports orcs, so it does) must exempt this union PLUS its own:
+
+    _apply_mjlab_compat(multi_clip_cfgs=(*orcs.MULTI_CLIP_CFGS, MyCfg))
+
+Spelling the union by hand instead is one added orcs task away from silently
+breaking `play Orcs-<whatever>` inside the consumer's env.
+"""
+
+_apply_mjlab_compat(multi_clip_cfgs=MULTI_CLIP_CFGS)
