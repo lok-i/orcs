@@ -15,7 +15,7 @@
     },
     "mocke": {
         "url": "git@github.com:lok-i/mocke.git",
-        "sha": "d82830bbfe3d8120e012fe9130d6c785b520ef91",
+        "sha": "004d4c02bb1be65c67688f25f95197c865f83d6f",
         "path": "dependencies/mocke",
         "pip_install": true,
         "pip_no_deps": true,
