@@ -16,7 +16,16 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-STAGE="$REPO_ROOT/scripts/stage_terrain_motions.py"
+
+# The staging entry point is the CONSOLE SCRIPT, not a path into this checkout:
+# `scripts/` does not ship in a wheel, so path math here would be unreachable
+# from a `pip install`. `scripts/stage_terrain_motions.py` is only the local
+# fallback for a checkout whose console scripts are not on PATH.
+if command -v orcs-stage-terrain &>/dev/null; then
+    STAGE=(orcs-stage-terrain)
+else
+    STAGE=(python "$REPO_ROOT/scripts/stage_terrain_motions.py")
+fi
 
 SOURCES="omni,grail"
 GRAIL_CATEGORIES="curb"     # stair1/stair2 land here when a roster wants them
@@ -65,6 +74,14 @@ from orcs.core.paths import DATA_ROOT, DEPS_ROOT
 from orcs.tasks.perloco.roster import ROSTER_DIR
 from orcs.tasks.perloco.sources.smplx_fk import smplx_dir
 print(DATA_ROOT, DEPS_ROOT, smplx_dir(), ROSTER_DIR)' | tail -1)
+
+# Resolved ONCE, then exported: staging and the verify step re-enter python and
+# would otherwise each re-resolve, giving four chances to disagree. Exporting
+# also means a host that set these (orcs vendored as a dependency) and one that
+# did not both reach every child through the same variable.
+export ORCS_DATA_ROOT="$DATA_ROOT"
+export ORCS_DEPS_ROOT="$DEPS_ROOT"
+export ORCS_SMPLX_DIR="$SMPLX_DIR"
 
 echo "[ENV] data $DATA_ROOT"
 echo "[ENV] deps $DEPS_ROOT"
@@ -214,8 +231,8 @@ if [ "$SKIP_STAGE" = 0 ]; then
             [ ${#vals[@]} -gt 0 ] && args+=("--$key" "${vals[@]}")
         done
         [ "$s" = grail ] && [ "$WITH_SMPL" = 1 ] && args+=(--smpl)
-        echo "[ STAGE  ] $STAGE --source $s ${args[*]}"
-        python "$STAGE" --source "$s" "${args[@]}"
+        echo "[ STAGE  ] ${STAGE[*]} --source $s ${args[*]}"
+        "${STAGE[@]}" --source "$s" "${args[@]}"
     done
 fi
 
