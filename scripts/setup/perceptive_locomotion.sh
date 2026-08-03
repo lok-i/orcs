@@ -69,7 +69,17 @@ has() { [[ ",$SOURCES," == *",$1,"* ]]; }
 # Roots come from orcs.core.paths, never from path math here — so ORCS_DATA_ROOT
 # / ORCS_DEPS_ROOT move the download exactly like they move the runtime lookup.
 # `tail -1`: importing orcs pulls mjlab, which chatters on stdout.
+#
+# `import mjlab` FIRST, and it is not decoration. mjlab runs its entry-point
+# scan as the last line of its own __init__, importing every registered task
+# package — CONSUMERS of orcs included. Let orcs be the outermost import and
+# that scan re-enters while orcs is half-built, so the consumer's tasks fail to
+# register (mjlab catches it and merely warns: a traceback on stderr and a
+# silently short `list_tasks()`). Importing mjlab first lets the scan run to
+# completion against a clean slate; orcs then imports normally. Same rule
+# applies to any script: **mjlab before orcs.**
 read -r DATA_ROOT DEPS_ROOT SMPLX_DIR ROSTER_DIR < <(python -c '
+import mjlab  # noqa: F401 — see above: mjlab before orcs
 from orcs.core.paths import DATA_ROOT, DEPS_ROOT
 from orcs.tasks.perloco.roster import ROSTER_DIR
 from orcs.tasks.perloco.sources.smplx_fk import smplx_dir
@@ -240,7 +250,8 @@ fi
 echo
 echo "=== registered ==="
 python -c '
+import mjlab  # noqa: F401 — mjlab before orcs (see the roots probe above)
 import orcs
 from mjlab.tasks.registry import list_tasks
-print("\n".join(t for t in list_tasks() if t.startswith("Orcs-PerLoco")) or "  (none)")
+print("\n".join(t for t in list_tasks() if "PerLoco" in t) or "  (none)")
 print("skip reason:", orcs.tasks.perloco.SKIP_REASON)'
