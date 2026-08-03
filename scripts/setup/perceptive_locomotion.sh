@@ -71,45 +71,91 @@ echo "[ENV] deps $DEPS_ROOT"
 
 command -v git-lfs &>/dev/null || { echo "[ERROR] git-lfs not on PATH"; exit 1; }
 
+# The ROSTER is the single source of "which tiles exist" — it drives the LFS
+# scope AND the staging flags, so a roster edit changes both and neither can
+# drift. tomllib only, no orcs import, so stdout carries the answer alone.
+roster_read() {
+    python -c '
+import sys, tomllib
+spec = tomllib.loads(open(sys.argv[1], "rb").read().decode())
+v = spec.get(sys.argv[2], "*")
+print("" if v == "*" else " ".join(map(str, v)))' "$ROSTER_DIR/$1.toml" "$2"
+}
+roster_families() { roster_read "$1" families; }
+
 # ── 1. datasets ─────────────────────────────────────────────────────────────
-# Non-cone sparse patterns: cone mode can only include whole subtrees, and the
-# whole point here is taking curb/ WITHOUT its 13 GB of video.
+# TWO independent filters, and missing either one downloads the whole dataset:
+#
+#   sparse-checkout   which POINTERS land in the working tree
+#   lfs pull -I       which BLOBS get fetched
+#
+# **`git lfs pull` does not read sparse-checkout.** `git lfs fetch` resolves
+# every LFS object reachable from the ref, so an unscoped pull on GRAIL fetches
+# 106k objects / 12+ GB no matter how narrow the working tree is. That is not a
+# tuning miss; it is the difference between 38 MB and a wasted afternoon.
+#
+# `--no-cone` on `set`, always: cone mode can only include whole subtrees, and
+# the point here is taking curb/ WITHOUT its 13 GB of video.
+#
+#   clone_sparse <url> <dest> <lfs-include-csv> <sparse patterns...>
+# An empty <lfs-include-csv> means "every blob in the sparse tree".
 clone_sparse() {
-    local url="$1" dest="$2"; shift 2
+    local url="$1" dest="$2" lfs_inc="$3"; shift 3
     echo
     echo "=== $(basename "$dest") ==="
     if [ ! -d "$dest/.git" ]; then
         echo "[ CLONE  ] $url"
         GIT_LFS_SKIP_SMUDGE=1 git clone --no-checkout "$url" "$dest"
-        git -C "$dest" sparse-checkout init --no-cone
     fi
-    printf '%s\n' "$@" | git -C "$dest" sparse-checkout set --stdin
+    GIT_LFS_SKIP_SMUDGE=1 git -C "$dest" sparse-checkout set --no-cone -- "$@"
     GIT_LFS_SKIP_SMUDGE=1 git -C "$dest" checkout
-    echo "[ LFS    ] pulling blobs (this is the slow part)"
-    git -C "$dest" lfs pull
+    echo "[ SPARSE ] $(git -C "$dest" ls-files | wc -l) files in tree"
+
+    local n
+    if [ -n "$lfs_inc" ]; then
+        n=$(git -C "$dest" lfs ls-files -I "$lfs_inc" | wc -l)
+        echo "[ LFS    ] $n blobs (scoped); $(git -C "$dest" lfs ls-files | wc -l) exist"
+        [ "$n" -gt 0 ] || { echo "[ERROR] include matched 0 blobs: $lfs_inc"; exit 1; }
+        git -C "$dest" lfs pull --include="$lfs_inc"
+    else
+        echo "[ LFS    ] $(git -C "$dest" lfs ls-files | wc -l) blobs"
+        git -C "$dest" lfs pull
+    fi
     echo "[ OK     ] $(du -sh "$dest" | cut -f1)"
 }
 
 if [ "$SKIP_CLONE" = 0 ] && has omni; then
-    # robot-object*.zip are the manipulation splits — perloco reads neither.
+    # robot-object*.zip are the manipulation splits — perloco reads neither, and
+    # robot-object.zip alone is 273 MB.
     clone_sparse https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset \
         "$DATA_ROOT/OmniRetarget_Dataset" \
+        'robot-terrain.zip,models/**' \
         '/robot-terrain.zip' '/models/' '/visualize.py' '/README.md'
 fi
 
 if [ "$SKIP_CLONE" = 0 ] && has grail; then
-    patterns=()
+    # ONLY the three dirs GrailSource opens: robot/ (the retargeted clip),
+    # object_usd/ (tile geometry, and NOT lfs — it rides the checkout) and
+    # recon/ (the SMPL-X human, --smpl). objects/ and meta/ are lfs and unread.
+    patterns=() lfs=()
     IFS=',' read -ra cats <<< "$GRAIL_CATEGORIES"
     for c in "${cats[@]}"; do
-        # robot = the retargeted clip, object_usd = tile geometry, objects = its
-        # pose, recon = the SMPL-X human (--smpl), meta = provenance.
-        for d in robot objects object_usd recon meta; do
+        for d in robot object_usd recon; do
             patterns+=("/data/$c/$d/")
         done
-        [ "$WITH_VIDEO" = 1 ] && patterns+=("/data/$c/video/")
+        if [ "$WITH_VIDEO" = 1 ]; then
+            patterns+=("/data/$c/video/")
+            lfs+=("data/$c/video/**")
+        fi
+        # Blobs are scoped to the ROSTERED families — a curb category ships
+        # 1769 takes and the roster names 8 of them. 126 files, not 8846.
+        for f in $(roster_families grail); do
+            lfs+=("data/$c/robot/*__${f}__*" "data/$c/recon/*__${f}__*")
+        done
     done
     clone_sparse https://huggingface.co/datasets/nvidia/PhysicalAI-Robotics-Locomanipulation-GRAIL \
         "$DATA_ROOT/PhysicalAI-Robotics-Locomanipulation-GRAIL" \
+        "$(IFS=,; echo "${lfs[*]}")" \
         '/README.md' "${patterns[@]}"
 fi
 
@@ -157,23 +203,16 @@ fi
 # Families/levels come from the ROSTER, not from this script: the roster is what
 # the env builds its grid from, so a hardcoded list here would be a second
 # source of "which tiles exist" and would drift the day one is edited.
-# tomllib only — no orcs import, so stdout carries the flags and nothing else.
-stage_args() {
-    python -c '
-import sys, tomllib
-spec = tomllib.loads(open(sys.argv[1], "rb").read().decode())
-for flag, key in (("--families", "families"), ("--levels", "levels")):
-    if (v := spec.get(key, "*")) != "*":
-        print(flag, *map(str, v))' "$ROSTER_DIR/$1.toml"
-}
-
 if [ "$SKIP_STAGE" = 0 ]; then
     for s in omni grail; do
         has "$s" || continue
         echo
         echo "=== stage $s ==="
         args=()
-        while read -r -a line; do args+=("${line[@]}"); done < <(stage_args "$s")
+        for key in families levels; do
+            read -r -a vals <<< "$(roster_read "$s" "$key")"
+            [ ${#vals[@]} -gt 0 ] && args+=("--$key" "${vals[@]}")
+        done
         [ "$s" = grail ] && [ "$WITH_SMPL" = 1 ] && args+=(--smpl)
         echo "[ STAGE  ] $STAGE --source $s ${args[*]}"
         python "$STAGE" --source "$s" "${args[@]}"

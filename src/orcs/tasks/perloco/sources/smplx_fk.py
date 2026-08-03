@@ -91,6 +91,21 @@ def _aa_to_quat(aa: np.ndarray) -> np.ndarray:
 @lru_cache(maxsize=2)
 def _model(model_dir: str, gender: str):
     import smplx
+
+    # Checked here because `smplx.create` does not check: given a path that is
+    # not a directory it INFERS the model type from the basename, so an absent
+    # dir surfaces as `ValueError: Unknown model type body` (from
+    # "body_models") several frames deep, naming neither the real problem nor
+    # the path it wanted.
+    want = Path(model_dir) / "smplx" / f"SMPLX_{gender.upper()}.npz"
+    if not want.exists():
+        raise FileNotFoundError(
+            f"SMPL-X body model not found: {want}\n"
+            f"  --smpl needs the licensed SMPL-X v1.1 NPZ models. Register and "
+            f"download at https://smpl-x.is.tue.mpg.de, unzip so that path "
+            f"exists, or point ORCS_SMPLX_DIR elsewhere.\n"
+            f"  Nothing else needs them: drop --smpl and every task but "
+            f"`Orcs-PerLoco-Grail-AdaptSonic-Smpl` stages and trains.")
     return smplx.create(model_dir, model_type="smplx", gender=gender,
                         use_pca=False, flat_hand_mean=True, batch_size=1)
 

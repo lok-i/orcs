@@ -53,7 +53,7 @@ download is a re-run, not a restart.
 | step | fetches | into |
 |---|---|---|
 | 1 | OmniRetarget `robot-terrain.zip` + `models/` (~125 MB) | `$ORCS_DATA_ROOT/OmniRetarget_Dataset` |
-| 1 | GRAIL `curb/{robot,objects,object_usd,recon,meta}` (~1.1 GB; `video/` excluded — 13 GB nothing reads) | `$ORCS_DATA_ROOT/PhysicalAI-Robotics-Locomanipulation-GRAIL` |
+| 1 | GRAIL `curb/{robot,object_usd,recon}`, blobs scoped to the ROSTERED families (~70 MB of 12 GB) | `$ORCS_DATA_ROOT/PhysicalAI-Robotics-Locomanipulation-GRAIL` |
 | 2 | [NVlabs/GRAIL](https://github.com/NVlabs/GRAIL) depth-1, no submodules (reference: retargeter + vendored SONIC) | `$ORCS_DEPS_ROOT/GRAIL` |
 | 3 | **you**: SMPL-X v1.1 NPZ from [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de) | `$ORCS_SMPLX_DIR/smplx/SMPLX_NEUTRAL.npz` |
 | 4 | staging (`stage_terrain_motions.py`, families/levels read from the roster) | `$ORCS_DATA_ROOT/terrain_motions/<source>` |
@@ -62,6 +62,14 @@ Step 3 is the only manual one — SMPL-X is licensed, so it cannot be fetched fo
 you. `--no-smpl` skips it, at the cost of `Orcs-PerLoco-Grail-AdaptSonic-Smpl`.
 Which tiles get staged comes from `src/orcs/tasks/perloco/rosters/<source>.toml`
 — the same file the env builds its grid from, so edit the roster, re-run, done.
+
+**Two filters, and missing either one downloads the whole dataset.**
+`sparse-checkout` decides which *pointers* land in the working tree;
+`git lfs pull --include` decides which *blobs* get fetched — and **`git lfs
+pull` does not read sparse-checkout**, so an unscoped pull on GRAIL fetches
+106k objects / 12+ GB no matter how narrow the tree is. The script scopes both,
+and its LFS include is built from the roster's family list, so a roster edit
+re-scopes the download too.
 
 **Order matters, and re-running step 1 alone undoes step 2.** mjlab pins
 `rsl-rl-lib==5.4.0`; our fork declares `5.4.1`, so any pip run that re-resolves
