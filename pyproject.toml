@@ -3,7 +3,8 @@ name = "orcs"
 version = "0.1.0"
 description = "Oracle Robot Control Synthesis — privileged-observation policies for humanoid control"
 readme = "readme.md"
-requires-python = ">=3.10"
+# 3.11, not 3.10: `tomllib` (rosters) is stdlib only from 3.11.
+requires-python = ">=3.11"
 dependencies = [
     # ── active ─────────────────────────────────────────────────────────────────
     "mjlab>=1.1.0",
@@ -31,6 +32,12 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Non-`.py` files setuptools would otherwise drop from a wheel. Editable installs
+# point at the source tree and hide this, so the omission only shows up as a
+# `pip install git+...` where every PerLoco task silently skips registration.
+[tool.setuptools.package-data]
+"orcs.tasks.perloco" = ["rosters/*.toml"]
 
 # mjlab auto-discovers tasks by importing this module at startup.
 # Format: <key> = "<python-module-to-import>"  (key is arbitrary, module is what gets imported)

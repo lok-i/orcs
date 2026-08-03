@@ -8,10 +8,9 @@ Include, never exclude: two mechanisms for one decision is how they drift.
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-
-import tomllib
 
 __all__ = ["Roster", "load_roster", "staged"]
 

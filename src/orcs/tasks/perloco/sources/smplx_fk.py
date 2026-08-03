@@ -37,15 +37,28 @@ is the body — `predicted_body_height` is an unused HMR estimate, not a scale.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 
-__all__ = ["SMPLX_DIR", "smpl_channels"]
+from orcs.core.paths import DEPS_ROOT
+
+__all__ = ["SMPLX_DIR", "smpl_channels", "smplx_dir"]
 
 SMPLX_DIR = "GRAIL/imports/GEM-SMPL/inputs/checkpoints/body_models"
 """SMPL-X body-model dir, relative to DEPS_ROOT. Holds `smplx/SMPLX_*.npz`."""
+
+
+def smplx_dir() -> Path:
+    """Where the licensed SMPL-X models live. `ORCS_SMPLX_DIR` overrides.
+
+    Defaults inside the GRAIL clone because that is where its own installer
+    puts them — the override exists so the models are not hostage to a 7 GB
+    reference checkout orcs never imports.
+    """
+    return Path(os.environ.get("ORCS_SMPLX_DIR") or DEPS_ROOT / SMPLX_DIR)
 
 _SMPLX_TO_SMPL24 = tuple(range(22)) + (25, 40)
 _BASE_ROT_CONJ = np.array([0.5, -0.5, -0.5, -0.5])  # conj([.5, .5, .5, .5])

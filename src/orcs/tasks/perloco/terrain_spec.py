@@ -101,7 +101,8 @@ class SmplSpec:
     """
 
     joints: np.ndarray
-    """(S, 24, 3) SMPL-native y-up, root-centred, root rotation applied."""
+    """(S, 24, 3) z-up, root-centred, root rotation applied — SAME frame as
+    `root_quat`, which the encoder's `quat_apply_inverse` requires."""
     root_quat: np.ndarray
     """(S, 4) wxyz, z-up world, SMPL base rot removed."""
     joints_viz: np.ndarray

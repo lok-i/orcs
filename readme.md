@@ -3,9 +3,13 @@
 privileged oracle policies for humanoid control on [mjlab](https://github.com/mujocolab/mjlab). 
 
 `orcs` currently supports the following tasks
-1. `omni-object` locomanipualtion 
-2. `perceptive locomtoion` (todo)
- 
+
+| task | ids | what the adapter reads |
+|---|---|---|
+| uni-object loco-manipulation | `Orcs-Uolm-*` | object kinematics |
+| perceptive locomotion | `Orcs-PerLoco-*` | a terrain height scan |
+
+
 ## setup
 
 Run these from the repo root, inside your project env (conda or uv, Python 3.11):
@@ -30,6 +34,34 @@ python -c "import orcs, mjlab.tasks; from mjlab.tasks.registry import list_tasks
 
 Step 5 printing `[orcs.tasks.uolm] skipping task registration: ...` means step 2
 or 3 is incomplete — registration degrades instead of breaking `import orcs`.
+
+### perceptive locomotion (optional)
+
+Only `Orcs-PerLoco-*` needs this. Skip it and those tasks stay unregistered;
+everything else works.
+
+```bash
+bash scripts/setup/perceptive_locomotion.sh          # both sources, ~1.5 GB
+bash scripts/setup/perceptive_locomotion.sh --help   # per-source / no-SMPL / resume flags
+```
+
+It sparse-clones the two source datasets, shallow-clones the GRAIL code repo,
+**pauses** for you to drop in the licensed SMPL-X body models, then stages
+exactly the tiles the rosters name. Idempotent and resumable — a failed
+download is a re-run, not a restart.
+
+| step | fetches | into |
+|---|---|---|
+| 1 | OmniRetarget `robot-terrain.zip` + `models/` (~125 MB) | `$ORCS_DATA_ROOT/OmniRetarget_Dataset` |
+| 1 | GRAIL `curb/{robot,objects,object_usd,recon,meta}` (~1.1 GB; `video/` excluded — 13 GB nothing reads) | `$ORCS_DATA_ROOT/PhysicalAI-Robotics-Locomanipulation-GRAIL` |
+| 2 | [NVlabs/GRAIL](https://github.com/NVlabs/GRAIL) depth-1, no submodules (reference: retargeter + vendored SONIC) | `$ORCS_DEPS_ROOT/GRAIL` |
+| 3 | **you**: SMPL-X v1.1 NPZ from [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de) | `$ORCS_SMPLX_DIR/smplx/SMPLX_NEUTRAL.npz` |
+| 4 | staging (`stage_terrain_motions.py`, families/levels read from the roster) | `$ORCS_DATA_ROOT/terrain_motions/<source>` |
+
+Step 3 is the only manual one — SMPL-X is licensed, so it cannot be fetched for
+you. `--no-smpl` skips it, at the cost of `Orcs-PerLoco-Grail-AdaptSonic-Smpl`.
+Which tiles get staged comes from `src/orcs/tasks/perloco/rosters/<source>.toml`
+— the same file the env builds its grid from, so edit the roster, re-run, done.
 
 **Order matters, and re-running step 1 alone undoes step 2.** mjlab pins
 `rsl-rl-lib==5.4.0`; our fork declares `5.4.1`, so any pip run that re-resolves
@@ -100,18 +132,28 @@ Per gear_sonic's split (see `dependencies/GR00T-WholeBodyControl/docs/source/ref
 base-rot removed) + `smpl_joints_viz_w` (z-up world, ghost only). G1 wrist refs
 ride `motion.npz` `joint_pos` (zeros OK — degraded wrist orientation only).
 
-## PerLoco — perceptive locomotion (`Orcs-PerLoco-AdaptSonic`)
+## PerLoco — perceptive locomotion (`Orcs-PerLoco-*`)
 
 Same frozen SONIC base and LoRA adapter as UOLM; the adapter reads a TERRAIN
-height scan instead of object kinematics. Needs staged (terrain, motion) pairs
-— full usage in [tasks/perloco/readme.md](src/orcs/tasks/perloco/readme.md).
+height scan instead of object kinematics. Data first — see
+[perceptive locomotion (optional)](#perceptive-locomotion-optional) above; full
+usage in [tasks/perloco/readme.md](src/orcs/tasks/perloco/readme.md).
+
+Ids read `Orcs-PerLoco-<Source>-<Agent>[-<CommandSpace>]`:
+
+| task | source | agent / reference |
+|---|---|---|
+| `Orcs-PerLoco-OmRe-AdaptSonic` | OmniRetarget climb | frozen SONIC + LoRA on the height scan |
+| `Orcs-PerLoco-OmRe-TaRa` | " | from-scratch floor |
+| `Orcs-PerLoco-Grail-AdaptSonic` | GRAIL curb | " |
+| `Orcs-PerLoco-Grail-AdaptSonic-Smpl` | " | ...encoder reads the HUMAN, not the retarget |
+| `Orcs-PerLoco-Grail-TaRa` | " | from-scratch floor |
 
 ```bash
-python scripts/stage_terrain_motions.py --source omni   # once: 145 clips / 145 tiles
-python scripts/view_terrain_motions.py  --source omni   # inspect + curate -> :8080
+python scripts/view_terrain_motions.py --source omni    # inspect + curate -> :8080
 
-play  Orcs-PerLoco-AdaptSonic --num-envs 10 --agent initial
-train Orcs-PerLoco-AdaptSonic --num_envs 4096
+play  Orcs-PerLoco-OmRe-AdaptSonic --num-envs 10 --agent initial
+train Orcs-PerLoco-Grail-AdaptSonic --num_envs 4096
 ```
 
 Tasks are skipped (never raised) when the staging directory is absent:
@@ -136,6 +178,7 @@ Paths resolve through `orcs.core.paths` — override a root instead of moving fi
 | `ORCS_DATA_ROOT` | `<repo>/data` | datasets |
 | `ORCS_DEPS_ROOT` | `<repo>/dependencies` | synced deps |
 | `ORCS_ASSETS_SOURCE` | `<deps>/assets/source`, else the installed `assets` pkg | raises if set but wrong |
+| `ORCS_SMPLX_DIR` | `<deps>/GRAIL/imports/GEM-SMPL/inputs/checkpoints/body_models` | licensed SMPL-X models; staging only |
 | `ORCS_NCCDMAX` | `64` | mujoco-warp CCD workspace rows/world; raise it if stderr shows "CCD overflow" |
 
 ## Adding a task

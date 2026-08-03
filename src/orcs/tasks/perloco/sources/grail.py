@@ -41,7 +41,6 @@ from pathlib import Path
 
 import numpy as np
 
-from orcs.core.paths import DEPS_ROOT
 from orcs.tasks.perloco.terrain_spec import (
     BoxSpec,
     ClipSpec,
@@ -172,12 +171,12 @@ class GrailSource:
 
     def _smpl_of(self, pkl: Path) -> SmplSpec | None:
         """The `recon/` SMPL-X take behind a `robot/` clip, same stem."""
-        from orcs.tasks.perloco.sources.smplx_fk import SMPLX_DIR, smpl_channels
+        from orcs.tasks.perloco.sources.smplx_fk import smpl_channels, smplx_dir
 
         recon = pkl.parent.parent / "recon" / pkl.name
         if not recon.exists():
             raise FileNotFoundError(f"--smpl asked for, but no recon at {recon}")
-        return SmplSpec(*smpl_channels(recon, DEPS_ROOT / SMPLX_DIR))
+        return SmplSpec(*smpl_channels(recon, smplx_dir()))
 
     def clips(self) -> Iterable[ClipSpec]:
         import joblib

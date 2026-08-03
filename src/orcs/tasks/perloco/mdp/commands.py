@@ -63,7 +63,7 @@ class _TileMotionLoader(ConcatMotionLoader):
             dst.append(src)
 
     def _finalize_extra(self) -> None:
-        self.smpl_joints = torch.cat(self._sj)      # (T_tot, 24, 3) y-up, RAW
+        self.smpl_joints = torch.cat(self._sj)      # (T_tot, 24, 3) z-up, RAW
         self.smpl_root_quat = torch.cat(self._sq)   # (T_tot, 4) z-up, wxyz
         self.smpl_joints_viz = torch.cat(self._sv)  # (T_tot, 24, 3) z-up world
 
