@@ -17,6 +17,7 @@ ahead, must still import.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 
@@ -48,7 +49,14 @@ def _head(pkg: str) -> str | None:
 
 
 def check(strict: bool = False) -> dict[str, tuple[str, str]]:
-    """Report {pkg: (validated, live)} for every shared dep that drifted."""
+    """Report {pkg: (validated, live)} for every shared dep that drifted.
+
+    `ORCS_SKIP_DEP_CHECK=1` short-circuits it: this shells out to `git` once per
+    dep on every `import orcs`, which is free on a laptop and not free on a
+    cluster filesystem where a 4096-env job pays it per rank.
+    """
+    if os.environ.get("ORCS_SKIP_DEP_CHECK"):
+        return {}
     drift = {
         pkg: (want, live)
         for pkg, want in VALIDATED.items()

@@ -49,11 +49,11 @@ from orcs.tasks.uolm.robustness import apply_robustness
 from orcs.tasks.uolm.sensors import (
     CONTACT_GRAPH_BODY_NAMES,
     CONTACT_GRAPH_SENSOR_NAME,
+    GROUND_CONTACT_SENSOR_NAME,
     HAND_BODY_NAMES,
-    TERRAIN_CONTACT_SENSOR_NAME,
     UOLM_KILL_BODIES,
+    ground_contact_sensor,
     object_contact_graph_sensor,
-    terrain_contact_sensor,
 )
 
 _G1_DATASETS_ROOT = str(DATA_ROOT / "retargeted_motions/data/unitree_g1")
@@ -249,10 +249,10 @@ def uolm_env_cfg(
     cfg.actions["joint_pos"] = profile.action_cfg(robot)
 
     cfg.scene.sensors = (cfg.scene.sensors or ()) + (
-        terrain_contact_sensor(kill_bodies, kill_exclude),
+        ground_contact_sensor(kill_bodies, kill_exclude),
     )
     cfg.terminations["illegal_contact"].params["sensor_name"] = (
-        TERRAIN_CONTACT_SENSOR_NAME)
+        GROUND_CONTACT_SENSOR_NAME)
 
     # ── motion command (omni mode) + object contact-graph sensor ──
     cfg.commands["motion"] = ObjectMotionCommandCfg(

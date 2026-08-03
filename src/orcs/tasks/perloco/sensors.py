@@ -14,17 +14,17 @@ from __future__ import annotations
 from mjlab.sensor import GridPatternCfg, ObjRef, RayCastSensorCfg
 
 from orcs.core.sensors import (  # noqa: F401 — perloco's public sensor surface
+    GROUND_CONTACT_SENSOR_NAME,
     LOCOMANIP_KILL_BODIES,
     ROOT_KILL_BODIES,
     STRICT_KILL_BODIES,
-    TERRAIN_CONTACT_SENSOR_NAME,
-    terrain_contact_sensor,
+    ground_contact_sensor,
 )
 
 __all__ = [
     "TERRAIN_SCAN_SENSOR_NAME", "SCAN_MAX_DISTANCE",
     "PERLOCO_KILL_BODIES", "terrain_scan_sensor",
-    "TERRAIN_CONTACT_SENSOR_NAME", "terrain_contact_sensor",
+    "GROUND_CONTACT_SENSOR_NAME", "ground_contact_sensor",
     "ROOT_KILL_BODIES", "LOCOMANIP_KILL_BODIES", "STRICT_KILL_BODIES",
 ]
 

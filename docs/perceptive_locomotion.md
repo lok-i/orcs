@@ -1,15 +1,23 @@
 # perceptive locomotion (PerLoco)
 
-Status: **design, not built.** Read [ethos.md](ethos.md) first.
+Status: **built through phase 5** (both sources land; training is next). This file is the
+design record — how to RUN it is [tasks/perloco/readme.md](../src/orcs/tasks/perloco/readme.md).
+Read [ethos.md](ethos.md) first.
 
 **UOLM's adapter reads object kinematics. PerLoco's reads terrain kinematics.** Same frozen
 SONIC base, same LoRA adapter, same 3-stream layout, same multi-clip RSI motion command.
 There is no object. The new noun is a **tile**; the new verb is **pair a clip to it**.
 
 ```
-Orcs-PerLoco-AdaptSonic     frozen SONIC + LoRA, height-scan augmentation   ← THE task
-Orcs-PerLoco-TaRa           tabula-rasa floor, same env
+Orcs-PerLoco-OmRe-AdaptSonic          frozen SONIC + LoRA, height-scan augmentation
+Orcs-PerLoco-Grail-AdaptSonic         same, GRAIL curb                  ← run-1 task
+Orcs-PerLoco-Grail-AdaptSonic-Smpl    ...encoder reads the HUMAN instead
+Orcs-PerLoco-{OmRe,Grail}-TaRa        tabula-rasa floors, same envs
 ```
+
+The SOURCE joined the id at phase 5: provenance changes code (reader, format, joint order,
+conventions), so it earns a token. Terrain TYPE does not — curb and stair share a reader, so
+they are a roster line.
 
 ---
 
@@ -333,8 +341,8 @@ Budget: ~450 LOC **moved** into core, ~500 new in `perloco/`, ~580 new offline (
 | **1** | core promotion; uolm refactored onto it; ethos §4 amended | `play Orcs-Uolm-AdaptSonic --agent initial` **bit-identical to today** — it is a pure move, and rolling it is the only way to know |
 | **2** | `OmniRetargetSource` + `stage_terrain_motions.py` + `view_terrain_motions.py` + `perloco/readme.md` | 145 clips staged; viser shows each clip **on its box, not through it**; you curate the roster, it writes `exclude_motions` in orcs's existing grammar |
 | **3** ✅ | `TileTerrainCfg`, `TerrainMotionCommand`, sensors, obs, rewards/terminations; agents promoted to `core.rl` | ✅ `play Orcs-PerLoco-AdaptSonic --num-envs 10 --agent initial` — 5×29 grid, 483 geoms, `augmentation` 187+15, every env's clip verified to belong to its own tile |
-| **4** | `train --num_envs 4096` + z_scale curriculum | beats `Orcs-PerLoco-TaRa` on reward vs `_runtime`; promotion fires |
-| **5** | `GrailSource` + hfield tier 2 — **curb is unblocked now**; stairs when their `robot/` lands | curb clips render on their curb in the same viewer |
+| **4** | `train --num_envs 4096` + z_scale curriculum | beats `-TaRa` on reward vs `_runtime`; promotion fires |
+| **5** ✅ | `GrailSource` (curb, 63 clips / 8 tiles) + the `-Smpl` command space | ✅ zero-shot tracking reward 6.039 (robot) / 4.660 (smpl) vs OmRe's 4.718; skeleton renders on its curb |
 
 **Phase 2's viewer is a deliverable, not a convenience** — the UOLM dataset ships a per-sample
 `retargeted_motion.mp4`; OmniRetarget ships nothing, so this is *how the roster gets chosen*.
@@ -352,11 +360,67 @@ from its `qpos` reproduces the staged `body_pos_w` to 0.000000 m.
 
 | | |
 |---|---|
-| name | `PerLoco` — `Orcs-PerLoco-{AdaptSonic,TaRa}` |
+| name | `PerLoco` — `Orcs-PerLoco-<Source>-<Agent>[-Smpl]` |
 | terrain | boxes wherever possible, hfield for the rest, CoACD never |
-| data | build on OmniRetarget `robot-terrain` (145 clips); GRAIL curb (1769, ready) then stairs at phase 5; no slope, no `robot-object-terrain` |
+| data | OmniRetarget `robot-terrain` (145 clips); GRAIL curb (8 tiles rostered of 1769 takes); stairs when they stage; no slope, no `robot-object-terrain` |
 | sharing | via `core/`, never task→task; costs an ethos §4 amendment |
 | tile mask | **read at reset from `terrain_levels/types`, never cached** — the curriculum mutates it |
-| anchor tubes | `bad_anchor_pos/ori` ON |
+| anchor tubes | `bad_anchor_pos/ori` ON, **width per source** — see §9 |
 | scan | raw 187, no encoder; frame a kwarg, default `pelvis` |
-| roster size | a kwarg; chosen from the phase-2 viewer; affects world extent only |
+| roster size | a roster line; chosen from the phase-2 viewer; affects world extent only |
+
+---
+
+## 9. run-1 regime (2026-08-02)
+
+The first training run asks ONE question: **can a frozen WBC be adapted to terrain
+constraints at all?** That is a behavior question, so nothing that makes it a sim2real
+question is on.
+
+| knob | setting | rationale |
+|---|---|---|
+| rewards | **8 terms** | the 6 tracking terms are byte-identical to SONIC's `tracking/base`, plus `action_rate_l2` (−0.1) and `joint_pos_limits` (−1.0) |
+| DR + obs noise | **off**, one switch (`env_cfg.SIM2REAL`) | see below |
+| anchor tubes | GRAIL 0.2 m / 0.3 rad · OmRe 0.4 / 0.8 | see below |
+
+**What NVIDIA runs, for calibration.** GRAIL ships no reward code — `grail/` is a data
+pipeline and all its RL is vendored SONIC (`imports/SONIC`). Its terrain entry point,
+`config/exp/manager/universal_token/scene/terrain_tracking.yaml`, picks the stock
+`rewards: tracking/base_5point_local_feet_acc`. So the four terms we do not have are:
+
+| term | weight / std | why it is not in yet |
+|---|---|---|
+| `tracking_vr_5point_local` | **+2.0 / 0.1** | their heaviest term; anchor-local 5-point over torso+0.5z, 2 wrists, 2 ankles. The one worth adding if run 1 underfits limb placement |
+| `undesired_contacts` | −0.1, 1 N | we use a hard root-only `illegal_contact` termination instead |
+| `anti_shake_ang_vel` | −5e-3, wrists+head, deadzone 1.5 rad/s | regularizer |
+| `feet_acc` (`joint_acc_l2` on `.*ankle.*`) | −2.5e-7 | regularizer |
+
+Their `joint_limit` is −10.0 against our −1.0. Their terminations are much tighter
+(`anchor_pos` 0.15, `anchor_ori` 0.2, plus `ee_body_pos_adaptive` and `foot_pos_xyz`).
+
+**Their height map is ours**: root origin, heading-aligned (yaw only), downward,
+`size 1.5` @ `res 0.15` → 11×11 = 121. Ours is 1.6×1.0 @ 0.1 → 187 at the pelvis. Same
+convention, finer grid. The real divergence is the CONSUMER — theirs feeds the tokenizer
+encoder through a conv2d projector, ours feeds the adapter. That difference IS the orcs
+thesis, so it is deliberate.
+
+**Why no domain randomization.** PerLoco never had one: `events` is reset + the update
+counter, and uolm's `apply_robustness` is object-specific. Obs noise was likewise inert —
+the groups set `enable_corruption=True` while mocke's `policy_obs_terms()` defaults
+`noisy=False`, so no term ever carried a `.noise`. `SIM2REAL = False` makes that state
+legible and gives it one name; flipping it turns on proprio noise. **NVIDIA agrees**: their
+terrain config nulls all five event terms and sets `enable_corruption: false`. A push/mass
+domain for perloco does not exist yet and belongs behind the same switch when it lands.
+
+**Why the anchor tubes differ by source.** `bad_anchor_pos` is pelvis-**z** drift, not a
+3-D tube. Frozen base, 250 steps × 32 envs:
+
+| source | \|dz\| p50 | p90 | ori p50 | p90 |
+|---|---|---|---|---|
+| GRAIL curb | 0.018 m | 0.281 | 0.101 rad | 0.433 |
+| OmniRetarget climb | 0.030 m | **0.562** | 0.149 rad | **1.491** |
+
+0.2 / 0.3 sits at roughly GRAIL's p90 — it kills divergence. On OmRe it would kill the
+**behaviour**: climbing means large vertical excursions, which is what the original 0.4
+comment said and what the p90 confirms. So the thresholds are `_core` parameters with
+per-source defaults, not a global constant.

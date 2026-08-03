@@ -5,13 +5,17 @@ orcs itself is not a task. Three layers, no upward imports:
 
   core     robot-generic, task-blind infra — paths, mjlab compat, clip
            discovery + timeline, the multi-clip motion command, obs atoms,
-           the PPO spine. Knows joints/bodies/clips; never objects or terrains.
+           the PPO spine, task registration. Knows joints/bodies/clips; never
+           objects or terrains.
   assets   robots + objects as mjlab entity cfgs (g1, objects).
   tasks    one self-registering sub-package per task:
              tasks.uolm      Uni-Object Loco-Manipulation
                              (Orcs-Uolm-AdaptSonic, -TaRa, -AdaptSonic-Smpl)
              tasks.perloco   Perceptive Locomotion over staged (terrain, motion)
-                             pairs (Orcs-PerLoco-AdaptSonic, -TaRa)
+                             pairs (Orcs-PerLoco-{OmRe,Grail}-AdaptSonic,
+                             -TaRa, and Grail's -AdaptSonic-Smpl)
+  cli      console entry points (`orcs-stage-terrain`, ...) — above `tasks`,
+           imported by nothing.
 
 The two tasks share everything except ONE obs group: uolm's adapter reads
 object kinematics, perloco's reads a terrain height scan. That the rest — the

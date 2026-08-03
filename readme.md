@@ -96,23 +96,22 @@ the env nullifies rewards and rolls the frozen base over SMPL motion.
 **Quicktest** — roll one clip (self-contained, stages a scratch dataset):
 
 ```bash
-# a shipped SONIC sample
-python scripts/rollout_smpl.py \
-  --smpl dependencies/GR00T-WholeBodyControl/sample_data/smpl_filtered/walk_forward_amateur_001__A001_M.pkl \
-  --viewer native
-
-python scripts/rollout_smpl.py            # no args -> synthetic standing clip
+orcs-rollout-smpl                                   # synthetic standing clip
+orcs-rollout-smpl --smpl <clip>.pkl --viewer native # a SONIC smpl pkl
 ```
 
-** persistent dataset** — convert a directory of SONIC smpl pkls, then play:
+**Persistent dataset** — convert a directory of SONIC smpl pkls, then play:
 
 ```bash
-python scripts/build_smpl_dataset.py \
-  --src dependencies/GR00T-WholeBodyControl/sample_data/smpl_filtered
+orcs-build-smpl --src <dir-of-smpl-pkls>
 # -> data/smpl_motions/<clip>/sample0/*.npz
 
 play Orcs-Uolm-AdaptSonic-Smpl --agent initial --viewer native   # multi-clip rollout
 ```
+
+Source pkls are **not** in `deps.lock` — bring your own (SONIC's
+`sample_data/smpl_filtered`, or any pkl with `pose_aa`/`transl`/`smpl_joints`).
+Every `orcs-*` command has a `python scripts/<name>.py` twin.
 
 Object motion is a static nominal placeholder unless a matching object npz is
 passed (`--object-dir <dir>`, matched by clip stem) — no smpl+object clips exist
@@ -120,12 +119,21 @@ yet, so the object stream is a placeholder to exercise the plumbing.
 
 ### SMPL data conventions
 
-Per gear_sonic's split (see `dependencies/GR00T-WholeBodyControl/docs/source/references/conventions.md`):
+Per gear_sonic's split:
 
 | field | frame | used for |
 |---|---|---|
 | `smpl_joints` (T,24,3) | **z-up, root-centered, RAW** | encoder input (never converted) |
 | `pose_aa` root, `transl` | SMPL-native **y-up** | converted to z-up for root quat / ghost |
+
+**The trap, and it costs a debugging round every time.** The encoder computes
+`quat_apply_inverse(root_q, joints)`, so joints and root must land in ONE
+frame — a mismatch never errors, it silently redefines the leading 72 dims as a
+body frame that rotates with heading. gear_sonic's `smpl_y_up` flag converts
+the **root only** (`motion_lib_base.py` loads `smpl_joints` untouched), so a pkl
+with a y-up `pose_aa` still ships z-up joints. Measured on 63 GRAIL curb clips,
+zero-shot tracking reward: z-up **4.735** vs y-up **0.348** (g1 encoder 5.677).
+The contract lives once in `orcs.core.data.smpl`.
 
 `orcs.tasks.uolm.smpl_data.load_smpl_clip` handles the conversion; the staged
 `smpl_motion.npz` carries `smpl_joints` (RAW) + `smpl_root_quat_w` (z-up, wxyz,
@@ -150,23 +158,30 @@ Ids read `Orcs-PerLoco-<Source>-<Agent>[-<CommandSpace>]`:
 | `Orcs-PerLoco-Grail-TaRa` | " | from-scratch floor |
 
 ```bash
-python scripts/view_terrain_motions.py --source omni    # inspect + curate -> :8080
+orcs-view-terrain --source omni                         # inspect + curate -> :8080
 
 play  Orcs-PerLoco-OmRe-AdaptSonic --num-envs 10 --agent initial
 train Orcs-PerLoco-Grail-AdaptSonic --num_envs 4096
 ```
 
-Tasks are skipped (never raised) when the staging directory is absent:
+Tasks are skipped (never raised) when the staging directory is absent — **per
+task**, so one unstaged dataset costs one row:
 
 ```bash
-python -c "import orcs; print(orcs.tasks.perloco.SKIP_REASON)"
+python -c "import orcs; print(orcs.tasks.perloco.SKIP_REASON)"   # {} = all good
 ```
 
-## Lint
+## Lint + test
 
 ```bash
-ruff check src scripts     # config: pyproject [tool.ruff.lint]
+ruff check src scripts tests   # config: pyproject [tool.ruff.lint]
+pytest                         # packaging + registration contracts, ~30 s, no GPU
 ```
+
+`pytest` does not test behavior — that is `play <task> --agent initial`. It
+tests the two things a checkout cannot self-report: that a **non-editable**
+install still contains everything the runtime needs, and that `import orcs`
+degrades to `SKIP_REASON` instead of raising.
 
 ## Environment overrides
 
@@ -180,9 +195,21 @@ Paths resolve through `orcs.core.paths` — override a root instead of moving fi
 | `ORCS_ASSETS_SOURCE` | `<deps>/assets/source`, else the installed `assets` pkg | raises if set but wrong |
 | `ORCS_SMPLX_DIR` | `<deps>/GRAIL/imports/GEM-SMPL/inputs/checkpoints/body_models` | licensed SMPL-X models; staging only |
 | `ORCS_NCCDMAX` | `64` | mujoco-warp CCD workspace rows/world; raise it if stderr shows "CCD overflow" |
+| `ORCS_SKIP_DEP_CHECK` | unset | skips the shared-dep git probe at import (2 subprocesses; matters per-rank on a cluster FS) |
 
 ## Adding a task
 
 Drop a package under `src/orcs/tasks/` that registers its envs on import, then
 add one line to `src/orcs/__init__.py`. Layer contract and full checklist:
 [docs/ethos.md](docs/ethos.md).
+
+## Consuming orcs from another repo
+
+`pip install -e dependencies/orcs` (or `git+…`). Three things a consumer gets
+that are easy to miss:
+
+| | |
+|---|---|
+| **paths auto-resolve** | `orcs.core.paths` walks up for the nearest repo root that HAS `data/` — a host vendoring orcs under `dependencies/` is found with no env vars and no import-order coupling |
+| **your lock wins** | `mocke`/`rsl_rl`/`assets` are one editable install per env, so the CONSUMER decides their SHAs. `orcs.core.deps` prints drift at import — believe it, especially for `mocke` (bit-coupled to the ported SONIC ckpts) |
+| **the data pipeline ships** | `orcs-stage-terrain` & co. are package entry points, not `scripts/` — available from a wheel |

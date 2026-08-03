@@ -24,58 +24,43 @@ The SOURCE is in the id because provenance is what changes code: reader, file
 format, joint order, conventions. The TERRAIN TYPE is not — curb and stair are
 the same reader and the same env, so they are a roster line, not a task.
 
-Registration needs staged data (`scripts/stage_terrain_motions.py`). Absent, it
-is SKIPPED, never raised — an incomplete checkout must not break `import orcs`
-for every consumer downstream. A missing task is the signal; `SKIP_REASON` is
-the explanation:
+Registration needs staged data (`scripts/setup/perceptive_locomotion.sh`).
+Absent, it is SKIPPED, never raised — an incomplete checkout must not break
+`import orcs` for every consumer downstream, and each row registers on its own
+(the `-Smpl` row needs `--smpl` staging the others do not). A missing task is
+the signal; `SKIP_REASON` is the explanation:
 
     python -c "import orcs; print(orcs.tasks.perloco.SKIP_REASON)"
 """
 
 from functools import partial
 
-from mjlab.tasks.registry import register_mjlab_task
-
+from orcs.core.registry import register_all
 from orcs.core.rl import SMPL_CKPT, adapt_sonic_agent_cfg, tara_agent_cfg
 from orcs.tasks.perloco.env_cfg import grail_env_cfg, omni_env_cfg
 
-SKIP_REASON: str | None = None
-"""Why registration was skipped, or None when every task registered."""
-
 # The agents come from `orcs.core.rl` — a task picks one and names its
-# experiment, it never declares PPO. See that module's docstring. A row is
-# (id, env factory, agent factory, experiment): both factories pre-bound, so
-# the loop below has no per-task branch to grow.
+# experiment, it never declares PPO. See that module's docstring. Both
+# factories arrive pre-bound, so this table has no per-task branch to grow.
 _smpl_sonic = partial(adapt_sonic_agent_cfg, base_checkpoint=SMPL_CKPT)
 
 _TASKS = (
     ("Orcs-PerLoco-OmRe-AdaptSonic",
-     partial(omni_env_cfg, agent="sonic"), adapt_sonic_agent_cfg,
-     "orcs_perloco_omre"),
+     partial(omni_env_cfg, agent="sonic"),
+     partial(adapt_sonic_agent_cfg, "orcs_perloco_omre")),
     ("Orcs-PerLoco-OmRe-TaRa",
-     partial(omni_env_cfg, agent="tara"), tara_agent_cfg,
-     "orcs_perloco_omre_tara"),
+     partial(omni_env_cfg, agent="tara"),
+     partial(tara_agent_cfg, "orcs_perloco_omre_tara")),
     ("Orcs-PerLoco-Grail-AdaptSonic",
-     partial(grail_env_cfg, agent="sonic"), adapt_sonic_agent_cfg,
-     "orcs_perloco_grail"),
+     partial(grail_env_cfg, agent="sonic"),
+     partial(adapt_sonic_agent_cfg, "orcs_perloco_grail")),
     ("Orcs-PerLoco-Grail-AdaptSonic-Smpl",
-     partial(grail_env_cfg, agent="sonic", command_space="smpl"), _smpl_sonic,
-     "orcs_perloco_grail_smpl"),
+     partial(grail_env_cfg, agent="sonic", command_space="smpl"),
+     partial(_smpl_sonic, "orcs_perloco_grail_smpl")),
     ("Orcs-PerLoco-Grail-TaRa",
-     partial(grail_env_cfg, agent="tara"), tara_agent_cfg,
-     "orcs_perloco_grail_tara"),
+     partial(grail_env_cfg, agent="tara"),
+     partial(tara_agent_cfg, "orcs_perloco_grail_tara")),
 )
 
-# Each task registers independently: staged data for one must not block the
-# other (the -Smpl row needs `--smpl` staging the others do not). SKIP_REASON
-# keeps the last failure.
-for _task_id, _env_cfg, _agent_cfg, _exp in _TASKS:
-    try:
-        register_mjlab_task(
-            task_id=_task_id,
-            env_cfg=_env_cfg(),
-            play_env_cfg=_env_cfg(play=True),
-            rl_cfg=_agent_cfg(_exp),
-        )
-    except (FileNotFoundError, NotADirectoryError, OSError) as e:
-        SKIP_REASON = f"{_task_id}: {type(e).__name__}: {e}"
+SKIP_REASON: dict[str, str] = register_all(_TASKS)
+"""{task_id: why it could not register}. Empty when every task registered."""

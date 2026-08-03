@@ -44,9 +44,9 @@ from orcs.tasks.perloco.mdp.commands import TerrainMotionCommandCfg
 from orcs.tasks.perloco.observation_cfgs import ObsCtx, sonic_obs, tara_obs
 from orcs.tasks.perloco.roster import Roster, load_roster
 from orcs.tasks.perloco.sensors import (
+    GROUND_CONTACT_SENSOR_NAME,
     PERLOCO_KILL_BODIES,
-    TERRAIN_CONTACT_SENSOR_NAME,
-    terrain_contact_sensor,
+    ground_contact_sensor,
     terrain_scan_sensor,
 )
 from orcs.tasks.perloco.terrain import TILE_SIZE, terrain_generator_cfg
@@ -65,6 +65,27 @@ _MOTION_PAD_EPS_SEC = 2.0
 """Post-motion hold padding — the episode, not the motion, owns resets."""
 
 _P = {"command_name": "motion"}
+
+SIM2REAL = False
+"""THE robustness switch, and the one place it lives.
+
+**Off is the current state, not a change.** PerLoco has never carried a
+robustness domain: `events` is reset + the update counter, and uolm's
+`apply_robustness` is object-specific and never called here. Obs noise was
+likewise inert — the groups set `enable_corruption=True`, but mocke's
+`policy_obs_terms()` defaults `noisy=False`, so no term ever carried a `.noise`
+and the flag did nothing. This constant makes that legible and gives the
+regime one name.
+
+Run 1 asks "can a frozen WBC be adapted to terrain constraints at all", which
+is a behavior question — a domain that makes it harder answers a different one.
+NVIDIA's own GRAIL terrain release agrees: it nulls all five event terms and
+sets `enable_corruption: false`.
+
+Flipping this to True turns on proprio noise. A push/mass/friction domain for
+perloco does NOT exist yet — that is sim2real work, and it belongs behind this
+same switch when it lands.
+"""
 
 
 def staged_root(source: str):
@@ -109,6 +130,8 @@ def _core(
     robot_cfg: Callable[[], EntityCfg] | None,
     kill_bodies: tuple[str, ...],
     kill_exclude: tuple[str, ...],
+    anchor_pos_thresh: float,
+    anchor_ori_thresh: float,
     command_space: str = "robot",
 ) -> ManagerBasedRlEnvCfg:
     """Everything both sources agree on."""
@@ -146,7 +169,7 @@ def _core(
             "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
             "illegal_contact": TerminationTermCfg(
                 func=illegal_contact,
-                params={"sensor_name": TERRAIN_CONTACT_SENSOR_NAME}),
+                params={"sensor_name": GROUND_CONTACT_SENSOR_NAME}),
         },
         viewer=ViewerConfig(
             origin_type=ViewerConfig.OriginType.WORLD,
@@ -166,7 +189,7 @@ def _core(
     cfg.scene.entities["robot"] = robot
     cfg.actions["joint_pos"] = profile.action_cfg(robot)
     cfg.scene.sensors = (
-        terrain_contact_sensor(kill_bodies, kill_exclude),
+        ground_contact_sensor(kill_bodies, kill_exclude),
         terrain_scan_sensor(scan_frame, debug_vis=play),
     )
 
@@ -190,11 +213,11 @@ def _core(
     cfg.terminations.update({
         # Anchor tubes are ON here (uolm drops them): with no object dragging
         # the root off the reference, a robot far from its anchor is simply
-        # failing to track. Loose enough for climbing's vertical excursions.
+        # failing to track. Width is PER SOURCE — see the two factories.
         "bad_anchor_pos": TerminationTermCfg(
-            func=mdp.bad_anchor_pos, params={**_P, "threshold": 0.4}),
+            func=mdp.bad_anchor_pos, params={**_P, "threshold": anchor_pos_thresh}),
         "bad_anchor_ori": TerminationTermCfg(
-            func=mdp.bad_anchor_ori, params={**_P, "threshold": 0.8}),
+            func=mdp.bad_anchor_ori, params={**_P, "threshold": anchor_ori_thresh}),
         "exceeded_motion": TerminationTermCfg(
             func=mdp.exceeded_motion_by_eps, time_out=True,
             params={**_P, "epsilon_steps": int(_MOTION_PAD_EPS_SEC / step_dt)}),
@@ -224,7 +247,7 @@ def _core(
         "joint_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     }
 
-    ctx = ObsCtx(p=_P)
+    ctx = ObsCtx(p=_P, noisy=SIM2REAL)
     # command_space "robot"/"smpl" -> mocke's encoder mode "g1"/"smpl"
     cfg.observations = (
         tara_obs(ctx) if agent == "tara"
@@ -246,12 +269,19 @@ def omni_env_cfg(
     robot_cfg: Callable[[], EntityCfg] | None = None,
     kill_bodies: tuple[str, ...] = PERLOCO_KILL_BODIES,
     kill_exclude: tuple[str, ...] = (),
+    anchor_pos_thresh: float = 0.4,
+    anchor_ori_thresh: float = 0.8,
 ) -> ManagerBasedRlEnvCfg:
     """OmniRetarget robot-terrain: climb families x z_scale levels.
 
     `roster` swaps `rosters/omni.toml` for another file — the only supported way
     to change which tiles a run sees, and how an eval isolates a subset on
     byte-identical infrastructure.
+
+    Wide anchor tubes, unlike GRAIL's: climbing MEANS large pelvis-z excursions,
+    and the frozen base spends a third of its steps past 0.2 m of |dz| (p90
+    0.562 m, vs GRAIL's 0.281) doing the task correctly. Tightening here would
+    terminate the behaviour instead of the failure.
     """
     r, motion_file, max_len = _resolve("omni", roster)
     return _core(
@@ -259,6 +289,7 @@ def omni_env_cfg(
         agent=agent, play=play, scan_frame=scan_frame, tile_size=tile_size,
         num_steps_per_env=num_steps_per_env, robot_cfg=robot_cfg,
         kill_bodies=kill_bodies, kill_exclude=kill_exclude,
+        anchor_pos_thresh=anchor_pos_thresh, anchor_ori_thresh=anchor_ori_thresh,
     )
 
 
@@ -274,6 +305,8 @@ def grail_env_cfg(
     robot_cfg: Callable[[], EntityCfg] | None = None,
     kill_bodies: tuple[str, ...] = PERLOCO_KILL_BODIES,
     kill_exclude: tuple[str, ...] = (),
+    anchor_pos_thresh: float = 0.2,
+    anchor_ori_thresh: float = 0.3,
 ) -> ManagerBasedRlEnvCfg:
     """GRAIL curb: one terrain per column, ONE row — there is no difficulty axis.
 
@@ -286,6 +319,12 @@ def grail_env_cfg(
     GRAIL ships both halves of every take. (uolm's `-Smpl` is rollout-only for
     exactly the opposite reason: its SMPL clips have no robot retarget, so its
     motion.npz is a placeholder and there is nothing to reward.)
+
+    Tighter anchor tubes than OmniRetarget's (0.2 m / 0.3 rad vs 0.4 / 0.8).
+    Curb-walking has no legitimate vertical excursion, and the frozen base
+    tracks it to |dz| p50 0.018 m / ori p50 0.101 rad — so 0.2/0.3 sits at
+    roughly its p90 and kills divergence, not the behaviour. (`bad_anchor_pos`
+    is pelvis-z drift, not a 3-D tube.)
     """
     r, motion_file, max_len = _resolve("grail", roster, command_space == "smpl")
     return _core(
@@ -293,6 +332,7 @@ def grail_env_cfg(
         agent=agent, play=play, scan_frame=scan_frame, tile_size=tile_size,
         num_steps_per_env=num_steps_per_env, robot_cfg=robot_cfg,
         kill_bodies=kill_bodies, kill_exclude=kill_exclude,
+        anchor_pos_thresh=anchor_pos_thresh, anchor_ori_thresh=anchor_ori_thresh,
         command_space=command_space,
     )
 

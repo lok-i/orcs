@@ -46,8 +46,23 @@ where = ["src"]
 [project.entry-points."mjlab.tasks"]
 orcs = "orcs"
 
+# The data pipeline ships INSIDE the package (`orcs.cli`), so a pip-installed
+# orcs can produce the data it consumes. `scripts/*.py` are thin wrappers.
+[project.scripts]
+orcs-stage-terrain = "orcs.cli.stage_terrain_motions:main"
+orcs-view-terrain = "orcs.cli.view_terrain_motions:main"
+orcs-build-smpl = "orcs.cli.build_smpl_dataset:main"
+orcs-rollout-smpl = "orcs.cli.rollout_smpl:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]
+# Staging-time only — the runtime never imports these, so a training env that
+# consumes already-staged data does not need them.
+perloco = [
+    "usd-core",   # GRAIL tile geometry (`from pxr import Usd`)
+    "smplx",      # GRAIL --smpl body-model forward pass
+    "viser",      # orcs-view-terrain
+]
 
 [tool.ruff]
 src = ["src"]

@@ -17,11 +17,11 @@ from mjlab.sensor import ContactSensorCfg
 from mjlab.sensor.contact_sensor import ContactMatch
 
 from orcs.core.sensors import (  # noqa: F401 — uolm's public sensor surface
+    GROUND_CONTACT_SENSOR_NAME,
     LOCOMANIP_KILL_BODIES,
     ROOT_KILL_BODIES,
     STRICT_KILL_BODIES,
-    TERRAIN_CONTACT_SENSOR_NAME,
-    terrain_contact_sensor,
+    ground_contact_sensor,
 )
 
 CONTACT_GRAPH_BODY_NAMES = (

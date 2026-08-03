@@ -19,39 +19,33 @@ orcs under `dependencies/` is found automatically — no env vars, no import-ord
 coupling. When the data genuinely is absent (a fresh checkout before
 `sync_dependencies.sh` / `make_object_models.py`), registration is skipped
 rather than raising: an incomplete checkout must not break `import orcs` for
-every consumer downstream.
+every consumer downstream. Each row registers on its own, so one unstaged
+dataset costs one task, not three.
 
 A missing task is the signal; `SKIP_REASON` is the explanation:
 
     python -c "import orcs; print(orcs.tasks.uolm.SKIP_REASON)"
 """
 
-from mjlab.tasks.registry import register_mjlab_task
+from functools import partial
 
+from orcs.core.registry import register_all
 from orcs.core.rl import SMPL_CKPT, adapt_sonic_agent_cfg, tara_agent_cfg
 from orcs.tasks.uolm.env_cfg import uolm_env_cfg
-
-SKIP_REASON: str | None = None
-"""Why registration was skipped, or None when every task registered."""
 
 # The agents come from `orcs.core.rl` — a task picks one and names its
 # experiment, it never declares PPO. See that module's docstring.
 _TASKS = (
-    ("Orcs-Uolm-AdaptSonic", {},
-     lambda: adapt_sonic_agent_cfg("orcs_uolm")),
-    ("Orcs-Uolm-TaRa", {"agent": "tara"},
-     lambda: tara_agent_cfg("orcs_uolm_tara")),
-    ("Orcs-Uolm-AdaptSonic-Smpl", {"command_space": "smpl"},
-     lambda: adapt_sonic_agent_cfg("orcs_uolm_smpl", base_checkpoint=SMPL_CKPT)),
+    ("Orcs-Uolm-AdaptSonic",
+     partial(uolm_env_cfg),
+     partial(adapt_sonic_agent_cfg, "orcs_uolm")),
+    ("Orcs-Uolm-TaRa",
+     partial(uolm_env_cfg, agent="tara"),
+     partial(tara_agent_cfg, "orcs_uolm_tara")),
+    ("Orcs-Uolm-AdaptSonic-Smpl",
+     partial(uolm_env_cfg, command_space="smpl"),
+     partial(adapt_sonic_agent_cfg, "orcs_uolm_smpl", base_checkpoint=SMPL_CKPT)),
 )
 
-try:
-    for _task_id, _kw, _rl in _TASKS:
-        register_mjlab_task(
-            task_id=_task_id,
-            env_cfg=uolm_env_cfg(**_kw),
-            play_env_cfg=uolm_env_cfg(**_kw, play=True),
-            rl_cfg=_rl(),
-        )
-except (FileNotFoundError, NotADirectoryError, OSError) as e:
-    SKIP_REASON = f"{type(e).__name__}: {e}"
+SKIP_REASON: dict[str, str] = register_all(_TASKS)
+"""{task_id: why it could not register}. Empty when every task registered."""
