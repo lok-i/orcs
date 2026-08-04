@@ -103,20 +103,38 @@ def sonic_adapter_actor(
     alpha: float = 1.0,
     base_checkpoint: str = SONIC_CKPT,
     adapter_obs_group: str = "augmentation",
+    std_scale: float | dict[str, float] = 1.0,
 ) -> dict:
     """Frozen SONIC base + zero-init LoRA adapter on the decoder.
 
     Construction reproduces the base bit-exact; PPO moves only the adapter.
     `adapter_obs_group` is the task's conditioning stream — THE extension seam.
+
+    ⚠ `alpha` is the delta's SCALE and rsl_rl divides it by rank
+    (`Adapter.scale = alpha / rank`), so the two are NOT independent: raising
+    rank at fixed alpha SHRINKS the update. Pass `alpha=rank` to hold the scale
+    at 1.0. The defaults below are scale 1/16 — every task that has trained on
+    them is calibrated to that, so change them per-task, not here.
+
+    `std_scale` multiplies the ckpt's per-dim `action_std` (scalar, or
+    {joint-name regex: factor}). It is the ONLY sanctioned way to buy
+    exploration off a frozen base: std never enters encoder/FSQ/decoder, so the
+    base's mean action and construction bit-exactness are untouched. The action
+    term's `scale` is NOT an alternative — the base's output is calibrated to
+    it, and on the wrists it is actuator-bound (5 Nm / kp) anyway, so a larger
+    target only saturates.
     """
     return {
         "class_name": "rsl_rl.models.SonicWithAdapterModel",
-        "distribution_cfg": DIST_BASE_BAND,
+        "distribution_cfg": dict(DIST_BASE_BAND),
         "adapter_obs_group": adapter_obs_group,
         "rank": rank,
         "alpha": alpha,
         "base_checkpoint": base_checkpoint,
         "freeze_base": True,
+        # Omitted at 1.0 (the no-op) so every task that does not ask for it
+        # keeps a byte-identical actor cfg — and a byte-identical wandb config.
+        **({"std_scale": std_scale} if std_scale != 1.0 else {}),
     }
 
 
@@ -128,7 +146,7 @@ def mlp_actor(hidden_dims: tuple[int, ...] = WBC_HIDDEN) -> RslRlModelCfg:
         hidden_dims=hidden_dims,
         obs_normalization=True,
         activation="elu",
-        distribution_cfg=DIST_LEARNABLE,
+        distribution_cfg=dict(DIST_LEARNABLE),
     )
 
 
@@ -150,7 +168,7 @@ def sidecar_actor(
         "hidden_dims": list(WBC_HIDDEN),
         "activation": "elu",
         "obs_normalization": True,
-        "distribution_cfg": DIST_LEARNABLE,
+        "distribution_cfg": dict(DIST_LEARNABLE),
         "sidecar_obs_group": sidecar_obs_group,
         "sidecar_hidden_dims": list(sidecar_hidden_dims),
         "sidecar_activation": "elu",
@@ -173,6 +191,7 @@ def adapt_sonic_agent_cfg(
     alpha: float = 1.0,
     base_checkpoint: str = SONIC_CKPT,
     adapter_obs_group: str = "augmentation",
+    std_scale: float | dict[str, float] = 1.0,
 ) -> RslRlOnPolicyRunnerCfg:
     """AdaptSonic — frozen SONIC base + LoRA adapter on the decoder. THE agent.
 
@@ -183,7 +202,7 @@ def adapt_sonic_agent_cfg(
     cfg = runner(experiment_name)
     cfg.actor = sonic_adapter_actor(  # type: ignore[assignment]
         rank=rank, alpha=alpha, base_checkpoint=base_checkpoint,
-        adapter_obs_group=adapter_obs_group)
+        adapter_obs_group=adapter_obs_group, std_scale=std_scale)
     return cfg
 
 

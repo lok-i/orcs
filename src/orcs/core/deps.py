@@ -23,7 +23,7 @@ from pathlib import Path
 
 VALIDATED: dict[str, str] = {
     "mocke": "004d4c02bb1be65c67688f25f95197c865f83d6f",
-    "rsl_rl": "30aef22e5aea1477f133f966da1aed202c42c308",
+    "rsl_rl": "4f8b9b3b657f27397a3337dabafb7ef7398387b4",
 }
 """SHAs orcs was last validated against. Bump only after `play Orcs-Uolm-AdaptSonic
 --agent initial` still rolls the frozen base bit-exact."""
