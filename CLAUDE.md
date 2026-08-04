@@ -12,11 +12,32 @@ an encyclopedia** — read the linked docs; do not grow this file with findings.
 
 One-line version: `orcs` (Oracle Robot Control Synthesis) trains privileged/oracle policies for
 humanoid control on mjlab. It is **not** a task — tasks self-register under `src/orcs/tasks/`.
-Today: **UOLM** (`src/orcs/tasks/uolm/`, Uni-Object Loco-Manipulation).
+
+| task | what | docs |
+|---|---|---|
+| **UOLM** `tasks/uolm/` | Uni-Object Loco-Manipulation — adapter reads OBJECT kinematics | this file, §UOLM mechanisms |
+| **PerLoco** `tasks/perloco/` | Perceptive Locomotion over staged (terrain, motion) pairs — adapter reads a TERRAIN height scan | [docs/perceptive_locomotion.md](docs/perceptive_locomotion.md), [tasks/perloco/readme.md](src/orcs/tasks/perloco/readme.md) |
+
+The two differ in exactly ONE obs group (`augmentation`). Everything else — frozen base,
+multi-clip command, agents, critic — is literally shared code. That is the thesis, not a
+coincidence; a term duplicated across the two is a bug.
+
+**Agents live in `core/rl.py`, never in a task.** `adapt_sonic_agent_cfg` / `tara_agent_cfg` /
+`sidecar_agent_cfg` — a task picks one and names its experiment. There is no `rl_cfg.py` under
+any task, and adding one back is how the two definitions of "PPO" start to drift.
+(`tests/test_registration.py` asserts the absence.)
+
+**Executable code lives in `orcs/cli/`, never in `scripts/`.** `scripts/` does not ship in a
+wheel, so logic there is unreachable from a `pip install`; the four `scripts/*.py` are
+three-line wrappers over `[project.scripts]` entry points and `tests/test_packaging.py` keeps
+them that way. Same rule for non-`.py` runtime files (`rosters/*.toml`): declare them in
+`[tool.setuptools.package-data]` or they exist only in your checkout.
 
 ## Hard rules
 
-1. **No test suite** (pytest is declared in `[dev]`, unused). Verify by running
+1. **`pytest` tests CONTRACTS, not behavior** (`tests/`, ~30 s, no GPU): that a
+   non-editable install still ships the rosters + CLI, and that `import orcs`
+   degrades to `SKIP_REASON` instead of raising. Behavior is verified by running
    `play <task> --agent initial` headless and watching obs shapes + reward.
    `--agent initial` (an orcs addition) builds the real agent with NO checkpoint — the frozen
    base bit-exact for adapter tasks.

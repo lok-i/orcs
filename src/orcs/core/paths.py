@@ -9,6 +9,12 @@ Resolution order for every root: env override -> auto-find -> marker walk-up.
   ORCS_ASSETS_SOURCE  robot/object asset tree (default: installed ``assets`` pkg,
                       else <deps>/assets/source)
 
+``DATA_ROOT``/``DEPS_ROOT`` follow ONE rule: **when orcs is vendored, the host
+owns them.** Standalone, they are orcs's own ``data/``/``dependencies/``. Either
+way the env var is the explicit channel and the walk-up is the default — do not
+rely on a consumer setting the var, since entry-point import order across
+``mjlab.tasks`` is not guaranteed and this module resolves at import.
+
 ``REPO_ROOT``/``DATA_ROOT``/``DEPS_ROOT`` are import-time constants and never
 assert existence — absent data must degrade to a skipped task registration, not
 a broken ``import orcs``. :func:`assets_source` validates and is therefore lazy:
@@ -54,23 +60,37 @@ if not _ROOTS:
         f"ancestor holds all of {_MARKERS}. Set ORCS_ROOT to override."
     )
 
+_HOST_ROOTS = _ROOTS[1:]
+"""Repo roots ABOVE orcs's own checkout — non-empty exactly when orcs is
+vendored as a dependency. Nearest first, so the immediate consumer wins over
+its own consumer in a deeper chain."""
+
 
 def _resolve(var: str, child: str) -> Path:
-    """Env override, else the nearest repo root whose ``child`` exists, else ours.
+    """Env override, else the owning repo root whose ``child`` exists.
 
-    The fallback is what makes orcs work unmodified as a library: a host project
-    that vendors orcs under ``dependencies/`` keeps its datasets at its OWN root,
-    and orcs finds them without the host having to set anything. Falling back to
-    ``_ROOTS[0]`` when nothing exists keeps the path well-defined for error
-    messages instead of raising at import.
+    **When orcs is vendored, the HOST owns the data.** This is the same rule as
+    "the consumer's lock wins" (CLAUDE.md §Hard rules), applied to datasets: a
+    dependency checkout is code only — its own ``data/`` and ``dependencies/``
+    are gitignored and never synced — so orcs's own root is disqualified the
+    moment it is nested and can never hijack a host's dataset by merely
+    existing. Before this, resolution keyed on the ABSENCE of
+    ``<host>/dependencies/orcs/data``, so anything that created that directory
+    (e.g. running orcs's own ``sync_dependencies.sh`` inside a consumer's tree)
+    silently relocated every dataset with no error — paths never assert, so it
+    surfaced only as a task that stopped registering.
+
+    Falling back to the first candidate when nothing exists keeps the path
+    well-defined for error messages instead of raising at import.
     """
     override = _env(var)
     if override:
         return override
-    for root in _ROOTS:
+    roots = _HOST_ROOTS or _ROOTS
+    for root in roots:
         if (root / child).is_dir():
             return root / child
-    return _ROOTS[0] / child
+    return roots[0] / child
 
 
 REPO_ROOT: Path = _env("ORCS_ROOT") or _ROOTS[0]

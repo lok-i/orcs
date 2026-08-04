@@ -1,4 +1,9 @@
-"""Object-manip observation terms — body-relative object state, goals, object tracking refs."""
+"""Object-manip observation terms — body-relative object state, goals, object refs.
+
+Robot-only terms (`robot_root_pos_env`, the {v,w}_cmd_t pair, the anchor-error
+pair, `unweighted_reward_vector`) live in :mod:`orcs.core.mdp.observations` and
+are re-exported here so ``mdp.<name>`` keeps resolving the whole uolm surface.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +17,14 @@ from mjlab.utils.lab_api.math import (
     quat_apply_inverse,
     subtract_frame_transforms,
 )
-from mocke.mdp.observations import (  # noqa: F401 — re-exported into `mdp.*`
+
+from orcs.core.mdp.observations import (  # noqa: F401 — task-blind, in core
     motion_anchor_ori_b_future,
     motion_anchor_pos_b_future,
+    robot_root_ang_vel_cmd,
+    robot_root_lin_vel_cmd,
+    robot_root_pos_env,
+    unweighted_reward_vector,
 )
 
 __all__ = [
@@ -37,9 +47,8 @@ __all__ = [
     "motion_object_pos_b_future",
     "motion_object_ori_b_future",
     "unweighted_reward_vector",
-    # re-exported from mocke: the reference-anchor error is the TRACKING layer's,
-    # not the object task's. One definition, so orcs and a vision consumer can
-    # never silently bind different implementations of the same term.
+    # re-exported THROUGH core (defined in mocke): the reference-anchor error
+    # is the TRACKING layer's, not the object task's.
     "motion_anchor_pos_b_future",
     "motion_anchor_ori_b_future",
 ]
@@ -76,21 +85,6 @@ def object_twist_b(
     lin_vel_b = quat_apply_inverse(robot_quat, obj.data.root_link_lin_vel_w)
     ang_vel_b = quat_apply_inverse(robot_quat, obj.data.root_link_ang_vel_w)
     return torch.cat([lin_vel_b, ang_vel_b], dim=-1)
-
-def robot_root_pos_env(
-    env: ManagerBasedRlEnv,
-    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),  # noqa: B008
-) -> torch.Tensor:
-    """Robot root position in env frame (world - env_origin) -> (B, 3).
-
-    The odometry channel that makes an env-frame goal actionable: without it
-    an env-frame `object_goal_pos` and an env-frame `object_pos_w` are two
-    absolutes the network can difference, but neither is reachable relative to
-    the robot. Privileged (no state estimator on hw) — augmentation/critic only.
-    """
-    robot = env.scene[robot_cfg.name]
-    return robot.data.root_link_pos_w - env.scene.env_origins
-
 
 # ---------------------------------------------------------------------------
 # Object identity — which of the K variants this world is simulating
@@ -186,50 +180,6 @@ def object_ang_vel_w_obs(
     return env.scene[object_cfg.name].data.root_link_ang_vel_w
 
 
-def unweighted_reward_vector(
-    env: ManagerBasedRlEnv, enabled: bool = False, terms: list[str] | None = None
-) -> torch.Tensor:
-    """(B, K) per-term UNWEIGHTED reward rates — critic-only conditioning,
-    V(concat(s, r)). Reads the reward manager's step cache (already computed
-    this step from the SAME post-step state the obs describe; zero recompute).
-
-    enabled=False -> zeros of the same shape: critic architecture stays
-    byte-identical across the with/without A/B, only information flips.
-    Toggle: --env.observations.critic.terms.reward_vec.params.enabled True
-    terms=[...] -> only those reward terms, in the given order (e.g. the
-    task-layer subset as a MuZero-style aux prediction target).
-
-    Notes:
-      - Obs-manager dim probe runs before the reward manager exists -> zeros
-        fallback sized from cfg.rewards / terms.
-      - First step after reset reads the pre-reset cache (one-frame stale).
-      - Zero-weight terms read 0 (reward manager skips them).
-    """
-    n = len(terms) if terms else len(env.cfg.rewards)
-    if not enabled or not hasattr(env, "reward_manager"):
-        return torch.zeros(env.num_envs, n, device=env.device)
-    rm = env.reward_manager
-    w = getattr(env, "_reward_vec_inv_w", None)
-    if w is None:
-        # _step_reward stores raw*weight -> divide weights back out
-        w = torch.tensor(
-            [c.weight if c.weight != 0.0 else 1.0 for c in rm._term_cfgs],
-            device=env.device,
-        )
-        env._reward_vec_inv_w = w
-    vec = rm._step_reward / w
-    if terms:
-        sel = getattr(env, "_reward_vec_sel", None)
-        if sel is None:
-            sel = env._reward_vec_sel = {}
-        key = tuple(terms)
-        if key not in sel:
-            sel[key] = torch.tensor(
-                [rm._term_names.index(t) for t in key], device=env.device)
-        vec = vec[:, sel[key]]
-    return vec
-
-
 def object_goal_pos_env(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     """Object goal position in env frame -> (B, 3)."""
     cmd = _get_omni_cmd(env, command_name)
@@ -288,21 +238,6 @@ def bodywise_saturated_force(
     force = _bodywise_contact_force(
         env, sensor_name, body_names or cmd.cfg.contact_graph_body_names)
     return torch.tanh(force / f_max)  # (B, K)
-
-
-def robot_root_lin_vel_cmd(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-    """v_cmd_t: reference anchor linear velocity in the REF anchor's own frame
-    -> (B, 3). Pure function of the reference stream (no live-state coupling),
-    SUGAR ref_anchor_lin_vel_b convention — sys1 can emit it open-loop."""
-    cmd = _get_omni_cmd(env, command_name)
-    return quat_apply_inverse(cmd.anchor_quat_w, cmd.anchor_lin_vel_w)
-
-
-def robot_root_ang_vel_cmd(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-    """w_cmd_t: reference anchor angular velocity in the REF anchor's own frame
-    -> (B, 3). Same convention as robot_root_lin_vel_cmd."""
-    cmd = _get_omni_cmd(env, command_name)
-    return quat_apply_inverse(cmd.anchor_quat_w, cmd.anchor_ang_vel_w)
 
 
 def motion_object_pos_b_future(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:

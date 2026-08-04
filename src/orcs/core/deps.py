@@ -17,12 +17,13 @@ ahead, must still import.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 
 VALIDATED: dict[str, str] = {
-    "mocke": "d82830bbfe3d8120e012fe9130d6c785b520ef91",
-    "rsl_rl": "30aef22e5aea1477f133f966da1aed202c42c308",
+    "mocke": "004d4c02bb1be65c67688f25f95197c865f83d6f",
+    "rsl_rl": "4f8b9b3b657f27397a3337dabafb7ef7398387b4",
 }
 """SHAs orcs was last validated against. Bump only after `play Orcs-Uolm-AdaptSonic
 --agent initial` still rolls the frozen base bit-exact."""
@@ -48,7 +49,14 @@ def _head(pkg: str) -> str | None:
 
 
 def check(strict: bool = False) -> dict[str, tuple[str, str]]:
-    """Report {pkg: (validated, live)} for every shared dep that drifted."""
+    """Report {pkg: (validated, live)} for every shared dep that drifted.
+
+    `ORCS_SKIP_DEP_CHECK=1` short-circuits it: this shells out to `git` once per
+    dep on every `import orcs`, which is free on a laptop and not free on a
+    cluster filesystem where a 4096-env job pays it per rank.
+    """
+    if os.environ.get("ORCS_SKIP_DEP_CHECK"):
+        return {}
     drift = {
         pkg: (want, live)
         for pkg, want in VALIDATED.items()

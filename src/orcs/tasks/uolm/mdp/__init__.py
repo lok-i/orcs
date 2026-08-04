@@ -1,11 +1,10 @@
-"""uolm mdp — THE object-manipulation term library .
+"""uolm mdp — THE object-manipulation term library.
 
-Aggregates mjlab's stock mdp + every local object-manip term
-(obs/rewards/terminations/curriculums/events/commands) so ``mdp.<name>``
-resolves all of them.
+Aggregates ``orcs.core.mdp`` (mjlab's stock mdp + every task-blind orcs term)
+with the local object-manip terms, so ``mdp.<name>`` resolves all of them.
 """
 
-from mjlab.envs.mdp import *  # noqa: F401, F403
+from orcs.core.mdp import *  # noqa: F401, F403
 
 from .commands import *  # noqa: F403
 from .contact_schedule import ContactSchedule  # noqa: F401

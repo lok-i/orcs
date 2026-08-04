@@ -3,7 +3,8 @@ name = "orcs"
 version = "0.1.0"
 description = "Oracle Robot Control Synthesis — privileged-observation policies for humanoid control"
 readme = "readme.md"
-requires-python = ">=3.10"
+# 3.11, not 3.10: `tomllib` (rosters) is stdlib only from 3.11.
+requires-python = ">=3.11"
 dependencies = [
     # ── active ─────────────────────────────────────────────────────────────────
     "mjlab>=1.1.0",
@@ -32,6 +33,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# Non-`.py` files setuptools would otherwise drop from a wheel. Editable installs
+# point at the source tree and hide this, so the omission only shows up as a
+# `pip install git+...` where every PerLoco task silently skips registration.
+[tool.setuptools.package-data]
+"orcs.tasks.perloco" = ["rosters/*.toml"]
+
 # mjlab auto-discovers tasks by importing this module at startup.
 # Format: <key> = "<python-module-to-import>"  (key is arbitrary, module is what gets imported)
 # Adding a package here triggers its __init__.py -> register_mjlab_task() calls.
@@ -39,8 +46,23 @@ where = ["src"]
 [project.entry-points."mjlab.tasks"]
 orcs = "orcs"
 
+# The data pipeline ships INSIDE the package (`orcs.cli`), so a pip-installed
+# orcs can produce the data it consumes. `scripts/*.py` are thin wrappers.
+[project.scripts]
+orcs-stage-terrain = "orcs.cli.stage_terrain_motions:main"
+orcs-view-terrain = "orcs.cli.view_terrain_motions:main"
+orcs-build-smpl = "orcs.cli.build_smpl_dataset:main"
+orcs-rollout-smpl = "orcs.cli.rollout_smpl:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]
+# Staging-time only — the runtime never imports these, so a training env that
+# consumes already-staged data does not need them.
+perloco = [
+    "usd-core",   # GRAIL tile geometry (`from pxr import Usd`)
+    "smplx",      # GRAIL --smpl body-model forward pass
+    "viser",      # orcs-view-terrain
+]
 
 [tool.ruff]
 src = ["src"]

@@ -18,11 +18,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
+from mjlab.managers.observation_manager import ObservationGroupCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mocke.sonic import profile
 
 from orcs.assets import OBJECT_BODY_NAME
+from orcs.core.obs import (
+    T as _T,
+)
+from orcs.core.obs import (
+    grp as _grp,
+)
+from orcs.core.obs import (
+    proprio_terms,
+    robot_root_twist_cmd_terms,
+)
+from orcs.core.obs import (
+    robot_root_state_terms as _core_root_state,
+)
 from orcs.tasks.uolm import mdp
 
 
@@ -34,33 +47,9 @@ class ObsCtx:
     p: dict = field(default_factory=lambda: {"command_name": "motion"})
 
 
-def _T(func, params: dict | None = None) -> ObservationTermCfg:
-    return ObservationTermCfg(func=func) if params is None else ObservationTermCfg(
-        func=func, params=params)
-
-
-def _grp(terms: dict, *, concat: bool = True, corrupt: bool = False) -> ObservationGroupCfg:
-    """Uniform group: nan-sanitized per term. concat=False -> dict group."""
-    return ObservationGroupCfg(
-        terms=terms, concatenate_terms=concat,
-        enable_corruption=corrupt, nan_policy="sanitize", nan_check_per_term=True,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Atomic term bundles — defined ONCE, composed into many groups
 # ---------------------------------------------------------------------------
-
-def proprio_terms() -> dict:
-    """Robot self-state (deployable): gravity dir + base twist + joint pos/vel."""
-    return {
-        "projected_gravity": _T(mdp.projected_gravity),
-        # "base_lin_vel": _T(mdp.base_lin_vel),  #NOTE (lok-i) 1Aug2026: found insensitive 
-        "base_ang_vel": _T(mdp.base_ang_vel),
-        "joint_pos": _T(mdp.joint_pos_rel),
-        "joint_vel": _T(mdp.joint_vel_rel),
-    }
-
 
 def robot_motion_cmd_terms(p: dict) -> dict:
     """sys1 command stream (SUGAR c_t parity): per-body contact + root twist cmd.
@@ -70,8 +59,7 @@ def robot_motion_cmd_terms(p: dict) -> dict:
     """
     return {
         "bodywise_contact_cmd": _T(mdp.bodywise_contact_cmd, p),
-        "robot_root_lin_vel_cmd": _T(mdp.robot_root_lin_vel_cmd, p),
-        "robot_root_ang_vel_cmd": _T(mdp.robot_root_ang_vel_cmd, p),
+        **robot_root_twist_cmd_terms(p),
     }
 
 
@@ -119,17 +107,12 @@ def object_state_w_terms(obj: SceneEntityCfg) -> dict:
 
 
 def robot_root_state_terms(p: dict) -> dict:
-    """Privileged robot-root state: env-frame position + body-frame twist.
+    """Privileged robot-root state — :func:`orcs.core.obs.robot_root_state_terms`.
 
-    Orientation is already in `proprio_terms`/the frozen base's stream, so only
-    the odometry half lives here.
+    Kept as a uolm-signature wrapper (the group factories thread `p` uniformly).
     """
     del p
-    return {
-        "robot_root_pos_env": _T(mdp.robot_root_pos_env),
-        "robot_root_lin_vel_b": _T(mdp.base_lin_vel),
-        "robot_root_ang_vel_b": _T(mdp.base_ang_vel),
-    }
+    return _core_root_state()
 
 
 def object_identity_terms(p: dict, obj: SceneEntityCfg, *, desc: bool = False) -> dict:

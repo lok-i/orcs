@@ -64,45 +64,90 @@ and PPO only moves the adapter. Verify this claim, don't trust it:
 ```
 src/orcs/
 ├── __init__.py   registry point: import each task, wire the mjlab shim
-├── core/         agnostic infra. paths, mjlab compat. zero semantics.
+├── core/         robot-generic, task-blind infra
+│   ├── paths · deps · _mjlab_compat      no semantics at all
+│   ├── data/     scan (clip discovery) · loader (concatenated timeline)
+│   ├── mdp/      commands (MultiClipMotionCommand) · observations
+│   │             · terminations · events
+│   ├── obs.py    group plumbing + robot-only term bundles
+│   ├── rl.py     PPO runner spine + actor builders
+│   └── sensors.py  robot<->terrain contact + kill-body vocabulary
+│   ├── registry.py per-task registration that degrades, never raises
+│   └── sensors.py  robot<->ground contact + kill-body vocabulary
 ├── assets/       robots + objects as mjlab entity cfgs. g1.py, objects.py
-└── tasks/        one self-registering package per task
-    └── uolm/     env_cfg · rl_cfg · robustness · smpl_data · mdp/
+├── tasks/        one self-registering package per task
+│   ├── uolm/     env_cfg · robustness · smpl_data · mdp/
+│   └── perloco/  env_cfg · terrain · terrain_spec · sensors · sources/ · mdp/
+│                 · roster.py + rosters/*.toml (shipped as package-data)
+└── cli/          console entry points — the data pipeline, INSIDE the package
 ```
 
-Import rules — enforced by review, not tooling:
+Import rules — enforced by review and `tests/test_registration.py`:
 
 | layer | may import | must never import |
 |---|---|---|
-| `core` | stdlib, mjlab | `orcs.assets`, `orcs.tasks` |
+| `core` | stdlib, mjlab, mocke | `orcs.assets`, `orcs.tasks` |
 | `assets` | `orcs.core` | `orcs.tasks` |
 | `tasks` | `orcs.core`, `orcs.assets`, sibling-free | another task |
+| `cli` | everything | — (nothing imports FROM it) |
 | `__init__` | everything (the only wiring point) | — |
+
+**`scripts/` is not a layer.** It does not ship in a wheel, so anything with
+logic in it is unreachable from a `pip install`. Executable code lives in
+`orcs/cli/` behind a `[project.scripts]` entry point; `scripts/*.py` are
+three-line wrappers, and `tests/test_packaging.py` keeps them that way.
 
 Two rules earn their keep:
 
 1. **No `__file__` depth math.** Every path comes from `orcs.core.paths`. Moving
    a module can never silently orphan a dataset.
-2. **`core` stays task-blind.** The mjlab compat shim needs a task's command cfg,
-   so it takes it as an argument — `apply(multi_clip_cfgs=...)`, wired in
+2. **`core` is robot-generic and task-blind.** It may know what a joint, a body,
+   a clip and a reference are. It must **not** know what an *object* or a
+   *terrain* is — the moment a name in `core` mentions one, it belongs to the
+   task that has one. The mjlab compat shim needs a task's command cfg, so it
+   takes it as an argument — `apply(multi_clip_cfgs=...)`, wired in
    `orcs/__init__.py`. Core never reaches upward.
+
+   > **Amended 2026-08-02.** Rule 2 used to read "zero semantics". That held only
+   > while core carried no terms, which held only while there was one task. The
+   > second task (perloco) needs the same proprio bundle, the same runner spine,
+   > the same RSI/annealing/freeze machinery — and §4 forbids it importing uolm to
+   > get them, which is the pressure working as intended. So core now carries
+   > robot semantics, and the line moved to where it can actually be checked:
+   > grep `core/` for "object" or "terrain".
+   >
+   > **And then it failed its own grep.** `core/sensors.py` exported
+   > `terrain_contact_sensor` / `TERRAIN_CONTACT_SENSOR_NAME` — 13 hits, a rule
+   > that only looked enforced. Renamed to `ground_contact_sensor` /
+   > `GROUND_CONTACT_SENSOR_NAME`: what core knows is that the robot stands on
+   > *something*. `"terrain"` survives there once, as mjlab's BODY name in a
+   > `ContactMatch` — an mjlab fact, not our vocabulary. **A rule you can't run
+   > is a preference.** If the next shared term forces the word back into
+   > `core/`, the honest move is to amend this rule again, not to smuggle it.
 
 ## 5. task slots
 
-| task | what | command spaces | status |
-|---|---|---|---|
-| `uolm` | Uni-Object Loco-Manipulation | `robot` (retargeted G1), `smpl` (human) | ✅ robot trains; smpl rollout-only |
-| perceptive locomotion | terrain from onboard sensing | — | ⬜ |
-| student distillation | oracle → deployable | — | ⬜ |
+| task | what | sources | command spaces | status |
+|---|---|---|---|---|
+| `uolm` | Uni-Object Loco-Manipulation | retargeted G1 | `robot`, `smpl` | ✅ robot trains; smpl rollout-only |
+| `perloco` | terrain from a height scan | OmniRetarget, GRAIL | `robot`, `smpl` (GRAIL) | ✅ 5 tasks register and roll |
+| student distillation | oracle → deployable | — | — | ⬜ the next build |
 
 ## 6. adding a task
 
-1. `src/orcs/tasks/<name>/__init__.py` calls `register_mjlab_task(...)`, wrapped
-   in `try/except FileNotFoundError` — a checkout without data must still import.
-2. Task id is `Orcs-<Name>-<Agent>[-<CommandSpace>]` — the agent is always an
-   explicit token, so no row's identity depends on knowing the default.
+1. `src/orcs/tasks/<name>/__init__.py` builds a `_TASKS` table and calls
+   `orcs.core.registry.register_all(_TASKS)` — per-row, so one unstaged dataset
+   costs one task and `SKIP_REASON[task_id]` says why. A checkout without data
+   must still import.
+2. Task id is `Orcs-<Name>-[<Source>-]<Agent>[-<CommandSpace>]`. The agent is
+   **always** an explicit token, so no row's identity depends on knowing the
+   default. The SOURCE slot appears only when provenance changes code — reader,
+   file format, joint order, conventions (perloco's `OmRe`/`Grail` do; its curb
+   vs stair terrains do not, so those are a roster line, not a task).
 3. Add one `import orcs.tasks.<name>` line to `src/orcs/__init__.py`.
 4. Draw robots/objects from `orcs.assets`, paths from `orcs.core.paths`. If you
    need a new robot, add `orcs/assets/<robot>.py` and re-export it.
 5. Anything shared with a second task moves down a layer — **only once the second
    task exists.** No speculative abstraction.
+6. Non-`.py` files the task needs at runtime (a roster, a schema) go in
+   `[tool.setuptools.package-data]`, or they exist only in your checkout.
