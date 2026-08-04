@@ -17,15 +17,21 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
-# The staging entry point is the CONSOLE SCRIPT, not a path into this checkout:
-# `scripts/` does not ship in a wheel, so path math here would be unreachable
-# from a `pip install`. `scripts/stage_terrain_motions.py` is only the local
-# fallback for a checkout whose console scripts are not on PATH.
-if command -v orcs-stage-terrain &>/dev/null; then
-    STAGE=(orcs-stage-terrain)
-else
-    STAGE=(python "$REPO_ROOT/scripts/stage_terrain_motions.py")
-fi
+# Staging runs the PACKAGED module (`orcs.cli.*`), not a path into this
+# checkout: `scripts/` does not ship in a wheel, so path math here would be
+# unreachable from a `pip install`.
+#
+# It is invoked through `python -c` rather than the `orcs-stage-terrain` console
+# script for one reason — **mjlab before orcs** (see the roots probe below). The
+# console script's import chain starts at `orcs`, which makes orcs the outermost
+# import and trips mjlab's entry-point scan into re-entering a half-built orcs;
+# the consumer's task package then fails to register and mjlab prints a [WARN]
+# traceback. Staging does not care (it never asks for a task), but the noise
+# reads like a failure in the middle of a fresh setup. Importing mjlab first
+# costs nothing and keeps the output honest.
+STAGE=(python -c 'import mjlab  # noqa: F401 — mjlab before orcs
+from orcs.cli.stage_terrain_motions import main
+main()')
 
 SOURCES="omni,grail"
 GRAIL_CATEGORIES="curb"     # stair1/stair2 land here when a roster wants them

@@ -59,7 +59,7 @@ Recentring geometry AND motion by the same offset at staging would let this
 drop to ~7 m; it is not done because shifting staged data is a change that
 has to be re-verified, and static geoms are not what costs walltime."""
 
-__all__ = ["omni_env_cfg", "grail_env_cfg", "staged_root"]
+__all__ = ["omni_env_cfg", "grail_env_cfg", "staged_root", "OMNI_RENDER_Z_SCALE"]
 
 _MOTION_PAD_EPS_SEC = 2.0
 """Post-motion hold padding — the episode, not the motion, owns resets."""
@@ -85,6 +85,28 @@ sets `enable_corruption: false`.
 Flipping this to True turns on proprio noise. A push/mass/friction domain for
 perloco does NOT exist yet — that is sim2real work, and it belongs behind this
 same switch when it lands.
+"""
+
+
+OMNI_RENDER_Z_SCALE: float | None = 0.75
+"""OmniRetarget geometry height, decoupled from the clip's own z_scale.
+
+`None` = staged pairing (each row's obstacle matches the motion retargeted
+against it). A float renders EVERY row at that absolute z_scale while the
+motions stay per-row — so the grid becomes N motions over ONE obstacle, and the
+policy must generalize across the gap instead of memorizing a height.
+
+**0.75 is measured, not chosen.** A checkpoint trained on levels 1.0/1.1/1.2
+still climbs at 0.75 (and 0.8) without ever having seen it, so the gap is
+inside the frozen base's competence rather than past it. It survives training,
+not just play, because the reference floats only `(level - 0.75) * 0.475` =
+0.119 / 0.166 / 0.214 m above the box — all well inside `anchor_pos_thresh`
+0.4, so `bad_anchor_pos` sees a tracking error and not a termination. Drop this
+much below ~0.5 and that stops being true: the float reaches the tube and the
+episode dies on the reference rather than on the robot.
+
+The source ships URDFs for z_scale 0.8-1.2 only, which is why this is a render
+knob and not a roster row — there is no 0.75 tile to stage.
 """
 
 
@@ -133,6 +155,7 @@ def _core(
     anchor_pos_thresh: float,
     anchor_ori_thresh: float,
     command_space: str = "robot",
+    render_z_scale: float | None = None,
 ) -> ManagerBasedRlEnvCfg:
     """Everything both sources agree on."""
     assert agent in ("sonic", "tara"), f"unknown agent {agent!r}"
@@ -146,7 +169,8 @@ def _core(
             terrain=TerrainEntityCfg(
                 terrain_type="generator",
                 terrain_generator=terrain_generator_cfg(
-                    root, roster, size=tile_size),
+                    root, roster, size=tile_size,
+                    render_z_scale=render_z_scale),
             ),
             num_envs=1,
         ),
@@ -271,12 +295,17 @@ def omni_env_cfg(
     kill_exclude: tuple[str, ...] = (),
     anchor_pos_thresh: float = 0.4,
     anchor_ori_thresh: float = 0.8,
+    render_z_scale: float | None = OMNI_RENDER_Z_SCALE,
 ) -> ManagerBasedRlEnvCfg:
     """OmniRetarget robot-terrain: climb families x z_scale levels.
 
     `roster` swaps `rosters/omni.toml` for another file — the only supported way
     to change which tiles a run sees, and how an eval isolates a subset on
     byte-identical infrastructure.
+
+    `render_z_scale` pins the OBSTACLE height while the roster keeps choosing
+    the MOTION — see `OMNI_RENDER_Z_SCALE` for why it defaults to 0.75 and what
+    bounds it. Pass `None` for the staged pairing.
 
     Wide anchor tubes, unlike GRAIL's: climbing MEANS large pelvis-z excursions,
     and the frozen base spends a third of its steps past 0.2 m of |dz| (p90
@@ -290,6 +319,7 @@ def omni_env_cfg(
         num_steps_per_env=num_steps_per_env, robot_cfg=robot_cfg,
         kill_bodies=kill_bodies, kill_exclude=kill_exclude,
         anchor_pos_thresh=anchor_pos_thresh, anchor_ori_thresh=anchor_ori_thresh,
+        render_z_scale=render_z_scale,
     )
 
 

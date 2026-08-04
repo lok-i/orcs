@@ -64,6 +64,11 @@ class TileTerrainCfg(SubTerrainCfg):
     root: Path = field(default_factory=Path)
     family: str = ""
     levels: tuple[float, ...] = ()
+    render_z_scale: float | None = None
+    """Render every tile at THIS absolute z_scale instead of its own level.
+    `None` = staged geometry, and the two axes stay paired.
+
+    See :func:`terrain_generator_cfg` for what it means and who sets it."""
 
     def function(
         self, difficulty: float, spec: mujoco.MjSpec, rng: np.random.Generator
@@ -71,6 +76,11 @@ class TileTerrainCfg(SubTerrainCfg):
         del rng  # staged geometry — nothing to sample
         row = int(round(difficulty * (len(self.levels) - 1)))
         level = self.levels[row]
+        if self.render_z_scale is not None and level <= 0.0:
+            raise ValueError(
+                f"render_z_scale on '{self.family}' level {level}: this source's "
+                "level axis is not an obstacle height, so re-scaling to a "
+                "z_scale is undefined (GRAIL stages one level_0.00 row)")
         tile = json.loads((_tile_dir(self.root, self.family, level)
                            / "tile.json").read_text())
 
@@ -88,12 +98,15 @@ class TileTerrainCfg(SubTerrainCfg):
             ),
             color=_FLOOR_RGBA,
         )]
+        # Staged boxes are bottom-pinned at z=0 and `level` IS their z scale, so
+        # an absolute re-scale is one factor on pos.z and half.z.
+        s = 1.0 if self.render_z_scale is None else self.render_z_scale / level
         for b in tile["boxes"]:
             geoms.append(TerrainGeometry(
                 geom=body.add_geom(
                     type=mujoco.mjtGeom.mjGEOM_BOX,
-                    size=tuple(b["half"]),
-                    pos=(cx + b["pos"][0], cy + b["pos"][1], b["pos"][2]),
+                    size=(b["half"][0], b["half"][1], s * b["half"][2]),
+                    pos=(cx + b["pos"][0], cy + b["pos"][1], s * b["pos"][2]),
                     quat=tuple(b["quat"]),
                     rgba=box_rgba,
                 ),
@@ -105,13 +118,26 @@ class TileTerrainCfg(SubTerrainCfg):
 
 
 def terrain_generator_cfg(
-    root: str | Path, roster: Roster, *, size: tuple[float, float] = TILE_SIZE
+    root: str | Path,
+    roster: Roster,
+    *,
+    size: tuple[float, float] = TILE_SIZE,
+    render_z_scale: float | None = None,
 ) -> TerrainGeneratorCfg:
     """One column per family, one row per level.
 
     `curriculum=True` pins column == family (mjlab then ignores `num_cols` and
     uses `len(sub_terrains)`) — that is what makes the env->tile map derivable
     rather than sampled.
+
+    `render_z_scale` **unpairs geometry from motion**: every tile renders at
+    that absolute z_scale while its clip still comes from its own level, so the
+    grid keeps N motions but presents ONE obstacle height. That is the only way
+    to ask for a height the source ships no URDF for, and it costs no staging.
+    The reference then floats `(level - render_z_scale) * top` above the box —
+    a real, deliberate tracking error that `bad_anchor_pos` must be wide enough
+    to tolerate (see `OMNI_RENDER_Z_SCALE` in `env_cfg.py`). The height scan
+    needs nothing: it raycasts geoms.
     """
     root = Path(root)
     return TerrainGeneratorCfg(
@@ -123,7 +149,8 @@ def terrain_generator_cfg(
         border_width=0.0,
         color_scheme="height",  # re-applies TerrainGeometry.color as-is
         sub_terrains={
-            f: TileTerrainCfg(root=root, family=f, levels=roster.levels, size=size)
+            f: TileTerrainCfg(root=root, family=f, levels=roster.levels, size=size,
+                              render_z_scale=render_z_scale)
             for f in roster.families
         },
     )
