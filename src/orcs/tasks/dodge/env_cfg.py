@@ -84,8 +84,23 @@ def nominal_root() -> str:
 
 @lru_cache(maxsize=None)
 def _resolve() -> tuple[str, int]:
-    """(first clip, its length in frames) — cached; raises if unstaged."""
-    files = scan_flat(nominal_root())
+    """(first clip, its length in frames) — cached; raises if not generated.
+
+    The raise becomes a `SKIP_REASON` entry, and that entry is the only place a
+    user learns why the task vanished — `list_tasks()` just omits it. So the
+    message has to carry the fix, not merely the path: unlike perloco's staged
+    terrain, this reference is ONE orcs command away, and "no motion.npz under
+    /some/path" does not tell anyone that command exists.
+    """
+    try:
+        files = scan_flat(nominal_root())
+    except FileNotFoundError as e:
+        raise FileNotFoundError(
+            f"{e} — generate it with `orcs-make-nominal`. If that ran and wrote "
+            f"somewhere else, orcs resolved a different DATA_ROOT than it does "
+            f"here; check `python -c 'from orcs.core.paths import DATA_ROOT; "
+            f"print(DATA_ROOT)'` and ORCS_DATA_ROOT."
+        ) from e
     max_len = max(int(np.load(f)["joint_pos"].shape[0]) for f in files)
     return files[0], max_len
 
