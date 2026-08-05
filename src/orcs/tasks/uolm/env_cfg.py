@@ -370,3 +370,9 @@ def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
     for k in ("bad_object_pos", "bad_object_ori"):
         cfg.terminations.pop(k, None)
     cfg.commands["motion"].start_from_zero = True
+    # remove the intial statn randomization in motion
+    cfg.commands["motion"].pose_range = {}
+    cfg.commands["motion"].velocity_range = {}
+    cfg.commands["motion"].joint_position_range = (0.0, 0.0)
+    cfg.commands["motion"].object_init_pose_range = {}
+    cfg.commands["motion"].object_in_contact_velocity_range = {}

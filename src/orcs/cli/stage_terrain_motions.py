@@ -27,15 +27,9 @@ Four transforms, in order:
   4. FK                         write the full state into the sim, read back
                                 body poses/twists
 
-**Body-array convention, read this before touching the output.** `motion.npz`
-carries `body_*_w` as (T, 37, ...) in ISAACLAB body order, and only the 14
-tracked rows are filled — the rest are zeros. No canonical 37-name IsaacLab
-body list exists in any dependency, and reconstructing it by BFS is off-by-one
-against the flat-hand robot (IsaacLab keeps fixed links MuJoCo merges away), so
-inventing one would be a silent misalignment waiting to happen. The loader
-reads exactly `mocke.mdp.joint_maps.G1_TRACKED_BODIES` and nothing else touches
-the array, so the unfilled rows are unreachable. `body_names` is written into
-the npz as a legend so the file explains itself.
+Steps 2 and 4, and the body-array convention that goes with them, live in
+`orcs.cli._motion_npz` — shared with every other producer of a `motion.npz`.
+Read that module before touching the output.
 """
 
 from __future__ import annotations
@@ -46,46 +40,17 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from mjlab.scene import Scene, SceneCfg
-from mjlab.sim.sim import Simulation, SimulationCfg
-from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.lab_api.math import (
     axis_angle_from_quat,
     quat_conjugate,
     quat_mul,
     quat_slerp,
 )
-from mocke.mdp.joint_maps import G1_TRACKED_BODIES, IL2MJ
-from mocke.sonic import profile
 
-from orcs.assets import get_g1_flat_hand_cfg
+from orcs.cli._motion_npz import Fk, il_body_names
 from orcs.core.paths import DATA_ROOT
 from orcs.tasks.perloco.sources import SOURCES
 from orcs.tasks.perloco.terrain_spec import ClipSpec, SmplSpec, TileSpec
-
-_N_IL_BODIES = 37
-"""Row count of `body_*_w`, matching the existing retargeted dataset. Only the
-`G1_TRACKED_BODIES` indices are filled — see the module docstring."""
-
-
-# ---------------------------------------------------------------------------
-# joint order
-# ---------------------------------------------------------------------------
-
-def il_joint_names(mj_joint_names: list[str]) -> list[str]:
-    """IsaacLab BFS joint order, derived — not hardcoded.
-
-    `IL2MJ[k]` is the IL slot of MJ slot k (that is what makes
-    `data[:, IL2MJ]` an IL->MJ conversion), so scattering the MJ names through
-    it reconstructs the IL order exactly. Verified equal to the retargeting
-    repo's own `ISAAC_JOINT_NAMES`.
-    """
-    out: list[str | None] = [None] * len(IL2MJ)
-    for mj_slot, il_slot in enumerate(IL2MJ):
-        out[il_slot] = mj_joint_names[mj_slot]
-    assert all(n is not None for n in out), "IL2MJ is not a permutation"
-    return out  # type: ignore[return-value]
-
 
 # ---------------------------------------------------------------------------
 # resampling + velocities (mjlab csv_to_npz conventions)
@@ -161,119 +126,6 @@ def _velocities(state: dict, dt: float) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# forward kinematics
-# ---------------------------------------------------------------------------
-
-class _Fk:
-    """Batched FK: B frames per sim.forward(), not one.
-
-    One env per FRAME (not per clip — clips have different lengths), so a
-    500-frame clip is 2 forward calls at B=256 instead of 500.
-    """
-
-    def __init__(self, batch: int, fps: float, device: str) -> None:
-        self.batch, self.device = batch, device
-        scene_cfg = SceneCfg(
-            num_envs=batch,
-            env_spacing=0.0,  # every env at the origin: FK is pose-only
-            terrain=TerrainEntityCfg(terrain_type="plane"),
-            entities={"robot": profile.robot_cfg(base=get_g1_flat_hand_cfg())},
-        )
-        self.scene = Scene(scene_cfg, device=device)
-        model = self.scene.compile()
-        sim_cfg = SimulationCfg()
-        sim_cfg.mujoco.timestep = 1.0 / fps
-        self.sim = Simulation(num_envs=batch, cfg=sim_cfg, model=model,
-                              device=device)
-        self.scene.initialize(self.sim.mj_model, self.sim.model, self.sim.data)
-        self.robot = self.scene["robot"]
-
-        # Entity-local names, NOT the compiled model's — Scene prefixes those
-        # with the entity ("robot/left_hip_pitch_joint").
-        self.mj_joint_names = list(self.robot.joint_names)
-        # tracked body -> (row in the IL-ordered output, index in sim body order)
-        self.tracked: list[tuple[int, int]] = []
-        for name, il_idx in G1_TRACKED_BODIES:
-            if name not in self.robot.body_names:
-                raise ValueError(
-                    f"tracked body '{name}' absent from the robot "
-                    f"(have: {list(self.robot.body_names)})")
-            self.tracked.append((il_idx, self.robot.body_names.index(name)))
-        self.il_names = il_joint_names(self.mj_joint_names)
-
-        # THE guard against a joint-order scramble, and it has to be by NAME.
-        # A "rigid span" check cannot do this job: a span that is rigid is
-        # invariant to ANY joint values, wrong ones included. What must hold is
-        # the permutation identity the runtime loader relies on — applying
-        # IL2MJ to an IL-ordered array yields MuJoCo order.
-        permuted = [self.il_names[i] for i in IL2MJ]
-        if permuted != self.mj_joint_names:
-            bad = [(k, a, b) for k, (a, b) in
-                   enumerate(zip(permuted, self.mj_joint_names, strict=True)) if a != b]
-            raise AssertionError(
-                "IL2MJ does not map this robot's IL order onto its MuJoCo "
-                f"order; first mismatches (slot, got, want): {bad[:3]}")
-
-    def __call__(self, state: dict, vel: dict) -> dict:
-        """IL-ordered state -> IL-ordered body arrays.
-
-        `joint_pos`/`joint_vel` arrive in **IsaacLab** order (what motion.npz
-        means) and are permuted to **MuJoCo** order on the way into the sim —
-        `IL2MJ` is exactly the permutation the runtime loader applies. Getting
-        this backwards runs FK on scrambled joints: legs and torso still look
-        plausible because several IL and MJ slots coincide, and the only loud
-        symptom is a limb whose length is not constant.
-        """
-        n = state["root_pos"].shape[0]
-        joint_pos_mj = state["joint_pos"][:, IL2MJ]
-        joint_vel_mj = vel["joint_vel"][:, IL2MJ]
-        out = {k: np.zeros((n, _N_IL_BODIES, d), dtype=np.float32)
-               for k, d in (("body_pos_w", 3), ("body_quat_w", 4),
-                            ("body_lin_vel_w", 3), ("body_ang_vel_w", 3))}
-        origins = self.scene.env_origins
-
-        for lo in range(0, n, self.batch):
-            hi = min(lo + self.batch, n)
-            k = hi - lo
-            root = self.robot.data.default_root_state.clone()
-            root[:k, 0:3] = state["root_pos"][lo:hi] + origins[:k]
-            root[:k, 3:7] = state["root_quat"][lo:hi]
-            root[:k, 7:10] = vel["root_lin_vel"][lo:hi]
-            root[:k, 10:13] = vel["root_ang_vel"][lo:hi]
-            self.robot.write_root_state_to_sim(root)
-
-            jp = self.robot.data.default_joint_pos.clone()
-            jv = self.robot.data.default_joint_vel.clone()
-            jp[:k] = joint_pos_mj[lo:hi]
-            jv[:k] = joint_vel_mj[lo:hi]
-            self.robot.write_joint_state_to_sim(jp, jv)
-
-            self.sim.forward()
-            self.scene.update(self.sim.mj_model.opt.timestep)
-
-            d = self.robot.data
-            src = {
-                "body_pos_w": d.body_link_pos_w - origins[:, None, :],
-                "body_quat_w": d.body_link_quat_w,
-                "body_lin_vel_w": d.body_link_lin_vel_w,
-                "body_ang_vel_w": d.body_link_ang_vel_w,
-            }
-            for key, arr in src.items():
-                a = arr[:k].detach().cpu().numpy()
-                for il_row, sim_col in self.tracked:
-                    out[key][lo:hi, il_row] = a[:, sim_col]
-        # Root round-trip: the pelvis body must land exactly where we asked.
-        # Catches a bad root write / frame convention, which FK alone hides.
-        err = float(np.abs(out["body_pos_w"][:, dict(G1_TRACKED_BODIES)["pelvis"]]
-                           - state["root_pos"].cpu().numpy()).max())
-        if err > 1e-4:
-            raise AssertionError(
-                f"FK sanity: pelvis body position differs from the commanded "
-                f"root position by {err:.2e} m")
-        return out
-
-
-# ---------------------------------------------------------------------------
 # writing
 # ---------------------------------------------------------------------------
 
@@ -301,16 +153,13 @@ def _write_clip(sample_dir: Path, clip: ClipSpec, state: dict, vel: dict,
     if smpl is not None:  # the -Smpl command space; contract in core.data.smpl
         np.savez(sample_dir / "smpl_motion.npz",
                  **{k: v.cpu().numpy().astype(np.float32) for k, v in smpl.items()})
-    body_names = [""] * _N_IL_BODIES
-    for name, il_idx in G1_TRACKED_BODIES:
-        body_names[il_idx] = name
     np.savez(
         sample_dir / "motion.npz",
         fps=np.array([int(fps)]),
         joint_pos=state["joint_pos"].cpu().numpy().astype(np.float32),
         joint_vel=vel["joint_vel"].cpu().numpy().astype(np.float32),
         joint_names=np.array(il_names),
-        body_names=np.array(body_names),
+        body_names=np.array(il_body_names()),
         **bodies,
     )
     (sample_dir / "metadata.json").write_text(json.dumps({
@@ -359,7 +208,7 @@ def main() -> None:
         _write_tile(out_root, tile)
     print(f"[stage] {len(tiles)} tiles -> {out_root}")
 
-    fk = _Fk(args.batch, args.fps, device)
+    fk = Fk(args.batch, args.fps, device)
     # Source joint order -> IL, BY NAME. A dataset that renames or reorders a
     # joint fails here instead of silently transposing the robot.
     per_tile: dict[str, int] = {}
