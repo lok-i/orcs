@@ -30,7 +30,7 @@ from mjlab.terrains.terrain_generator import (
 
 from orcs.tasks.perloco.roster import Roster
 
-__all__ = ["TILE_SIZE", "TileTerrainCfg", "terrain_generator_cfg"]
+__all__ = ["TILE_SIZE", "FLOOR_RGBA", "TileTerrainCfg", "terrain_generator_cfg"]
 
 TILE_SIZE = (6.0, 6.0)
 """Tile footprint, metres. Measured over all 145 staged omni tiles: the widest
@@ -42,7 +42,15 @@ _FLOOR_DEPTH = 0.5
 """Thickness of the per-tile ground slab. Its TOP is z=0 — the plane every
 staged clip's root trajectory is expressed against."""
 
-_FLOOR_RGBA = (0.35, 0.36, 0.38, 1.0)
+FLOOR_RGBA = (0.35, 0.36, 0.38, 1.0)
+"""The tile ground slab's colour — PUBLIC, because it is the only channel that
+says which terrain geoms are ground and which are obstacle.
+
+mjlab renames every terrain geom to `terrain_<i>` at merge
+(`terrain_generator._build`), so a role-carrying NAME does not survive; the
+nominal rgba does, and `color_scheme="height"` is what writes it. A consumer
+that recolours the terrain matches against this."""
+_FLOOR_RGBA = FLOOR_RGBA
 _BOX_RGBA_LO = np.array([0.24, 0.46, 0.86, 1.0])   # easiest level
 _BOX_RGBA_HI = np.array([0.88, 0.34, 0.28, 1.0])   # hardest level
 

@@ -138,8 +138,14 @@ def object_identity_terms(p: dict, obj: SceneEntityCfg, *, desc: bool = False) -
 
 def policy_group() -> ObservationGroupCfg:
     """The frozen SONIC decoder's proprio stream (history-10, no odometry by
-    construction). Term set owned by mocke."""
-    return _grp(profile.policy_obs_terms(), corrupt=True)
+    construction). Term set owned by mocke.
+
+    Assembled CLEAN; `orcs.core.obs.apply_obs_noise` stamps the sensor noise
+    post-assembly, so one table covers this group and a consumer's own deployed
+    streams from one edit. `corrupt=True` here used to be a lie in the other
+    direction — the flag was on while every term's `.noise` was None.
+    """
+    return _grp(profile.policy_obs_terms())
 
 
 def tokenizer_groups(mode: str = "g1", command_name: str = "motion") -> dict:
@@ -269,6 +275,6 @@ def tara_obs(c: ObsCtx) -> dict[str, ObservationGroupCfg]:
             **object_identity_terms(c.p, c.obj),
             **object_goal_terms(c.p),
             **robot_motion_cmd_terms(c.p),
-        }, corrupt=True),
+        }),
         "critic": critic_group(c),
     }

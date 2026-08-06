@@ -52,9 +52,6 @@ class ObsCtx:
     """Assembly context threaded through the group factories (uniform signature)."""
 
     p: dict = field(default_factory=lambda: {"command_name": "motion"})
-    noisy: bool = False
-    """Proprio sensor noise on the deployable streams. Set from `env_cfg.SIM2REAL`
-    — the ONE switch; never flip it here."""
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +97,14 @@ def tracking_ref_terms(p: dict) -> dict:
 # The named groups
 # ---------------------------------------------------------------------------
 
-def policy_group(noisy: bool = False) -> ObservationGroupCfg:
-    """The frozen SONIC decoder's proprio stream. Term set owned by mocke."""
-    return _grp(profile.policy_obs_terms(noisy=noisy), corrupt=noisy)
+def policy_group() -> ObservationGroupCfg:
+    """The frozen SONIC decoder's proprio stream. Term set owned by mocke.
+
+    Assembled CLEAN; `orcs.core.obs.apply_obs_noise` stamps the sensor noise
+    post-assembly, so one table covers this group and a consumer's own deployed
+    streams from one edit (mocke's `noisy=` flag reaches only this one).
+    """
+    return _grp(profile.policy_obs_terms())
 
 
 def tokenizer_groups(command_name: str = "motion") -> ObservationGroupCfg:
@@ -158,7 +160,7 @@ def critic_group(c: ObsCtx) -> ObservationGroupCfg:
 def sonic_obs(c: ObsCtx) -> dict[str, ObservationGroupCfg]:
     """3-stream (frozen base): SONIC policy + tokenizer / augmentation / critic."""
     return {
-        "policy": policy_group(c.noisy),
+        "policy": policy_group(),
         **tokenizer_groups(c.p["command_name"]),
         "augmentation": augmentation_group(c),
         "critic": critic_group(c),

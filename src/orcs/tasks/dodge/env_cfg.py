@@ -48,7 +48,9 @@ from mocke.sonic import profile
 from orcs.assets import BALL_BODY_NAME, ball_entity_cfg, get_g1_flat_hand_cfg
 from orcs.core.data.scan import scan_flat
 from orcs.core.mdp.commands import MultiClipMotionCommandCfg
+from orcs.core.obs import apply_obs_noise
 from orcs.core.paths import DATA_ROOT
+from orcs.core.robustness import apply_robot_robustness, strip_domain
 from orcs.tasks.dodge import mdp
 from orcs.tasks.dodge.observation_cfgs import ObsCtx, sonic_obs
 from orcs.tasks.dodge.sensors import (
@@ -59,19 +61,15 @@ from orcs.tasks.dodge.sensors import (
     ground_contact_sensor,
 )
 
-__all__ = ["dodge_env_cfg", "nominal_root", "SIM2REAL"]
+__all__ = ["dodge_env_cfg", "nominal_root"]
 
 _P = {"command_name": "motion"}
 
-SIM2REAL = False
-"""THE robustness switch, and the one place it lives.
-
-Off for run 1, matching perloco. The question is behavioural — can a frozen WBC
-be adapted into a whole-body evasion at all — and a domain that makes it harder
-answers a different one. Flipping this on turns on proprio noise; a push / mass
-/ friction domain does not exist for dodge yet and belongs behind this same
-switch when it lands.
-"""
+# The robustness domain is UNCONDITIONAL (the `SIM2REAL` switch is gone,
+# 2026-08-06): the robot half of `orcs.core.robustness` plus `apply_obs_noise`,
+# the same set repose transfers to hardware with. The BALL carries no param DR
+# on purpose — flight is ballistic and contact is a termination, so mass and
+# friction are inert before the only moment they could matter.
 
 EPISODE_LENGTH_S = 10.0
 """Long enough for several throws at `interval_range_s`, short enough that a
@@ -110,7 +108,7 @@ def dodge_env_cfg(
     play: bool = False,
     num_steps_per_env: int = 24,
     robot_cfg: Callable[[], EntityCfg] | None = None,
-    ball_radius: float = 0.12,
+    ball_radius: float = 0.127,  # the 10-inch ball this transfers onto
     ball_mass: float = 0.62,
     kill_bodies: tuple[str, ...] = DODGE_KILL_BODIES,
     kill_exclude: tuple[str, ...] = (),
@@ -239,8 +237,14 @@ def dodge_env_cfg(
         "joint_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     }
 
-    cfg.observations = sonic_obs(ObsCtx(p=_P, noisy=SIM2REAL))
+    cfg.observations = sonic_obs(ObsCtx(p=_P))
 
+    # ── the training domain: robot half only (the ball is not manipulated) ──
+    apply_robot_robustness(cfg)
+    apply_obs_noise(cfg)
+
+    # INVARIANT: play overrides are LAST — they SUBTRACT from the assembled
+    # domain, so anything wired below this line leaks into play/eval.
     if play:
         _play_overrides(cfg)
     return cfg
@@ -255,5 +259,6 @@ def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
     """
     cfg.scene.num_envs = 16
     cfg.events["throw_ball"].params["stand_fraction"] = 0.0
+    strip_domain(cfg)
     for group in cfg.observations.values():
         group.enable_corruption = False
