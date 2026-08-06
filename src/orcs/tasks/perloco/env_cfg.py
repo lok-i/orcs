@@ -38,7 +38,9 @@ from mjlab.viewer import ViewerConfig
 from mocke.sonic import profile
 
 from orcs.assets import get_g1_flat_hand_cfg
+from orcs.core.obs import apply_obs_noise
 from orcs.core.paths import DATA_ROOT
+from orcs.core.robustness import apply_robot_robustness, strip_domain
 from orcs.tasks.perloco import mdp
 from orcs.tasks.perloco.mdp.commands import TerrainMotionCommandCfg
 from orcs.tasks.perloco.observation_cfgs import ObsCtx, sonic_obs, tara_obs
@@ -66,28 +68,11 @@ _MOTION_PAD_EPS_SEC = 2.0
 
 _P = {"command_name": "motion"}
 
-SIM2REAL = False
-"""THE robustness switch, and the one place it lives.
-
-**Off is the current state, not a change.** PerLoco has never carried a
-robustness domain: `events` is reset + the update counter, and uolm's
-`apply_robustness` is object-specific and never called here. Obs noise was
-likewise inert — the groups set `enable_corruption=True`, but mocke's
-`policy_obs_terms()` defaults `noisy=False`, so no term ever carried a `.noise`
-and the flag did nothing. This constant makes that legible and gives the
-regime one name.
-
-Run 1 asks "can a frozen WBC be adapted to terrain constraints at all", which
-is a behavior question — a domain that makes it harder answers a different one.
-NVIDIA's own GRAIL terrain release agrees: it nulls all five event terms and
-sets `enable_corruption: false`.
-
-Flipping this to True turns on proprio noise. A push/mass/friction domain for
-perloco does NOT exist yet — that is sim2real work, and it belongs behind this
-same switch when it lands.
-"""
-
-
+# The robustness domain is UNCONDITIONAL (the `SIM2REAL` switch is gone,
+# 2026-08-06): the robot half of `orcs.core.robustness` plus `apply_obs_noise`,
+# the same set repose transfers to hardware with. Run 1 asked a behavior
+# question and could afford a nominal domain; a policy anyone intends to deploy
+# cannot, and a switch that is always on in every task is not an axis.
 OMNI_RENDER_Z_SCALE: float | None = 0.75
 """OmniRetarget geometry height, decoupled from the clip's own z_scale.
 
@@ -271,12 +256,18 @@ def _core(
         "joint_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     }
 
-    ctx = ObsCtx(p=_P, noisy=SIM2REAL)
+    ctx = ObsCtx(p=_P)
     # command_space "robot"/"smpl" -> mocke's encoder mode "g1"/"smpl"
     cfg.observations = (
         tara_obs(ctx) if agent == "tara"
         else sonic_obs(ctx, "smpl" if command_space == "smpl" else "g1"))
 
+    # ── the training domain: robot half only (there is no object here) ──
+    apply_robot_robustness(cfg)
+    apply_obs_noise(cfg)
+
+    # INVARIANT: play overrides are LAST — they SUBTRACT from the assembled
+    # domain, so anything wired below this line leaks into play/eval.
     if play:
         _play_overrides(cfg)
     return cfg
@@ -368,10 +359,10 @@ def grail_env_cfg(
 
 
 def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
-    """No corruption, no anneal, no tracking kills — so a rollout survives long
+    """No domain, no anneal, no tracking kills — so a rollout survives long
     enough to SHOW where it fails. `illegal_contact` stays: a pelvis on the
     ground is exactly what you want to notice."""
-    cfg.observations["policy"].enable_corruption = False
+    strip_domain(cfg)
     cfg.events.pop("policy_update_counter", None)
     for k in ("bad_anchor_pos", "bad_anchor_ori"):
         cfg.terminations.pop(k, None)

@@ -40,7 +40,9 @@ from orcs.assets import (
     get_g1_flat_hand_cfg,
     omni_object_entity_cfg,
 )
+from orcs.core.obs import apply_obs_noise
 from orcs.core.paths import DATA_ROOT
+from orcs.core.robustness import strip_domain
 from orcs.tasks.uolm import mdp
 from orcs.tasks.uolm.mdp.commands import ObjectMotionCommandCfg
 from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
@@ -349,13 +351,17 @@ def uolm_env_cfg(
         for k in ("bad_object_pos", "bad_object_ori"):
             cfg.terminations.pop(k)
     else:
-        # ── robustness domain: state (isr + pushes) + param (physical DR) ──
+        # ── robustness domain: state (isr + pushes) + param (physical DR),
+        #    both halves — this is the task that has an object ──
         apply_robustness(
             cfg, object_name=OBJECT_BODY_NAME,
             sensor_name=CONTACT_GRAPH_SENSOR_NAME,
             hand_body_names=HAND_BODY_NAMES,
         )
+    apply_obs_noise(cfg)
 
+    # INVARIANT: play overrides are LAST — they SUBTRACT from the assembled
+    # domain, so anything wired below this line leaks into play/eval.
     if play:
         _play_overrides(cfg)
 
@@ -363,8 +369,14 @@ def uolm_env_cfg(
 
 
 def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
-    """Play-mode overrides: no corruption, no anneal/VOF, no tracking kills."""
-    cfg.observations["policy"].enable_corruption = False
+    """Play-mode overrides: no domain, no anneal/VOF, no tracking kills.
+
+    `strip_domain` is a prefix match over `perturb_*`/`rand_*`, so it now takes
+    the PARAM half too. Those events used to survive play (the list named only
+    the anneal terms), which handed every eval rollout a randomized mass,
+    friction, torso COM and a biased joint encoder.
+    """
+    strip_domain(cfg)
     for event in ("policy_update_counter", "virtual_object_force"):
         cfg.events.pop(event, None)
     for k in ("bad_object_pos", "bad_object_ori"):
