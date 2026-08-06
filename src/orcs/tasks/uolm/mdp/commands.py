@@ -17,7 +17,7 @@ Functionally 1:1 with fcrl's ObjectMotionCommand, built on mjlab.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import mujoco
@@ -28,6 +28,7 @@ from mjlab.utils.lab_api.math import (
     quat_error_magnitude,
     quat_from_euler_xyz,
     quat_mul,
+    sample_uniform,
 )
 
 from orcs.core.data.loader import ConcatMotionLoader
@@ -48,7 +49,23 @@ from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
-__all__ = ["ObjectMotionCommandCfg", "ObjectMotionCommand", "motion_dirs"]
+__all__ = [
+    "ObjectMotionCommandCfg",
+    "ObjectMotionCommand",
+    "ProgressivePoolMotionCommandCfg",
+    "ProgressivePoolMotionCommand",
+    "motion_dirs",
+]
+
+# Per-frame SMPL keypoint *direction* channel (palm/foot/pelvis/head). Ported
+# from geometry-aware-policy's src.rewards.reference: staging writes a
+# `smpl_dirs.npz` per sample with one (T, 3) unit-vector array per keypoint,
+# and the loader concatenates them onto the same timeline as smpl_joints_viz so
+# `time_steps` indexes them directly. Read live by the keypoint direction reward
+# via `command.motion.smpl_dirs`. Keys must match src.debug.directions.KEYPOINTS.
+_KEYPOINT_DIR_NAMES = (
+    "left_palm", "right_palm", "left_foot", "right_foot", "pelvis", "head",
+)
 
 # Body-name roster for the tracked-body cfg default — canonical copy lives in
 # mocke.mdp.joint_maps. The IL->MJ joint permutation and the tracked-body slice
@@ -91,6 +108,9 @@ class _ConcatMotionLoader(ConcatMotionLoader):
         self._all_oq: list[torch.Tensor] = []
         self._all_olv: list[torch.Tensor] = []
         self._all_oav: list[torch.Tensor] = []
+        # per-keypoint reference-direction lists (smpl_dirs.npz), same timeline.
+        self._all_dirs: dict[str, list[torch.Tensor]] = {
+            n: [] for n in _KEYPOINT_DIR_NAMES}
         self._clip_lengths: list[int] = []
 
     def _load_extra(self, sample_dir, npz, n_frames: int) -> None:
@@ -115,6 +135,20 @@ class _ConcatMotionLoader(ConcatMotionLoader):
         self._all_oq.append(obq)
         self._all_olv.append(oblv)
         self._all_oav.append(obav)
+
+        # SMPL keypoint reference directions (staged smpl_dirs.npz). Absent is
+        # legal (robot-space clips / not staged) -> zeros, so the direction
+        # reward reads a safe null vector for those frames.
+        df = sample_dir / "smpl_dirs.npz"
+        dd = np.load(df) if df.exists() else None
+        for name in _KEYPOINT_DIR_NAMES:
+            if dd is not None and name in dd.files:
+                self._all_dirs[name].append(
+                    torch.tensor(dd[name], dtype=torch.float32, device=self.device))
+            else:
+                self._all_dirs[name].append(
+                    torch.zeros(T, 3, dtype=torch.float32, device=self.device))
+
         self._clip_lengths.append(T)
 
     def _finalize_extra(self) -> None:
@@ -149,6 +183,11 @@ class _ConcatMotionLoader(ConcatMotionLoader):
         self.obj_quat = torch.cat(self._all_oq)        # (T_tot, 4)
         self.obj_lin_vel = torch.cat(self._all_olv)    # (T_tot, 3)
         self.obj_ang_vel = torch.cat(self._all_oav)    # (T_tot, 3)
+
+        # ── SMPL keypoint reference directions ── {name: (T_tot, 3)}
+        self.smpl_dirs: dict[str, torch.Tensor] = {
+            name: torch.cat(v) for name, v in self._all_dirs.items()
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -563,3 +602,370 @@ class ObjectMotionCommandCfg(MultiClipMotionCommandCfg):
 
     def build(self, env: ManagerBasedRlEnv) -> ObjectMotionCommand:
         return ObjectMotionCommand(self, env)
+
+
+# ---------------------------------------------------------------------------
+# ProgressivePoolMotionCommand — Sugar-DRCL growing-pool RSI
+# ---------------------------------------------------------------------------
+#
+# Ported from geometry-aware-policy's src.commands.progressive_pool. On top of
+# the real retargeted robot reference (here that IS the base loader's robot
+# arrays — orcs already RSIs from the real G1 clips, so no separate retarget
+# loader is needed), this grows a **pool of validated start states** over
+# training:
+#
+#   * The pool starts as a clone of the real reference, with only each clip's
+#     frame 0 marked valid (`pool_flag`).
+#   * Every `update_interval` control steps (after `pool_warmup_steps`) the live
+#     state each env was in `validation_k` steps earlier is committed into the
+#     pool — but only if that env did NOT reset in the intervening window
+#     (survival gate). This validates new (clip, frame) cells.
+#   * A protected fraction of envs (`start_init_env_ratio`) always resets to
+#     clip frame 0; the rest ("free" envs) draw from the pool with probability
+#     `1 - ref_prob`, where `ref_prob` decays linearly from 1 over
+#     `[pool_warmup_steps, pool_minref_steps]` down to `pool_minref_ratio`. A
+#     cell not yet valid in the pool falls back to the raw reference.
+#
+# Also implements Sugar's clip-start-only reset noise (`reset_pose_range` /
+# `reset_joint_position_range`), applied only when a reset lands exactly on a
+# clip's first frame — a separate mechanism from pool growth (the parent's
+# pose_range/velocity_range/joint_position_range are left untouched and apply,
+# if set, to every resample unconditionally).
+#
+# Object state/RSI (goal, contact-conditional randomization) is entirely
+# untouched — still the parent's logic. Only the robot root+joint state written
+# at reset is replaced. Pooling activates only when the clip library is NOT
+# object-masked (`_clip_allowed is None`, i.e. the flat/SMPL command space);
+# omni/robot datasets fall back to the parent sampler.
+
+
+class ProgressivePoolMotionCommand(ObjectMotionCommand):
+    """ObjectMotionCommand + Sugar-DRCL growing-pool RSI."""
+
+    cfg: "ProgressivePoolMotionCommandCfg"
+
+    def __init__(self, cfg: "ProgressivePoolMotionCommandCfg",
+                 env: "ManagerBasedRlEnv") -> None:
+        super().__init__(cfg, env)
+
+        # Optional one-shot clip override for deterministic playback. When set,
+        # the next reset starts each env from that clip's frame 0, then clears.
+        self._forced_clip_ids: torch.Tensor | None = None
+
+        # Optional floating platform to re-place per reset at the resetting env's
+        # active clip's last-frame object x,y (see _place_platform). ``None`` (no
+        # name, missing entity, or non-mocap) disables it.
+        self._platform = None
+        name = cfg.platform_entity_name
+        if name is not None and name in env.scene.entities:
+            plat = env.scene[name]
+            if getattr(plat, "is_mocap", False):
+                self._platform = plat
+
+        # The REAL robot reference is the base loader's robot arrays (orcs RSIs
+        # from the real retargeted G1 clips). Root arrays are the anchor body
+        # (index 0) in env-local frame; env origin is added at write time.
+        self.ref_root_pos = self.motion.body_pos_w[:, 0]
+        self.ref_root_quat = self.motion.body_quat_w[:, 0]
+        self.ref_root_lin_vel = self.motion.body_lin_vel_w[:, 0]
+        self.ref_root_ang_vel = self.motion.body_ang_vel_w[:, 0]
+        self.ref_joint_pos = self.motion.joint_pos
+        self.ref_joint_vel = self.motion.joint_vel
+        self._pool_J = self.ref_joint_pos.shape[-1]
+
+        # `_init_from_pool` is set per-resample by `_sample_init_frame`, aligned
+        # to that call's env_ids. Init empty so an early dry-run resample is safe.
+        self._init_from_pool = torch.zeros(0, dtype=torch.bool, device=self.device)
+
+        if not cfg.pool_enabled:
+            return
+
+        self.pool_count = 0
+        self.start_init_env_count = int(self.num_envs * cfg.start_init_env_ratio)
+
+        # ── the init pool (env-agnostic, origin-free), seeded from the REAL
+        # reference; only frame 0 of each clip is valid to start ──
+        T = self.ref_root_pos.shape[0]
+        self.pool_root_pos = self.ref_root_pos.clone()
+        self.pool_root_quat = self.ref_root_quat.clone()
+        self.pool_root_lin_vel = self.ref_root_lin_vel.clone()
+        self.pool_root_ang_vel = self.ref_root_ang_vel.clone()
+        self.pool_joint_pos = self.ref_joint_pos.clone()
+        self.pool_joint_vel = self.ref_joint_vel.clone()
+        self.pool_flag = torch.zeros(T, dtype=torch.bool, device=self.device)
+        self.pool_flag[self.motion.clip_offsets] = True
+
+        # ── candidate buffers (per env), captured `validation_k` before commit ──
+        n = self.num_envs
+        J = self._pool_J
+        self.cand_valid = torch.zeros(n, dtype=torch.bool, device=self.device)
+        self.cand_clip_id = torch.zeros(n, dtype=torch.long, device=self.device)
+        self.cand_global_step = torch.zeros(n, dtype=torch.long, device=self.device)
+        self.cand_root_pos = torch.zeros(n, 3, device=self.device)
+        self.cand_root_quat = torch.zeros(n, 4, device=self.device)
+        self.cand_root_lin_vel = torch.zeros(n, 3, device=self.device)
+        self.cand_root_ang_vel = torch.zeros(n, 3, device=self.device)
+        self.cand_joint_pos = torch.zeros(n, J, device=self.device)
+        self.cand_joint_vel = torch.zeros(n, J, device=self.device)
+
+        self.metrics["pool_valid_cells"] = torch.zeros(n, device=self.device)
+        self.metrics["pool_ref_prob"] = torch.zeros(n, device=self.device)
+
+    # ── ref-vs-pool schedule ────────────────────────────────────────────────
+
+    def _ref_prob(self) -> float:
+        """Probability a free env resets from the raw reference (vs the pool)."""
+        c = self.pool_count
+        w, m, r = (self.cfg.pool_warmup_steps, self.cfg.pool_minref_steps,
+                   self.cfg.pool_minref_ratio)
+        if c < w or m <= w:
+            return 1.0
+        if c < m:
+            alpha = (c - w) / (m - w)
+            return 1.0 - alpha * (1.0 - r)
+        return r
+
+    # ── sampling ─────────────────────────────────────────────────────────────
+
+    def _sample_init_frame(
+        self, env_ids: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-env (clip, global start-frame) with protected/free + pool draw.
+
+        Also records ``self._init_from_pool`` (aligned to ``env_ids``): which
+        envs' robot state should come from the pool rather than the raw
+        reference. Object-masked (omni) datasets or a disabled pool fall back to
+        the parent sampler (pure phase-annealed/uniform reference selection).
+        """
+        if self._forced_clip_ids is not None:
+            clip_ids = self._forced_clip_ids.to(device=self.device, dtype=torch.long)
+            if clip_ids.numel() != len(env_ids):
+                raise ValueError(
+                    f"forced clip count {clip_ids.numel()} does not match "
+                    f"env_ids {len(env_ids)}")
+            self._forced_clip_ids = None
+            self._init_from_pool = torch.zeros(
+                len(env_ids), dtype=torch.bool, device=self.device)
+            return clip_ids, self.motion.clip_offsets[clip_ids]
+
+        if not self.cfg.pool_enabled or self._clip_allowed is not None:
+            clip_ids, steps = super()._sample_init_frame(env_ids)
+            self._init_from_pool = torch.zeros(
+                len(env_ids), dtype=torch.bool, device=self.device)
+            return clip_ids, steps
+
+        n = len(env_ids)
+        dev = self.device
+        offsets = self.motion.clip_offsets
+        lengths = self.motion.clip_lengths
+
+        clip_ids = torch.zeros(n, dtype=torch.long, device=dev)
+        global_steps = torch.zeros(n, dtype=torch.long, device=dev)
+        use_pool = torch.zeros(n, dtype=torch.bool, device=dev)
+
+        protected = env_ids < self.start_init_env_count
+        free = ~protected
+
+        # protected envs: uniform clip, frame 0, always reference.
+        if protected.any():
+            k = int(protected.sum())
+            c = torch.randint(self.motion.n_clips, (k,), device=dev)
+            clip_ids[protected] = c
+            global_steps[protected] = offsets[c]
+
+        # free envs: uniform candidate frame + ref-vs-pool decision.
+        if free.any():
+            k = int(free.sum())
+            c = torch.randint(self.motion.n_clips, (k,), device=dev)
+            # leave `future_steps` of lookahead so there is a trajectory to track
+            max_local = (lengths[c].float() - self.cfg.future_steps).clamp(min=1.0)
+            local = (torch.rand(k, device=dev) * max_local).long()
+            local = torch.minimum(local, (lengths[c] - 1).clamp(min=0))
+            gstep = offsets[c] + local
+
+            ref_prob = self._ref_prob()
+            take_ref = torch.rand(k, device=dev) < ref_prob
+            pool_valid = self.pool_flag[gstep]
+            # use pool only when NOT drawing reference AND the cell is validated.
+            up = (~take_ref) & pool_valid
+
+            clip_ids[free] = c
+            global_steps[free] = gstep
+            use_pool[free] = up
+
+        self._init_from_pool = use_pool
+        return clip_ids, global_steps
+
+    def force_next_clip_ids(self, clip_ids: torch.Tensor | list[int]) -> None:
+        """Force the next reset to start each env from the given clip's frame 0."""
+        self._forced_clip_ids = torch.as_tensor(
+            clip_ids, dtype=torch.long, device=self.device)
+
+    def _resample_command(self, env_ids: torch.Tensor) -> None:
+        """Reset: invalidate stale candidates, delegate clip/time/goal/object RSI
+        to the parent (unchanged), then overwrite the robot state with the real
+        reference or pool state."""
+        if self.cfg.pool_enabled:
+            # these envs are resetting -> any candidate captured for them is
+            # unproven (they did not survive the validation window).
+            self.cand_valid[env_ids] = False
+
+        # parent samples (via our _sample_init_frame), sets clip/time_steps,
+        # writes robot + object RSI. The robot side is re-written below (pool or
+        # real ref + clip-start noise); the object side is left untouched.
+        super()._resample_command(env_ids)
+        self._write_robot_state(env_ids)
+        self._place_platform(env_ids)
+
+    def _place_platform(self, env_ids: torch.Tensor) -> None:
+        """Re-place the floating platform at each resetting env's active clip's
+        last-frame object x,y (env-local + env origin), keeping the configured
+        box-center height and an upright orientation. No-op when no mocap
+        platform was resolved in ``__init__``."""
+        if self._platform is None:
+            return
+        clip_ids = self._clip_ids[env_ids]
+        origins = self._env.scene.env_origins[env_ids]
+        clip_last = self.motion.clip_ends[clip_ids] - 1
+        n = env_ids.shape[0]
+        pos = torch.empty(n, 3, device=self.device)
+        pos[:, :2] = self.motion.obj_pos[clip_last][:, :2] + origins[:, :2]
+        pos[:, 2] = self.cfg.platform_height + origins[:, 2]
+        quat = torch.zeros(n, 4, device=self.device)
+        quat[:, 0] = 1.0  # identity (w,x,y,z)
+        pose = torch.cat([pos, quat], dim=-1)
+        self._platform.write_mocap_pose_to_sim(pose, env_ids=env_ids)
+
+    def _write_robot_state(self, env_ids: torch.Tensor) -> None:
+        """Overwrite root+joint state from the real reference/pool, with
+        Sugar-style reset noise applied only at clip-start resets."""
+        t = self.time_steps[env_ids]
+        origins = self._env.scene.env_origins[env_ids]
+        clip_ids = self._clip_ids[env_ids]
+        at_start = t == self.motion.clip_offsets[clip_ids]
+
+        if self.cfg.pool_enabled:
+            use_pool = self._init_from_pool.unsqueeze(-1)
+            root_pos = torch.where(use_pool, self.pool_root_pos[t], self.ref_root_pos[t])
+            root_quat = torch.where(use_pool, self.pool_root_quat[t], self.ref_root_quat[t])
+            root_lin_vel = torch.where(
+                use_pool, self.pool_root_lin_vel[t], self.ref_root_lin_vel[t])
+            root_ang_vel = torch.where(
+                use_pool, self.pool_root_ang_vel[t], self.ref_root_ang_vel[t])
+            joint_pos = torch.where(use_pool, self.pool_joint_pos[t], self.ref_joint_pos[t])
+            joint_vel = torch.where(use_pool, self.pool_joint_vel[t], self.ref_joint_vel[t])
+        else:
+            root_pos = self.ref_root_pos[t]
+            root_quat = self.ref_root_quat[t]
+            root_lin_vel = self.ref_root_lin_vel[t]
+            root_ang_vel = self.ref_root_ang_vel[t]
+            joint_pos = self.ref_joint_pos[t]
+            joint_vel = self.ref_joint_vel[t]
+
+        root_pos = root_pos + origins
+
+        rc = self.cfg
+        has_pose_noise = bool(rc.reset_pose_range)
+        has_joint_noise = tuple(rc.reset_joint_position_range) != (0.0, 0.0)
+        if bool(at_start.any()) and (has_pose_noise or has_joint_noise):
+            n = len(env_ids)
+            mask = at_start.unsqueeze(-1)
+            if has_pose_noise:
+                s = sample_se3(rc.reset_pose_range, n, self.device)
+                root_pos = root_pos + torch.where(
+                    mask, s[:, 0:3], torch.zeros_like(s[:, 0:3]))
+                d_quat = quat_from_euler_xyz(s[:, 3], s[:, 4], s[:, 5])
+                ident = torch.zeros_like(d_quat)
+                ident[:, 0] = 1.0
+                d_quat = torch.where(mask, d_quat, ident)
+                root_quat = quat_mul(d_quat, root_quat)
+            if has_joint_noise:
+                jn = sample_uniform(
+                    rc.reset_joint_position_range[0], rc.reset_joint_position_range[1],
+                    joint_pos.shape, device=self.device)
+                joint_pos = joint_pos + torch.where(mask, jn, torch.zeros_like(jn))
+
+        self._write_reference_state_to_sim(
+            env_ids, root_pos, root_quat, root_lin_vel, root_ang_vel,
+            joint_pos, joint_vel)
+
+    # ── step: advance time, grow the pool ─────────────────────────────────────
+
+    def _update_command(self) -> None:
+        super()._update_command()   # advances time_steps, logs, relative poses
+        if not self.cfg.pool_enabled:
+            return
+
+        self.pool_count += 1
+        ui, vk = self.cfg.update_interval, self.cfg.validation_k
+        # snapshot live states `vk` steps before each update boundary.
+        if ui > vk and self.pool_count % ui == (ui - vk):
+            self._snapshot_candidates()
+        # commit survivors at the boundary, once past warmup.
+        if self.pool_count % ui == 0 and self.pool_count > self.cfg.pool_warmup_steps:
+            self._commit_candidates()
+
+        self.metrics["pool_valid_cells"][:] = float(self.pool_flag.sum().item())
+        self.metrics["pool_ref_prob"][:] = self._ref_prob()
+        log = self._env.extras.setdefault("log", {})
+        log["ProgressivePool/valid_cells"] = float(self.pool_flag.sum().item())
+        log["ProgressivePool/ref_prob"] = self._ref_prob()
+
+    def _snapshot_candidates(self) -> None:
+        """Record every env's current live state as a pool candidate."""
+        origins = self._env.scene.env_origins
+        rd = self.robot.data
+        self.cand_clip_id[:] = self._clip_ids
+        self.cand_global_step[:] = self.time_steps
+        self.cand_root_pos[:] = rd.root_link_pos_w - origins
+        self.cand_root_quat[:] = rd.root_link_quat_w
+        self.cand_root_lin_vel[:] = rd.root_link_lin_vel_w
+        self.cand_root_ang_vel[:] = rd.root_link_ang_vel_w
+        self.cand_joint_pos[:] = rd.joint_pos[:, : self._pool_J]
+        self.cand_joint_vel[:] = rd.joint_vel[:, : self._pool_J]
+        self.cand_valid[:] = True
+
+    def _commit_candidates(self) -> None:
+        """Write survived candidates (mid-clip only) into the pool, validating
+        their ``(clip, frame)`` cells."""
+        local = self.cand_global_step - self.motion.clip_offsets[self.cand_clip_id]
+        ok = self.cand_valid & (local > 0)   # frame 0 is protected/seeded
+        if not bool(ok.any()):
+            return
+        g = self.cand_global_step[ok]
+        self.pool_root_pos[g] = self.cand_root_pos[ok]
+        self.pool_root_quat[g] = self.cand_root_quat[ok]
+        self.pool_root_lin_vel[g] = self.cand_root_lin_vel[ok]
+        self.pool_root_ang_vel[g] = self.cand_root_ang_vel[ok]
+        self.pool_joint_pos[g] = self.cand_joint_pos[ok]
+        self.pool_joint_vel[g] = self.cand_joint_vel[ok]
+        self.pool_flag[g] = True
+        self.cand_valid[:] = False
+
+
+@dataclass(kw_only=True)
+class ProgressivePoolMotionCommandCfg(ObjectMotionCommandCfg):
+    """ObjectMotionCommandCfg + Sugar-DRCL pooling knobs."""
+
+    # progressive pooling (control-step units)
+    pool_enabled: bool = True
+    start_init_env_ratio: float = 0.25
+    pool_warmup_steps: int = 24000
+    pool_minref_steps: int = 120000
+    pool_minref_ratio: float = 0.33
+    validation_k: int = 48
+    update_interval: int = 2400
+
+    # Sugar-style reset noise, clip-start only (independent of pool_enabled)
+    reset_pose_range: dict[str, tuple[float, float]] = field(default_factory=dict)
+    reset_joint_position_range: tuple[float, float] = (0.0, 0.0)
+
+    # Floating-platform per-reset placement. When ``platform_entity_name`` names
+    # a (mocap) entity in the scene, every reset re-places that platform's x,y at
+    # the resetting env's active clip's last-frame object x,y. Left ``None`` the
+    # platform keeps its static build-time pose.
+    platform_entity_name: str | None = None
+    platform_height: float = 0.0
+
+    def build(self, env: ManagerBasedRlEnv) -> ProgressivePoolMotionCommand:
+        return ProgressivePoolMotionCommand(self, env)

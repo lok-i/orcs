@@ -341,9 +341,30 @@ def uolm_env_cfg(
     )
 
     if command_space == "smpl":
-        # Rollout-only for now: rewards + RSI design deferred (frozen base,
-        # zero-adapt). No tracking kills / robustness / VOF — just play.
-        cfg.rewards = {}
+        # SMPL keypoint tracking (pos + body-fixed direction), no retargeting:
+        # hands rewarded in the OBJECT frame (morphology-free interaction
+        # signal); feet / pelvis / head in the WORLD frame. Reference position
+        # comes from the SMPL ghost joints, reference direction from the
+        # command's per-frame smpl_dirs buffer.
+        _hands = ("left_palm", "right_palm")
+        _world_kps = ("left_foot", "right_foot", "pelvis", "head")
+        rewards: dict[str, RewardTermCfg] = {}
+        for kp in _hands:
+            rewards[f"kp_pos_{kp}"] = RewardTermCfg(
+                func=mdp.keypoint_position_error_exp, weight=1.0,
+                params={**_p, "keypoint": kp, "frame": "object", "std": 0.3})
+            rewards[f"kp_dir_{kp}"] = RewardTermCfg(
+                func=mdp.keypoint_direction_error_exp, weight=0.5,
+                params={**_p, "keypoint": kp, "frame": "object", "std": 0.4})
+        for kp in _world_kps:
+            rewards[f"kp_pos_{kp}"] = RewardTermCfg(
+                func=mdp.keypoint_position_error_exp, weight=1.0,
+                params={**_p, "keypoint": kp, "frame": "world", "std": 0.3})
+            rewards[f"kp_dir_{kp}"] = RewardTermCfg(
+                func=mdp.keypoint_direction_error_exp, weight=0.5,
+                params={**_p, "keypoint": kp, "frame": "world", "std": 0.4})
+        cfg.rewards = rewards
+        # No tracking kills / robustness / VOF here — keypoint tracking only.
         cfg.observations["critic"].terms.pop("reward_vec")
         cfg.events.pop("virtual_object_force")
         for k in ("bad_object_pos", "bad_object_ori"):
