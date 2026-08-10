@@ -24,11 +24,10 @@ class ThrowBall(ManagerTermBase):
 
     ``mode="interval"``, ``interval_range_s=(0.0, 0.0)`` -> ticks every env step.
 
-    **Trajectory.** Pure ballistic under the model's own gravity, parameterised
-    by the REACTION WINDOW rather than by a launch speed: the ball is released in
-    the robot's frontal cone at ``dist_range`` and must arrive at the aim point
-    after ``flight_time_range``, which fixes the horizontal speed. Two threat
-    types are mixed so the evasion vocabulary is not one move:
+    **Trajectory.** Pure ballistic under the model's own gravity. The default
+    threat model is parameterised by the REACTION WINDOW rather than by a launch
+    speed: the ball is released in the robot's frontal cone at ``dist_range``
+    and must arrive after ``flight_time_range``. Two threat types are mixed:
 
     | type | release | vz0 | arrives at | evasion |
     |---|---|---|---|---|
@@ -39,6 +38,15 @@ class ThrowBall(ManagerTermBase):
     so a robot that walks in a straight line does not evade for free and no two
     throws share a geometry. Descending flight times are capped so the ball
     cannot land short of the robot.
+
+    A camera-aware task may instead pass ``launch_camera_name``. Its release
+    point is sampled directly in the camera frustum's intersection with the
+    low ``underarm_height_range`` plane, using the camera pose captured at the
+    nominal reset. Horizontal speed is sampled and flight time is then derived
+    from distance. ``underarm_vertical_speed_max`` bounds the launch impulse;
+    target height is sampled only from the reachable part of
+    ``underarm_target_height_range``. This mode is always a rising underarm
+    throw; the legacy cone and descending branch are deliberately bypassed.
 
     **Parking is a pin, not a spawn.** A ball is only ever teleported: for
     ``flight_window_s`` after a throw it flies free, and every other step its
@@ -62,6 +70,44 @@ class ThrowBall(ManagerTermBase):
         p = cfg.params
         self._interval_range = p.get("interval_range_s", (1.0, 4.0))
         self._stand_fraction = float(p.get("stand_fraction", 0.2))
+        self._launch_camera_name = p.get("launch_camera_name")
+        self._camera_pos_0: torch.Tensor | None = None
+        self._camera_mat_0: torch.Tensor | None = None
+        if self._launch_camera_name is not None:
+            camera = env.scene.sensors[self._launch_camera_name]
+            self._camera_id = env.sim.mj_model.camera(self._launch_camera_name).id
+            if camera.cfg.fovy is None:
+                raise ValueError("camera-footprint throws require a perspective fovy")
+            half_v = math.radians(camera.cfg.fovy) / 2.0
+            self._tan_v = math.tan(half_v)
+            self._tan_h = (camera.cfg.width / camera.cfg.height) * self._tan_v
+            height_range = p.get("underarm_height_range", (0.4, 0.7))
+            target_range = p.get("underarm_target_height_range", (0.9, 1.3))
+            speed_range = p.get("horizontal_speed_range", (3.0, 5.0))
+            vertical_speed_max = float(p.get("underarm_vertical_speed_max", 5.0))
+            ndc_margin = p.get("launch_ndc_margin", 0.15)
+            if not 0.0 <= ndc_margin < 1.0:
+                raise ValueError(
+                    f"launch_ndc_margin must be in [0, 1), got {ndc_margin}"
+                )
+            if height_range[0] > height_range[1] or target_range[0] > target_range[1]:
+                raise ValueError("underarm height ranges must be ordered")
+            if height_range[1] >= target_range[0]:
+                raise ValueError(
+                    "underarm release heights must be below target heights"
+                )
+            if speed_range[0] <= 0.0 or speed_range[0] > speed_range[1]:
+                raise ValueError(
+                    f"invalid horizontal_speed_range: {speed_range}"
+                )
+            min_vertical_speed = math.sqrt(
+                2.0 * self._g * (target_range[0] - height_range[0])
+            )
+            if vertical_speed_max < min_vertical_speed:
+                raise ValueError(
+                    f"underarm_vertical_speed_max={vertical_speed_max} cannot "
+                    f"reach target height {target_range[0]} from {height_range[0]}"
+                )
         self.reset(None)
 
     # ── state ──
@@ -79,6 +125,58 @@ class ThrowBall(ManagerTermBase):
         self._flight[env_ids] = 0
         self._anchor[env_ids] = (
             torch.rand(n, device=self.device) < self._stand_fraction)
+
+    def _capture_nominal_camera(self, env: ManagerBasedRlEnv) -> None:
+        """Cache the post-DR camera pose relative to each scene origin once."""
+        if self._launch_camera_name is None or self._camera_pos_0 is not None:
+            return
+        self._camera_pos_0 = (
+            env.sim.data.cam_xpos[:, self._camera_id] - env.scene.env_origins
+        ).clone()
+        self._camera_mat_0 = env.sim.data.cam_xmat[:, self._camera_id].reshape(
+            self.num_envs, 3, 3
+        ).clone()
+
+    def _sample_camera_launch(
+        self,
+        env: ManagerBasedRlEnv,
+        throw_ids: torch.Tensor,
+        heights: torch.Tensor,
+        ndc_margin: float,
+    ) -> torch.Tensor:
+        """Sample the nominal camera frustum on one horizontal launch plane."""
+        if not 0.0 <= ndc_margin < 1.0:
+            raise ValueError(f"launch_ndc_margin must be in [0, 1), got {ndc_margin}")
+        assert self._camera_pos_0 is not None and self._camera_mat_0 is not None
+
+        n = len(throw_ids)
+        ndc = (
+            torch.rand(n, 2, device=self.device) * 2.0 - 1.0
+        ) * (1.0 - ndc_margin)
+        ray_c = torch.stack(
+            [
+                ndc[:, 0] * self._tan_h,
+                ndc[:, 1] * self._tan_v,
+                -torch.ones(n, device=self.device),
+            ],
+            dim=-1,
+        )
+        ray_w = torch.bmm(
+            self._camera_mat_0[throw_ids], ray_c.unsqueeze(-1)
+        ).squeeze(-1)
+        camera_pos = (
+            env.scene.env_origins[throw_ids] + self._camera_pos_0[throw_ids]
+        )
+        plane_z = env.scene.env_origins[throw_ids, 2] + heights
+        scale = (plane_z - camera_pos[:, 2]) / ray_w[:, 2]
+        if bool((scale <= 0.0).any()):
+            raise RuntimeError(
+                f"camera {self._launch_camera_name!r} does not face the underarm "
+                "launch plane; its nominal frustum has no forward intersection"
+            )
+        start = camera_pos + scale[:, None] * ray_w
+        start[:, 2] = plane_z
+        return start
 
     # ── per step ──
 
@@ -99,12 +197,19 @@ class ThrowBall(ManagerTermBase):
         low_arc_fraction: float = 0.5,
         low_launch_height_range: tuple[float, float] = (0.4, 0.9),
         low_target_z_range: tuple[float, float] = (0.9, 1.3),
+        launch_camera_name: str | None = None,
+        launch_ndc_margin: float = 0.15,
+        underarm_height_range: tuple[float, float] = (0.4, 0.7),
+        underarm_target_height_range: tuple[float, float] = (0.9, 1.3),
+        horizontal_speed_range: tuple[float, float] = (3.0, 5.0),
+        underarm_vertical_speed_max: float = 5.0,
         lead_target: bool = True,
         aim_noise: float = 0.1,
     ) -> None:
         del env_ids, interval_range_s, stand_fraction  # read at construction
         ball, robot = env.scene[ball_name], env.scene[robot_name]
         dev = self.device
+        self._capture_nominal_camera(env)
 
         # 1. Pin every ball that is not mid-flight. Unconditional, so a ball that
         #    landed, bounced or was never thrown is in exactly one place.
@@ -131,43 +236,107 @@ class ThrowBall(ManagerTermBase):
         # 3. Launch.
         n = len(throw_ids)
         root_pos = robot.data.root_link_pos_w[throw_ids]
-        yq = yaw_quat(robot.data.root_link_quat_w[throw_ids])
 
         def u(lo: float, hi: float) -> torch.Tensor:
             return torch.rand(n, device=dev) * (hi - lo) + lo
 
-        # Release point: in the frontal cone, so the throw is camera-visible.
-        dist = u(*dist_range)
-        bearing = u(-angle_deg, angle_deg) * (math.pi / 180.0)
-        offset_b = torch.stack(
-            [dist, dist * torch.tan(bearing), torch.zeros_like(dist)], dim=-1)
-        low = torch.rand(n, device=dev) < low_arc_fraction
-        start = torch.empty(n, 3, device=dev)
-        start[:, 0:2] = root_pos[:, 0:2] + quat_apply(yq, offset_b)[:, 0:2]
-        start[:, 2] = torch.where(
-            low, u(*low_launch_height_range), u(*launch_height_range))
+        if launch_camera_name is not None:
+            if launch_camera_name != self._launch_camera_name:
+                raise ValueError(
+                    "launch_camera_name cannot change after ThrowBall construction"
+                )
+            # This is a direct sample of the camera footprint on a low release
+            # plane. No polar cone and no sampled reaction window are involved.
+            start = self._sample_camera_launch(
+                env,
+                throw_ids,
+                u(*underarm_height_range),
+                launch_ndc_margin,
+            )
+            aim = root_pos[:, 0:2].clone()
+            if lead_target:
+                mean_speed = 0.5 * sum(horizontal_speed_range)
+                t = (
+                    torch.linalg.vector_norm(aim - start[:, 0:2], dim=-1)
+                    / mean_speed
+                )
+                aim = aim + robot.data.root_link_lin_vel_w[throw_ids, :2] * t[:, None]
+            if aim_noise > 0.0:
+                aim = aim + aim_noise * torch.randn_like(aim)
+            delta = aim - start[:, 0:2]
+            distance = torch.linalg.vector_norm(delta, dim=-1).clamp(min=1e-3)
 
-        # Reaction window. A DESCENDING ball (vz0=0) falls the whole flight, so
-        # cap its time at the ground: past that it lands short and is no threat.
-        # A LOW-ARC ball is still climbing at arrival and needs no cap.
-        t_req = u(*flight_time_range)
-        t_max = torch.sqrt((2.0 * (start[:, 2] - 0.05).clamp(min=1e-3)) / self._g)
-        t = torch.where(low, t_req, torch.minimum(t_req, t_max))
+            # Bound the vertical impulse without deleting far footprint samples.
+            # If a slow horizontal throw would require vz > the cap merely to
+            # reach the minimum hit height, raise its horizontal speed within
+            # the configured range. Close throws keep the full speed range.
+            target_lo = (
+                env.scene.env_origins[throw_ids, 2]
+                + underarm_target_height_range[0]
+            )
+            dz_lo = target_lo - start[:, 2]
+            discriminant = underarm_vertical_speed_max**2 - 2.0 * self._g * dz_lo
+            t_max = (
+                underarm_vertical_speed_max + torch.sqrt(discriminant.clamp(min=0.0))
+            ) / self._g
+            speed_lo = torch.maximum(
+                torch.full_like(distance, horizontal_speed_range[0]),
+                distance / t_max,
+            )
+            if bool((speed_lo > horizontal_speed_range[1]).any()):
+                raise RuntimeError(
+                    "camera footprint contains a throw that cannot satisfy both "
+                    "horizontal_speed_range and underarm_vertical_speed_max"
+                )
+            speed = speed_lo + torch.rand(n, device=dev) * (
+                horizontal_speed_range[1] - speed_lo
+            )
+            t = distance / speed
+            vel = torch.zeros(n, 3, device=dev)
+            vel[:, 0:2] = delta / t[:, None]
+            target_hi = torch.minimum(
+                env.scene.env_origins[throw_ids, 2]
+                + underarm_target_height_range[1],
+                start[:, 2]
+                + underarm_vertical_speed_max * t
+                - 0.5 * self._g * t.square(),
+            )
+            target_hi = torch.maximum(target_hi, target_lo)
+            target_z = target_lo + torch.rand(n, device=dev) * (target_hi - target_lo)
+            vel[:, 2] = (target_z - start[:, 2]) / t + 0.5 * self._g * t
+        else:
+            # Legacy release point: robot-relative frontal cone.
+            dist = u(*dist_range)
+            bearing = u(-angle_deg, angle_deg) * (math.pi / 180.0)
+            offset_b = torch.stack(
+                [dist, dist * torch.tan(bearing), torch.zeros_like(dist)], dim=-1)
+            yq = yaw_quat(robot.data.root_link_quat_w[throw_ids])
+            low = torch.rand(n, device=dev) < low_arc_fraction
+            start = torch.empty(n, 3, device=dev)
+            start[:, 0:2] = root_pos[:, 0:2] + quat_apply(yq, offset_b)[:, 0:2]
+            start[:, 2] = torch.where(
+                low, u(*low_launch_height_range), u(*launch_height_range))
 
-        aim = root_pos[:, 0:2].clone()
-        if lead_target:
-            aim = aim + robot.data.root_link_lin_vel_w[throw_ids, :2] * t[:, None]
-        if aim_noise > 0.0:
-            aim = aim + aim_noise * torch.randn_like(aim)
+            # A descending ball falls the whole flight, so cap its time at the
+            # ground: past that it lands short and is no threat.
+            t_req = u(*flight_time_range)
+            t_max = torch.sqrt(
+                (2.0 * (start[:, 2] - 0.05).clamp(min=1e-3)) / self._g)
+            t = torch.where(low, t_req, torch.minimum(t_req, t_max))
 
-        vel = torch.zeros(n, 3, device=dev)
-        vel[:, 0:2] = (aim - start[:, 0:2]) / t[:, None]
-        # z_target = z0 + vz0 t - g t^2 / 2  ->  vz0 = (z_tgt - z0)/t + g t / 2.
-        vel[:, 2] = torch.where(
-            low,
-            (u(*low_target_z_range) - start[:, 2]) / t + 0.5 * self._g * t,
-            torch.zeros(n, device=dev),
-        )
+            aim = root_pos[:, 0:2].clone()
+            if lead_target:
+                aim = aim + robot.data.root_link_lin_vel_w[throw_ids, :2] * t[:, None]
+            if aim_noise > 0.0:
+                aim = aim + aim_noise * torch.randn_like(aim)
+
+            vel = torch.zeros(n, 3, device=dev)
+            vel[:, 0:2] = (aim - start[:, 0:2]) / t[:, None]
+            vel[:, 2] = torch.where(
+                low,
+                (u(*low_target_z_range) - start[:, 2]) / t + 0.5 * self._g * t,
+                torch.zeros(n, device=dev),
+            )
 
         pose = torch.zeros(n, 7, device=dev)
         pose[:, 0:3] = start
