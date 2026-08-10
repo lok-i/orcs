@@ -118,8 +118,9 @@ def dodge_env_cfg(
     """Frozen SONIC + LoRA, standing, dodging a thrown ball.
 
     `**throw_kw` forwards to :class:`~orcs.tasks.dodge.mdp.events.ThrowBall`, so
-    the whole threat model (interval, cone, distance, flight time, threat mix,
-    anchor fraction) is tunable without re-declaring a single default here.
+    the whole threat model (interval, legacy cone/reaction window or camera
+    footprint/speed, threat mix, anchor fraction) is tunable without
+    re-declaring a single default here.
 
     `station_std` widens or tightens the pull back to the reference position.
     Wide by default: at 1.0 m a 0.5 m sidestep keeps ~78% of the term, so it
