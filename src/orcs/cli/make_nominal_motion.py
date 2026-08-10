@@ -19,7 +19,7 @@ Why `--seconds` covers a whole episode rather than one frame: the frames are
 identical, so phase carries no information, but the machinery still advances the
 timeline. A clip longer than the episode means no env ever reaches the end, so
 `exceeded_motion_by_eps` and the last-frame freeze stay dormant instead of
-needing a special case. Pair it with `start_from_zero=True` in the command cfg.
+needing a special case. Pair it with `alpha_phase_init=0.0` in the command cfg.
 """
 
 from __future__ import annotations

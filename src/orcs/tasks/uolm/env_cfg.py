@@ -381,7 +381,7 @@ def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
         cfg.events.pop(event, None)
     for k in ("bad_object_pos", "bad_object_ori"):
         cfg.terminations.pop(k, None)
-    cfg.commands["motion"].start_from_zero = True
+    cfg.commands["motion"].alpha_phase_init = 0.0  # every clip from frame 0
     # remove the intial statn randomization in motion
     cfg.commands["motion"].pose_range = {}
     cfg.commands["motion"].velocity_range = {}

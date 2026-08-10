@@ -366,4 +366,4 @@ def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
     cfg.events.pop("policy_update_counter", None)
     for k in ("bad_anchor_pos", "bad_anchor_ori"):
         cfg.terminations.pop(k, None)
-    cfg.commands["motion"].start_from_zero = True
+    cfg.commands["motion"].alpha_phase_init = 0.0  # every clip from frame 0

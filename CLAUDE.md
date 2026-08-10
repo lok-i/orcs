@@ -80,6 +80,22 @@ orcs is thin; the substance lives in four pinned deps (`deps.lock`, materialized
   converged per-dim band). Streams: `policy` (proprio hist-10) + `tokenizer` (future ref window)
   from `mocke.sonic.profile`; orcs adds `augmentation` (task/object kinematics — the adapter's
   conditioning) and a privileged `critic`.
+- **Annealing has ONE primitive and ONE naming convention** — `orcs.core.schedules.anneal_alpha`.
+  Every curriculum on `policy_update_count` spells itself `<what>_anneal_{start,end}: int`
+  (`end <= start` = OFF) + `alpha_<what>_init: float` (held before `start` and forever when the
+  window is empty) + live `alpha_<what>` + a `<What>Annealing/alpha` log key. **Two scalars, not
+  a tuple** — mjlab's `train` parses argv in two stages, so no multi-value flag reaches the cfg
+  (stock `--env.commands.motion.joint-position-range 0.0 0.1` fails the same way). Two today:
+  **phase** (`alpha_phase` 1→0, caps where RSI may start; `alpha_phase_init=0.0` is play's "every
+  clip from frame 0" and REPLACED the old `start_from_zero` bool — the two are identical because
+  `init_lens` clamps to 1) and **goal domain** (`alpha_goal` 0→1, the fraction of envs whose goal
+  is task-domain rather than the demo's terminal pose; needs the task to override
+  `ObjectMotionCommand._sample_task_goal_quat`, else annealing asserts at init). Because
+  `alpha_<what>_init` doubles as the held constant, an arbitrary fixed mixture and the
+  no-counter play/eval case are the SAME field — do not add a bool for either.
+  **A term incompatible with an annealed goal switches off RUN-level (`goal_anneals`),
+  never per env.** The critic sees the goal but not the domain, so a per-env reward makes
+  V average two regimes for the whole ramp; `goal_is_task` is telemetry only.
 - **Joint order**: the retargeted dataset is IsaacLab BFS (IL); mjlab/MuJoCo is XML DFS (MJ). The
   port script bakes the IL→MJ permutation into the ported ckpt's first/last layers, so the runtime
   consumes/emits MJ order with no runtime converters. `mocke.mdp.joint_maps.{IL2MJ,MJ2IL}` is the

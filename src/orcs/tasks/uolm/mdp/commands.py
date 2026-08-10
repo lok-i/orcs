@@ -7,7 +7,8 @@ everything that mentions an object:
 
   1. object tracking on the same timeline (_ConcatMotionLoader's extra channels)
   2. object RSI, conditional on init phase and reference contact
-  3. object goal from the final clip frame + the `at_goal` metric
+  3. object goal from the final clip frame + the `at_goal` metric, and the
+     GOAL-DOMAIN anneal that walks a fraction of it off the demo manifold
   4. N-step future OBJECT reference accessors
   5. omni mode: env->object identity, so an env samples only ITS object's clips
   6. the ghost/goal/SMPL debug viz
@@ -42,6 +43,7 @@ from orcs.core.mdp.commands import (
     MultiClipMotionCommandCfg,
     sample_se3,
 )
+from orcs.core.schedules import anneal_alpha
 from orcs.tasks.uolm.mdp.contact_schedule import ContactSchedule
 from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
 
@@ -230,6 +232,19 @@ class ObjectMotionCommand(MultiClipMotionCommand):
         )
         self._object_goal_quat[:, 0] = 1.0
 
+        # Goal-domain annealing (orcs.core.schedules): alpha_goal ramps
+        # `alpha_goal_init` -> 1 = the fraction of envs whose goal is drawn from
+        # the TASK domain instead of the demo's terminal pose.
+        self.alpha_goal: float = cfg.alpha_goal_init
+        self._goal_is_task = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        assert not (self.goal_anneals and self._sample_task_goal_quat(1) is None), (
+            f"{type(self).__name__} has goal annealing configured but defines no "
+            "task-domain goal set — override _sample_task_goal_quat."
+        )
+        self.metrics["alpha_goal"] = torch.zeros(self.num_envs, device=self.device)
+
         # Object tracking metrics
         self.metrics["error_object_pos"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_object_ori"] = torch.zeros(self.num_envs, device=self.device)
@@ -237,6 +252,69 @@ class ObjectMotionCommand(MultiClipMotionCommand):
         self.metrics["error_object_pos_goal"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_object_ori_goal"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["at_goal"] = torch.zeros(self.num_envs, device=self.device)
+
+    # ── goal-domain annealing ──
+
+    @property
+    def goal_anneals(self) -> bool:
+        """Can a task-domain goal occur AT ALL this run? Run-level on purpose:
+        a term incompatible with an off-manifold goal must switch off for EVERY
+        env, or the reward function varies across envs in a way the critic
+        cannot observe (it sees the goal, never the domain)."""
+        return (self.cfg.goal_anneal_end > self.cfg.goal_anneal_start
+                or self.cfg.alpha_goal_init > 0.0)
+
+    @property
+    def goal_is_task(self) -> torch.Tensor:
+        """(B,) bool — this episode's goal is TASK-domain, not the demo's end
+        pose. TELEMETRY ONLY; never gate a reward or termination on it — see
+        `goal_anneals`."""
+        return self._goal_is_task
+
+    def _sample_task_goal_quat(self, n: int) -> torch.Tensor | None:
+        """Task-domain goal orientations -> (n, 4), or None if this task defines
+        none (then annealing is a config error, asserted at init)."""
+        del n
+        return None
+
+    def _assign_goal_domain(self, env_ids: torch.Tensor) -> None:
+        """Exact-count controller: keep the STANDING task-domain count at
+        round(alpha_goal * N) by picking k of the RESETTING envs, so the realized
+        fraction is variance-free where per-reset Bernoulli would drift.
+
+        Overwrites `_object_goal_quat` in place; the caller re-derives whatever
+        it caches off the goal. alpha_goal=0 => k=0 => exact no-op.
+        """
+        m = len(env_ids)
+        if m == 0 or not self.goal_anneals:
+            return
+        standing = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        standing[env_ids] = False
+        n_target = round(self.alpha_goal * self.num_envs)
+        k = min(max(n_target - int((self._goal_is_task & standing).sum()), 0), m)
+        sel = torch.zeros(m, dtype=torch.bool, device=self.device)
+        if k > 0:
+            sel[torch.randperm(m, device=self.device)[:k]] = True
+            quat = self._sample_task_goal_quat(k)
+            assert quat is not None
+            self._object_goal_quat[env_ids[sel]] = quat
+        self._goal_is_task[env_ids] = sel
+
+    def _log_goal_domain_split(self, env_ids: torch.Tensor, metric: str) -> None:
+        """Log `metric`'s mean over the resetting envs, split by goal domain.
+
+        Call BEFORE `CommandTerm.reset` — it zeroes metrics and then reassigns
+        the domain flag. Empty side -> key omitted, never a fake 0. Split a
+        metric the TASK actually scores: `at_goal` is yaw-inclusive, so for an
+        up-face goal it sits near its floor and says nothing.
+        """
+        log = self._env.extras.setdefault("log", {})
+        is_task = self._goal_is_task[env_ids]
+        for name, m in (("task", is_task), ("demo", ~is_task)):
+            if bool(m.any()):
+                log[f"GoalAnnealing/{metric}_{name}"] = float(
+                    self.metrics[metric][env_ids][m].mean()
+                )
 
     def _clip_allowance(self, env_ids: torch.Tensor) -> torch.Tensor | None:
         """Omni mode: each env samples only clips of ITS object."""
@@ -293,14 +371,27 @@ class ObjectMotionCommand(MultiClipMotionCommand):
             [obj_pos, obj_quat, obj_lin_vel, obj_ang_vel], dim=-1)
         self.object.write_root_state_to_sim(obj_state, env_ids=env_ids)
 
+        # LAST: the goal-domain draw sits after the object RSI draws, so turning
+        # annealing on cannot shift the RNG stream the rest of this reset uses.
+        self._assign_goal_domain(env_ids)
+
     def _update_task(self) -> None:
-        """RobotObjectContactGraph: per-body demo-vs-actual contact disparity
-        |ref - live|, averaged over envs (logged whenever a graph sensor is
-        configured, whatever contact reward, if any, is live)."""
+        """Goal-domain alpha + the RobotObjectContactGraph disparity log
+        (|ref - live| per body, averaged over envs)."""
+        log = self._env.extras.setdefault("log", {})
+        self.alpha_goal = anneal_alpha(
+            getattr(self._env, "policy_update_count", 0),
+            self.cfg.goal_anneal_start, self.cfg.goal_anneal_end,
+            self.cfg.alpha_goal_init, 1.0,
+        )
+        self.metrics["alpha_goal"][:] = self.alpha_goal
+        log["GoalAnnealing/alpha"] = self.alpha_goal
+        log["GoalAnnealing/frac_task"] = (
+            int(self._goal_is_task.sum()) / self.num_envs)
+
         if not (self.cfg.contact_graph_body_names
                 and self.cfg.contact_graph_sensor_name):
             return
-        log = self._env.extras.setdefault("log", {})
         sensor = self._env.scene.sensors[self.cfg.contact_graph_sensor_name]
         force = torch.norm(sensor.data.force, dim=-1)  # (N, K) sensor order
         cols = [sensor.primary_names.index(b)
@@ -513,8 +604,8 @@ class ObjectMotionCommandCfg(MultiClipMotionCommandCfg):
     """MultiClipMotionCommandCfg + object tracking.
 
     The clip-library fields (`dataset_dir`, `exclude_motions`, `future_steps`,
-    the tracked-body/anchor defaults, phase annealing, `start_from_zero`) are
-    inherited from core. Everything below mentions an object.
+    the tracked-body/anchor defaults, phase annealing) are inherited from core.
+    Everything below mentions an object.
     """
 
     object_entity_name: str = "object"
@@ -554,6 +645,16 @@ class ObjectMotionCommandCfg(MultiClipMotionCommandCfg):
     # RobotObjectContactGraph logging (ref-vs-live disparity). None -> not logged.
     contact_graph_sensor_name: str | None = None
     contact_force_threshold: float = 0.1
+
+    # Goal-domain annealing (orcs.core.schedules; needs `_sample_task_goal_quat`).
+    # alpha_goal = the fraction of envs whose goal is TASK-domain rather than the
+    # demo's terminal pose, ramping `alpha_goal_init` -> 1 over [start, end].
+    # end <= start = OFF, so alpha_goal == alpha_goal_init all run: the default
+    # is pure demo goals, and `alpha_goal_init=1.0` is pure task domain (what
+    # play/eval wants — it needs no policy-update counter).
+    goal_anneal_start: int = 0
+    goal_anneal_end: int = 0
+    alpha_goal_init: float = 0.0
 
     # Success thresholds for the `at_goal` metric (pos AND ori, fcrl parity)
     success_pos_threshold: float = 0.15

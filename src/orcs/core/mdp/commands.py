@@ -40,6 +40,7 @@ from mocke.mdp.joint_maps import G1_TRACKED_BODY_NAMES as _G1_BODY_NAMES
 
 from orcs.core.data.loader import ConcatMotionLoader
 from orcs.core.data.scan import scan_flat
+from orcs.core.schedules import anneal_alpha
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -79,10 +80,10 @@ class MultiClipMotionCommand(MotionCommand):
             self.num_envs, dtype=torch.long, device=self.device
         )
 
-        # Phase annealing: _init_phase_max ∈ [0,1] caps WHERE envs can
-        # start (not where they end — clips always run to natural end).
-        self._init_phase_max: float = 1.0
-        self.metrics["init_phase_max"] = torch.zeros(self.num_envs, device=self.device)
+        # Phase annealing: alpha_phase ∈ [0,1] caps WHERE envs may start; ramps
+        # `alpha_phase_init` -> 0. 0 == every clip from frame 0.
+        self.alpha_phase: float = cfg.alpha_phase_init
+        self.metrics["alpha_phase"] = torch.zeros(self.num_envs, device=self.device)
 
         self._init_task()
 
@@ -125,28 +126,19 @@ class MultiClipMotionCommand(MotionCommand):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample per-env (clip_id, init_frame) with phase annealing.
 
-        _init_phase_max restricts WHERE the episode can START.
-        Clips always run to their natural boundary.
+        alpha_phase restricts WHERE the episode can START; clips always run to
+        their natural boundary. alpha_phase=0 collapses to frame 0 of a uniform
+        allowed clip on its own — hence no separate start-from-zero branch.
         """
         n = len(env_ids)
         L = self.motion.max_clip_length
 
         allowed = self._clip_allowance(env_ids)  # (n, n_clips) | None
 
-        # Force frame 0: pick a clip uniformly (within allowance), init at start.
-        if self.cfg.start_from_zero:
-            if allowed is None:
-                clip_ids = torch.randint(
-                    self.motion.n_clips, (n,), device=self.device
-                )
-            else:
-                clip_ids = torch.multinomial(allowed, 1).squeeze(1)
-            return clip_ids, self.motion.clip_offsets[clip_ids]
-
-        # Init-sampling mask: [0, _init_phase_max * clip_length) per clip
-        if self._init_phase_max < 1.0:
+        # Init-sampling mask: [0, alpha_phase * clip_length) per clip
+        if self.alpha_phase < 1.0:
             init_lens = (
-                self.motion.clip_lengths.float() * self._init_phase_max
+                self.motion.clip_lengths.float() * self.alpha_phase
             ).long().clamp(min=1)
             frame_indices = torch.arange(L, device=self.device).unsqueeze(0)
             init_mask = frame_indices < init_lens.unsqueeze(1)
@@ -217,17 +209,15 @@ class MultiClipMotionCommand(MotionCommand):
     # ── step ──
 
     def _update_command(self) -> None:
-        # Phase annealing: _init_phase_max 1→0 over N policy updates.
-        if self.cfg.init_phase_anneal_iterations > 0 and hasattr(
-            self._env, "policy_update_count"
-        ):
-            k = self._env.policy_update_count
-            self._init_phase_max = max(
-                0.0, 1.0 - k / self.cfg.init_phase_anneal_iterations
-            )
-        self.metrics["init_phase_max"][:] = self._init_phase_max
+        # Phase annealing: alpha_phase `alpha_phase_init` → 0 over the window.
+        self.alpha_phase = anneal_alpha(
+            getattr(self._env, "policy_update_count", 0),
+            self.cfg.phase_anneal_start, self.cfg.phase_anneal_end,
+            self.cfg.alpha_phase_init, 0.0,
+        )
+        self.metrics["alpha_phase"][:] = self.alpha_phase
         log = self._env.extras.setdefault("log", {})
-        log["PhaseAnnealing/init_phase_max"] = self._init_phase_max
+        log["PhaseAnnealing/alpha"] = self.alpha_phase
 
         self._update_task()
 
@@ -323,14 +313,13 @@ class MultiClipMotionCommandCfg(MotionCommandCfg):
     # sampler; pinned to "start" (per-clip adaptive sampling = future PR).
     sampling_mode: Literal["adaptive", "uniform", "start"] = "start"
 
-    # Phase annealing: init_phase_max 1→0 over N policy updates.
-    # Caps WHERE envs can start; clips always run to natural end.
-    # 0 = disabled (init anywhere).
-    init_phase_anneal_iterations: int = 0
-
-    # Always init at frame 0 (init_phase=0), ignoring the [0, init_phase_max)
-    # sampling window. Set True for play so every clip runs from its start.
-    start_from_zero: bool = False
+    # Phase annealing (orcs.core.schedules): alpha_phase caps WHERE envs may
+    # start, ramping `alpha_phase_init` -> 0 over [start, end] policy updates.
+    # end <= start = OFF, so alpha_phase == alpha_phase_init for the whole run;
+    # `alpha_phase_init=0.0` is play's "every clip from frame 0".
+    phase_anneal_start: int = 0
+    phase_anneal_end: int = 0
+    alpha_phase_init: float = 1.0
 
     def build(self, env: ManagerBasedRlEnv) -> MultiClipMotionCommand:
         return MultiClipMotionCommand(self, env)

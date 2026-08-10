@@ -182,7 +182,7 @@ def dodge_env_cfg(
     )
 
     # ── the nominal-stand reference ──
-    # `start_from_zero`: every frame of the clip is the same pose, so phase
+    # `alpha_phase_init=0`: every frame of the clip is the same pose, so phase
     # carries no information and a random init would only risk running an env
     # off the end of the timeline mid-episode. Pose/velocity/joint ranges stay
     # empty — RSI onto ONE pose is the point (the robot always starts standing);
@@ -192,7 +192,7 @@ def dodge_env_cfg(
         dataset_dir=nominal_root(),
         future_steps=5,
         resampling_time_range=(1e9, 1e9),
-        start_from_zero=True,
+        alpha_phase_init=0.0,
         debug_vis=True,
         pose_range={},
         velocity_range={},
