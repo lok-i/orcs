@@ -42,9 +42,9 @@ class ThrowBall(ManagerTermBase):
     A camera-aware task may instead pass ``launch_camera_name``. Its release
     point is sampled directly in the camera frustum's intersection with the
     low ``underarm_height_range`` plane, using the camera pose captured at the
-    nominal reset. Horizontal speed is sampled and flight time is then derived
-    from distance. ``underarm_vertical_speed_max`` bounds the launch impulse;
-    target height is sampled only from the reachable part of
+    nominal reset. Horizontal speed is sampled first, then incompatible
+    footprint points are redrawn. ``underarm_vertical_speed_max`` bounds the
+    launch impulse; target height is sampled only from the reachable part of
     ``underarm_target_height_range``. This mode is always a rising underarm
     throw; the legacy cone and descending branch are deliberately bypassed.
 
@@ -245,52 +245,70 @@ class ThrowBall(ManagerTermBase):
                 raise ValueError(
                     "launch_camera_name cannot change after ThrowBall construction"
                 )
-            # This is a direct sample of the camera footprint on a low release
-            # plane. No polar cone and no sampled reaction window are involved.
-            start = self._sample_camera_launch(
-                env,
-                throw_ids,
-                u(*underarm_height_range),
-                launch_ndc_margin,
-            )
-            aim = root_pos[:, 0:2].clone()
-            if lead_target:
-                mean_speed = 0.5 * sum(horizontal_speed_range)
-                t = (
-                    torch.linalg.vector_norm(aim - start[:, 0:2], dim=-1)
-                    / mean_speed
-                )
-                aim = aim + robot.data.root_link_lin_vel_w[throw_ids, :2] * t[:, None]
-            if aim_noise > 0.0:
-                aim = aim + aim_noise * torch.randn_like(aim)
-            delta = aim - start[:, 0:2]
-            distance = torch.linalg.vector_norm(delta, dim=-1).clamp(min=1e-3)
-
-            # Bound the vertical impulse without deleting far footprint samples.
-            # If a slow horizontal throw would require vz > the cap merely to
-            # reach the minimum hit height, raise its horizontal speed within
-            # the configured range. Close throws keep the full speed range.
+            # Sample speed first so enforcing the vertical cap cannot silently
+            # delete slow throws. A footprint point that is too far away for
+            # that speed is redrawn; a robot which has left the entire reachable
+            # footprint simply gets this throw deferred instead of killing the
+            # training run.
+            speed = u(*horizontal_speed_range)
             target_lo = (
                 env.scene.env_origins[throw_ids, 2]
                 + underarm_target_height_range[0]
             )
-            dz_lo = target_lo - start[:, 2]
-            discriminant = underarm_vertical_speed_max**2 - 2.0 * self._g * dz_lo
-            t_max = (
-                underarm_vertical_speed_max + torch.sqrt(discriminant.clamp(min=0.0))
-            ) / self._g
-            speed_lo = torch.maximum(
-                torch.full_like(distance, horizontal_speed_range[0]),
-                distance / t_max,
-            )
-            if bool((speed_lo > horizontal_speed_range[1]).any()):
-                raise RuntimeError(
-                    "camera footprint contains a throw that cannot satisfy both "
-                    "horizontal_speed_range and underarm_vertical_speed_max"
+            start = torch.empty(n, 3, device=dev)
+            aim = torch.empty(n, 2, device=dev)
+            distance = torch.empty(n, device=dev)
+            feasible = torch.zeros(n, dtype=torch.bool, device=dev)
+            for _ in range(8):
+                rows = (~feasible).nonzero(as_tuple=False).squeeze(-1)
+                if rows.numel() == 0:
+                    break
+                ids = throw_ids[rows]
+                m = len(ids)
+                heights = torch.rand(m, device=dev) * (
+                    underarm_height_range[1] - underarm_height_range[0]
+                ) + underarm_height_range[0]
+                candidate = self._sample_camera_launch(
+                    env, ids, heights, launch_ndc_margin
                 )
-            speed = speed_lo + torch.rand(n, device=dev) * (
-                horizontal_speed_range[1] - speed_lo
-            )
+                candidate_aim = root_pos[rows, :2].clone()
+                if lead_target:
+                    lead_time = torch.linalg.vector_norm(
+                        candidate_aim - candidate[:, :2], dim=-1
+                    ) / speed[rows]
+                    candidate_aim += (
+                        robot.data.root_link_lin_vel_w[ids, :2]
+                        * lead_time[:, None]
+                    )
+                if aim_noise > 0.0:
+                    candidate_aim += aim_noise * torch.randn_like(candidate_aim)
+                candidate_distance = torch.linalg.vector_norm(
+                    candidate_aim - candidate[:, :2], dim=-1
+                ).clamp(min=1e-3)
+                candidate_t = candidate_distance / speed[rows]
+                reachable_z = (
+                    candidate[:, 2]
+                    + underarm_vertical_speed_max * candidate_t
+                    - 0.5 * self._g * candidate_t.square()
+                )
+                start[rows] = candidate
+                aim[rows] = candidate_aim
+                distance[rows] = candidate_distance
+                feasible[rows] = reachable_z >= target_lo[rows]
+
+            if not bool(feasible.all()):
+                self._flight[throw_ids[~feasible]] = 0
+                throw_ids = throw_ids[feasible]
+                start = start[feasible]
+                aim = aim[feasible]
+                distance = distance[feasible]
+                speed = speed[feasible]
+                target_lo = target_lo[feasible]
+                n = len(throw_ids)
+                if n == 0:
+                    return
+
+            delta = aim - start[:, :2]
             t = distance / speed
             vel = torch.zeros(n, 3, device=dev)
             vel[:, 0:2] = delta / t[:, None]
