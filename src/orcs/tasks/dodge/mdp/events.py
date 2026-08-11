@@ -39,14 +39,33 @@ class ThrowBall(ManagerTermBase):
     throws share a geometry. Descending flight times are capped so the ball
     cannot land short of the robot.
 
-    A camera-aware task may instead pass ``launch_camera_name``. Its release
-    point is sampled directly in the camera frustum's intersection with the
-    low ``underarm_height_range`` plane, using the camera pose captured at the
-    nominal reset. Horizontal speed is sampled first, then incompatible
-    footprint points are redrawn. ``underarm_vertical_speed_max`` bounds the
-    launch impulse; target height is sampled only from the reachable part of
-    ``underarm_target_height_range``. This mode is always a rising underarm
-    throw; the legacy cone and descending branch are deliberately bypassed.
+    A camera-aware task may instead pass ``launch_camera_name``: the release
+    point is then sampled in the camera frustum's intersection with the low
+    ``underarm_height_range`` plane (the pose cached at the nominal reset), so
+    every ball STARTS in frame. This mode is always a rising underarm throw; the
+    legacy cone and descending branch are deliberately bypassed.
+
+    **``flight_time_range`` is the knob in both modes, and speed is derived.**
+    A frustum footprint spans ~3x in distance, so sampling speed there makes the
+    reaction window inherit that spread — a bottom tail of ~0.2 s that no
+    control rate can dodge, which trains a stander instead of a dodger (measured;
+    it is why this branch was rewritten). ``horizontal_speed_range`` is
+    therefore an ADMISSIBLE BAND, not a distribution: it and the window together
+    confine the release to ``[v_lo t_lo, v_hi t_hi]``, the far slice of the
+    footprint where a floor-launched ball is both a real threat and still inside
+    a down-facing camera's cone. Points outside are redrawn (window included, so
+    long windows are not rejected preferentially); a robot that has left the
+    whole admissible footprint gets the throw deferred rather than killing the
+    run. ``underarm_vertical_speed_max`` bounds the launch impulse and target
+    height is sampled only from the reachable part of
+    ``underarm_target_height_range``.
+
+    **The arc must fit the camera, and gravity sets that budget.** A floor
+    release with flight time ``t`` peaks at least ``g t^2 / 8`` above the chord,
+    while a camera pitched ``p`` below horizontal at height ``h`` can only see
+    ``z <= h - d tan(p - fovy/2)``. Long windows and low mounts pull against
+    each other; a task picks ``underarm_target_height_range`` to settle it (a
+    45 deg mount wants the knee-to-waist band, not the head).
 
     **Parking is a pin, not a spawn.** A ball is only ever teleported: for
     ``flight_window_s`` after a throw it flies free, and every other step its
@@ -84,6 +103,7 @@ class ThrowBall(ManagerTermBase):
             height_range = p.get("underarm_height_range", (0.4, 0.7))
             target_range = p.get("underarm_target_height_range", (0.9, 1.3))
             speed_range = p.get("horizontal_speed_range", (3.0, 5.0))
+            time_range = p.get("flight_time_range", (0.55, 0.62))
             vertical_speed_max = float(p.get("underarm_vertical_speed_max", 5.0))
             ndc_margin = p.get("launch_ndc_margin", 0.15)
             if not 0.0 <= ndc_margin < 1.0:
@@ -100,6 +120,16 @@ class ThrowBall(ManagerTermBase):
                 raise ValueError(
                     f"invalid horizontal_speed_range: {speed_range}"
                 )
+            if time_range[0] <= 0.0 or time_range[0] > time_range[1]:
+                raise ValueError(f"invalid flight_time_range: {time_range}")
+            # The two bands intersect to select the admissible slice of the
+            # footprint: d = v t, so only release points in
+            # [v_lo t_lo, v_hi t_hi] can satisfy both. Checked against the real
+            # footprint once the camera pose exists (`_capture_nominal_camera`).
+            self._launch_distance_band = (
+                speed_range[0] * time_range[0], speed_range[1] * time_range[1])
+            self._underarm_height_range = height_range
+            self._ndc_margin = float(ndc_margin)
             min_vertical_speed = math.sqrt(
                 2.0 * self._g * (target_range[0] - height_range[0])
             )
@@ -136,6 +166,40 @@ class ThrowBall(ManagerTermBase):
         self._camera_mat_0 = env.sim.data.cam_xmat[:, self._camera_id].reshape(
             self.num_envs, 3, 3
         ).clone()
+        self._assert_footprint_reaches_band(env)
+
+    def _assert_footprint_reaches_band(self, env: ManagerBasedRlEnv) -> None:
+        """Fail loudly if no release point can satisfy the speed x window bands.
+
+        Every throw is then rejected by the redraw loop and DEFERRED, so the
+        symptom is a task that never throws a ball and trains a stander — with
+        no error anywhere. That is the exact failure this branch was rewritten
+        to remove, so it gets an assertion rather than a comment. Approximate by
+        one camera-height: the check only asks whether the two intervals are
+        disjoint, which no sub-metre offset can flip.
+        """
+        lo, hi = self._launch_distance_band
+        mid = torch.full(
+            (2,),
+            0.5 * sum(self._underarm_height_range),
+            device=self.device,
+        )
+        edge = torch.tensor([[0.0, 1.0], [0.0, -1.0]], device=self.device)
+        ids = torch.zeros(2, dtype=torch.long, device=self.device)
+        pts = self._sample_camera_launch(
+            env, ids, mid, self._ndc_margin, ndc=edge * (1.0 - self._ndc_margin)
+        )
+        cam_xy = (env.scene.env_origins[ids] + self._camera_pos_0[ids])[:, :2]
+        reach = torch.linalg.vector_norm(pts[:, :2] - cam_xy, dim=-1)
+        near, far = float(reach.min()), float(reach.max())
+        if far < lo or near > hi:
+            raise ValueError(
+                f"camera {self._launch_camera_name!r} sees the launch plane at "
+                f"{near:.2f}-{far:.2f} m, but horizontal_speed_range x "
+                f"flight_time_range admits only {lo:.2f}-{hi:.2f} m — every "
+                "throw would be silently deferred. Widen a band, lower the "
+                "launch plane, or pitch the camera up."
+            )
 
     def _sample_camera_launch(
         self,
@@ -143,6 +207,7 @@ class ThrowBall(ManagerTermBase):
         throw_ids: torch.Tensor,
         heights: torch.Tensor,
         ndc_margin: float,
+        ndc: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Sample the nominal camera frustum on one horizontal launch plane."""
         if not 0.0 <= ndc_margin < 1.0:
@@ -150,9 +215,10 @@ class ThrowBall(ManagerTermBase):
         assert self._camera_pos_0 is not None and self._camera_mat_0 is not None
 
         n = len(throw_ids)
-        ndc = (
-            torch.rand(n, 2, device=self.device) * 2.0 - 1.0
-        ) * (1.0 - ndc_margin)
+        if ndc is None:
+            ndc = (
+                torch.rand(n, 2, device=self.device) * 2.0 - 1.0
+            ) * (1.0 - ndc_margin)
         ray_c = torch.stack(
             [
                 ndc[:, 0] * self._tan_h,
@@ -245,26 +311,37 @@ class ThrowBall(ManagerTermBase):
                 raise ValueError(
                     "launch_camera_name cannot change after ThrowBall construction"
                 )
-            # Sample speed first so enforcing the vertical cap cannot silently
-            # delete slow throws. A footprint point that is too far away for
-            # that speed is redrawn; a robot which has left the entire reachable
-            # footprint simply gets this throw deferred instead of killing the
-            # training run.
-            speed = u(*horizontal_speed_range)
+            # Sample the RELEASE POINT and the REACTION WINDOW; DERIVE the
+            # speed. Never the other way round: the frustum footprint spans ~3x
+            # in distance, so drawing speed makes the window inherit that spread
+            # and its bottom tail is undodgeable at any control rate. The window
+            # is the one quantity this task exists to hold, so it is the one
+            # that gets sampled. `horizontal_speed_range` is then an ADMISSIBLE
+            # BAND, not a distribution: a release point whose implied d/t falls
+            # outside it is redrawn, which is what confines the draw to the far
+            # slice of the footprint where a floor-launched ball is both a real
+            # threat and visible to a down-facing camera.
             target_lo = (
                 env.scene.env_origins[throw_ids, 2]
                 + underarm_target_height_range[0]
             )
             start = torch.empty(n, 3, device=dev)
             aim = torch.empty(n, 2, device=dev)
-            distance = torch.empty(n, device=dev)
+            t = torch.empty(n, device=dev)
             feasible = torch.zeros(n, dtype=torch.bool, device=dev)
-            for _ in range(8):
+            for _ in range(12):
                 rows = (~feasible).nonzero(as_tuple=False).squeeze(-1)
                 if rows.numel() == 0:
                     break
                 ids = throw_ids[rows]
                 m = len(ids)
+                # The window is redrawn with the point, not held across
+                # retries: a long window needs a far release, so holding it
+                # would reject long windows preferentially and quietly shorten
+                # the very distribution this samples.
+                candidate_t = torch.rand(m, device=dev) * (
+                    flight_time_range[1] - flight_time_range[0]
+                ) + flight_time_range[0]
                 heights = torch.rand(m, device=dev) * (
                     underarm_height_range[1] - underarm_height_range[0]
                 ) + underarm_height_range[0]
@@ -273,19 +350,16 @@ class ThrowBall(ManagerTermBase):
                 )
                 candidate_aim = root_pos[rows, :2].clone()
                 if lead_target:
-                    lead_time = torch.linalg.vector_norm(
-                        candidate_aim - candidate[:, :2], dim=-1
-                    ) / speed[rows]
                     candidate_aim += (
                         robot.data.root_link_lin_vel_w[ids, :2]
-                        * lead_time[:, None]
+                        * candidate_t[:, None]
                     )
                 if aim_noise > 0.0:
                     candidate_aim += aim_noise * torch.randn_like(candidate_aim)
                 candidate_distance = torch.linalg.vector_norm(
                     candidate_aim - candidate[:, :2], dim=-1
                 ).clamp(min=1e-3)
-                candidate_t = candidate_distance / speed[rows]
+                candidate_speed = candidate_distance / candidate_t
                 reachable_z = (
                     candidate[:, 2]
                     + underarm_vertical_speed_max * candidate_t
@@ -293,23 +367,25 @@ class ThrowBall(ManagerTermBase):
                 )
                 start[rows] = candidate
                 aim[rows] = candidate_aim
-                distance[rows] = candidate_distance
-                feasible[rows] = reachable_z >= target_lo[rows]
+                t[rows] = candidate_t
+                feasible[rows] = (
+                    (candidate_speed >= horizontal_speed_range[0])
+                    & (candidate_speed <= horizontal_speed_range[1])
+                    & (reachable_z >= target_lo[rows])
+                )
 
             if not bool(feasible.all()):
                 self._flight[throw_ids[~feasible]] = 0
                 throw_ids = throw_ids[feasible]
                 start = start[feasible]
                 aim = aim[feasible]
-                distance = distance[feasible]
-                speed = speed[feasible]
+                t = t[feasible]
                 target_lo = target_lo[feasible]
                 n = len(throw_ids)
                 if n == 0:
                     return
 
             delta = aim - start[:, :2]
-            t = distance / speed
             vel = torch.zeros(n, 3, device=dev)
             vel[:, 0:2] = delta / t[:, None]
             target_hi = torch.minimum(
