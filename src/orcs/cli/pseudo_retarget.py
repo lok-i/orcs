@@ -10,11 +10,14 @@ Examples:
   orcs-pseudo-retarget --scene uolm --source path/to/sample0
   orcs-pseudo-retarget --scene perloco-grail --source \
       data/terrain_motions/grail/curb_000/level_0.00/sample0
+  orcs-pseudo-retarget --scene perloco-grail --all
 """
 
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
 import tempfile
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
@@ -36,6 +39,82 @@ _CAPTURE_ERROR_SPREAD_M = 0.005
 
 def _sample_dir(path: Path) -> Path:
     return path.parent if path.name == "smpl_motion.npz" else path
+
+
+def _selected_grail_samples() -> list[Path]:
+    """Return every staged sample selected by the packaged GRAIL roster."""
+    from orcs.tasks.perloco.roster import load_roster
+
+    root = DATA_ROOT / "terrain_motions" / "grail"
+    roster = load_roster("grail", root)
+    samples = [
+        motion.parent
+        for key in roster.tile_keys
+        for motion in sorted((root / key).glob("sample*/motion.npz"))
+        if not roster.clips.get(key) or motion.parent.name in roster.clips[key]
+    ]
+    if not samples:
+        raise FileNotFoundError(f"GRAIL roster selected no samples under {root}")
+    missing = [sample for sample in samples if not (sample / "smpl_motion.npz").exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"{len(missing)}/{len(samples)} selected GRAIL samples have no "
+            f"smpl_motion.npz (e.g. {missing[0]}); restage with "
+            "scripts/setup/perceptive_locomotion.sh"
+        )
+    return samples
+
+
+def _seed_is_complete(sample: Path) -> bool:
+    """Whether a resumable batch may safely skip this sample."""
+    try:
+        seed = SeedMotion.load(sample / "seed_state.npz")
+        with np.load(sample / "smpl_motion.npz") as source:
+            num_source_frames = int(source["smpl_joints"].shape[0])
+    except (FileNotFoundError, KeyError, OSError, ValueError):
+        return False
+    return seed.num_frames == num_source_frames and bool(seed.valid.all())
+
+
+def _run_grail_batch(*, device: str | None, overwrite: bool) -> None:
+    """Retarget the full roster, one fresh process per clip for GPU isolation."""
+    samples = _selected_grail_samples()
+    pending = [
+        sample for sample in samples if overwrite or not _seed_is_complete(sample)
+    ]
+    skipped = len(samples) - len(pending)
+    print(
+        f"[kinematic-retarget] GRAIL roster: {len(samples)} clips "
+        f"({skipped} complete, {len(pending)} pending)"
+    )
+
+    failures: list[Path] = []
+    for index, sample in enumerate(pending, start=1):
+        print(f"\n[{index}/{len(pending)}] {sample}", flush=True)
+        command = [
+            sys.executable,
+            "-m",
+            "orcs.cli.pseudo_retarget",
+            "--scene",
+            "perloco-grail",
+            "--source",
+            str(sample),
+        ]
+        if device is not None:
+            command.extend(("--device", device))
+        if subprocess.run(command, check=False).returncode != 0:
+            failures.append(sample)
+
+    complete = sum(_seed_is_complete(sample) for sample in samples)
+    print(
+        f"\n[kinematic-retarget] complete={complete}/{len(samples)}, "
+        f"failed={len(failures)}"
+    )
+    if failures:
+        print("failed samples:")
+        for sample in failures:
+            print(f"  {sample}")
+        raise SystemExit(1)
 
 
 @contextmanager
@@ -382,6 +461,17 @@ def main() -> None:
         default=None,
         help="staged sample dir, smpl_motion.npz, SONIC pkl, or prepared npz",
     )
+    parser.add_argument(
+        "--all",
+        dest="all_grail",
+        action="store_true",
+        help="retarget every sample in the packaged GRAIL roster; resumes by default",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="with --all, regenerate complete seed_state.npz files",
+    )
     parser.add_argument("--object", default=None, help="object_motion npz for a raw clip")
     parser.add_argument(
         "--z-up", action="store_true", help="raw SONIC pose/transl are already z-up"
@@ -390,8 +480,17 @@ def main() -> None:
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
 
+    if args.all_grail:
+        if args.scene != "perloco-grail":
+            parser.error("--all is only valid with --scene perloco-grail")
+        if args.source is not None or args.output is not None or args.object is not None:
+            parser.error("--all cannot be combined with --source, --output, or --object")
+        _run_grail_batch(device=args.device, overwrite=args.overwrite)
+        return
+    if args.overwrite:
+        parser.error("--overwrite requires --all")
     if args.scene == "perloco-grail" and args.source is None:
-        parser.error("--scene perloco-grail requires a staged --source sample")
+        parser.error("--scene perloco-grail requires --source or --all")
 
     device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
     with ExitStack() as stack:

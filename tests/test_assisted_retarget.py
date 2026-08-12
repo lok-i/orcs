@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import numpy as np
 import torch
 
-from orcs.cli.pseudo_retarget import _SettlingMonitor
+import orcs.cli.pseudo_retarget as pseudo_retarget
+from orcs.cli.pseudo_retarget import (
+    _seed_is_complete,
+    _selected_grail_samples,
+    _SettlingMonitor,
+)
 from orcs.core.assisted_retarget import (
     DEFAULT_ASSISTANCE_GAINS,
     G1_SMPL_BODY_MAP,
@@ -85,3 +93,50 @@ def test_settling_monitor_accepts_only_a_low_error_plateau():
         error = max(0.15, 0.30 - 0.01 * step)
         settling.update(error)
     assert settling.converged
+
+
+def test_grail_batch_selection_follows_roster(monkeypatch, tmp_path):
+    root = tmp_path / "terrain_motions/grail"
+    tile = root / "curb_000/level_0.00"
+    for name in ("sample0", "sample1"):
+        sample = tile / name
+        sample.mkdir(parents=True)
+        np.savez(sample / "motion.npz", joint_pos=np.zeros((2, 1)))
+        np.savez(sample / "smpl_motion.npz", smpl_joints=np.zeros((2, 24, 3)))
+
+    import orcs.tasks.perloco.roster as roster_module
+
+    monkeypatch.setattr(pseudo_retarget, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        roster_module,
+        "load_roster",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            tile_keys=("curb_000/level_0.00",),
+            clips={"curb_000/level_0.00": ("sample1",)},
+        ),
+    )
+
+    assert _selected_grail_samples() == [tile / "sample1"]
+
+
+def test_complete_seed_requires_valid_source_aligned_frames(monkeypatch, tmp_path):
+    sample = tmp_path / "sample0"
+    sample.mkdir()
+    np.savez(sample / "smpl_motion.npz", smpl_joints=np.zeros((3, 24, 3)))
+    (sample / "seed_state.npz").touch()
+
+    monkeypatch.setattr(
+        pseudo_retarget,
+        "SeedMotion",
+        SimpleNamespace(
+            load=lambda _path: SimpleNamespace(
+                num_frames=3, valid=np.ones(3, dtype=bool)
+            )
+        ),
+    )
+    assert _seed_is_complete(sample)
+
+    pseudo_retarget.SeedMotion.load = lambda _path: SimpleNamespace(
+        num_frames=2, valid=np.ones(2, dtype=bool)
+    )
+    assert not _seed_is_complete(sample)
