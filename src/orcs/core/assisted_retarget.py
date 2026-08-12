@@ -1,0 +1,259 @@
+"""Crude, task-agnostic virtual-force assistance for kinematic retargeting.
+
+A frozen SONIC policy remains the motion generator; this module supplies
+temporary world-frame wrenches that pull a simulated G1 toward scaled SMPL
+landmarks.  Policy training later refines this kinematic result into a dynamic
+retarget.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import torch
+from mjlab.utils.lab_api.math import quat_conjugate, quat_mul
+
+from orcs.core.data.point_reference import (
+    G1_SMPL_BODY_MAP,
+    infer_morphology_scale,
+    scaled_smpl_targets,
+)
+
+if TYPE_CHECKING:
+    from mjlab.envs import ManagerBasedRlEnv
+
+__all__ = [
+    "G1_SMPL_BODY_MAP",
+    "DEFAULT_ASSISTANCE_GAINS",
+    "AssistanceGains",
+    "AssistanceSnapshot",
+    "AssistedMotionController",
+    "infer_morphology_scale",
+    "scaled_smpl_targets",
+]
+
+_ANCHOR_BODY = "torso_link"
+_GRAVITY = 9.81
+
+
+@dataclass(frozen=True)
+class AssistanceGains:
+    """Global force-assistance tuning shared by every scene and task.
+
+    ``response_rate`` is the controller's angular frequency in rad/s.  With
+    the default critical damping ratio, each point uses
+    ``kp = mass * response_rate**2`` and
+    ``kd = 2 * damping_ratio * mass * response_rate``.
+    """
+
+    response_rate: float = 8.0
+    damping_ratio: float = 1.0
+    robot_force_budget_g: float = 3.0
+    object_force_budget_g: float = 5.0
+
+    def __post_init__(self) -> None:
+        if self.response_rate <= 0.0:
+            raise ValueError("response_rate must be positive")
+        if self.damping_ratio < 0.0:
+            raise ValueError("damping_ratio must be non-negative")
+        if self.robot_force_budget_g <= 0.0:
+            raise ValueError("robot_force_budget_g must be positive")
+        if self.object_force_budget_g <= 0.0:
+            raise ValueError("object_force_budget_g must be positive")
+
+
+DEFAULT_ASSISTANCE_GAINS = AssistanceGains()
+
+
+def _quat_error_world(current: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    q_err = quat_mul(target, quat_conjugate(current))
+    q_err = torch.where(q_err[..., 0:1] < 0, -q_err, q_err)
+    return 2.0 * q_err[..., 1:4]
+
+
+def _cap_vectors(vectors: torch.Tensor, budget: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Scale a per-env vector set into one L1-of-norms force budget."""
+    used = torch.linalg.vector_norm(vectors, dim=-1).sum(-1, keepdim=True)
+    scale = torch.minimum(torch.ones_like(used), budget / used.clamp_min(1e-6))
+    return vectors * scale[..., None], scale.squeeze(-1)
+
+
+@dataclass(frozen=True)
+class AssistanceSnapshot:
+    body_targets_w: torch.Tensor
+    body_forces_w: torch.Tensor
+    body_torques_w: torch.Tensor
+    body_error: torch.Tensor
+    saturation: torch.Tensor
+    object_target_pos_w: torch.Tensor | None = None
+    object_force_w: torch.Tensor | None = None
+    object_torque_w: torch.Tensor | None = None
+
+
+class AssistedMotionController:
+    """Mass-scaled PD wrenches around the frozen SONIC rollout."""
+
+    def __init__(
+        self,
+        env: ManagerBasedRlEnv,
+        *,
+        command_name: str = "motion",
+        robot_name: str = "robot",
+        object_name: str | None = None,
+        gains: AssistanceGains = DEFAULT_ASSISTANCE_GAINS,
+    ) -> None:
+        self.env = env
+        self.command = env.command_manager.get_term(command_name)
+        self.robot = env.scene[robot_name]
+        self.object = env.scene[object_name] if object_name else None
+        self.gains = gains
+        self.body_names = tuple(name for name, _ in G1_SMPL_BODY_MAP)
+        missing = [name for name in self.body_names if name not in self.robot.body_names]
+        if missing:
+            raise ValueError(f"G1 assistance bodies missing from robot: {missing}")
+        self.body_ids = [self.robot.body_names.index(name) for name in self.body_names]
+        self.anchor_idx = self.body_names.index(_ANCHOR_BODY)
+
+        entity_body_ids = self.robot.data.indexing.body_ids
+        model_body_ids = entity_body_ids[self.body_ids]
+        model = self.robot.data.model
+        self.body_mass = model.body_mass[:, model_body_ids].to(env.device)
+        self.total_mass = model.body_mass[:, entity_body_ids].sum(-1).to(env.device)
+        anchor_model_id = model_body_ids[self.anchor_idx]
+        self.anchor_inertia = model.body_inertia[:, anchor_model_id].mean(-1).to(env.device)
+
+        source = self.command.motion.smpl_joints_viz
+        nominal_body_pos = self.robot.data.body_link_pos_w[:, self.body_ids]
+        self.morphology_scale = infer_morphology_scale(
+            source, nominal_body_pos[0], self.body_names
+        )
+
+        self.object_mass = None
+        self.object_inertia = None
+        if self.object is not None:
+            ids = self.object.data.indexing.body_ids
+            obj_model = self.object.data.model
+            self.object_mass = obj_model.body_mass[:, ids].sum(-1).to(env.device)
+            self.object_inertia = obj_model.body_inertia[:, ids].mean(-1).sum(-1).to(env.device)
+
+    def targets(self, frame_idx: torch.Tensor) -> torch.Tensor:
+        """Return morphology-scaled SMPL landmark targets for source frames."""
+        joints = self.command.motion.smpl_joints_viz[frame_idx]
+        return scaled_smpl_targets(
+            joints, self.morphology_scale, self.env.scene.env_origins
+        )
+
+    def apply(self) -> AssistanceSnapshot:
+        frame = self.command.time_steps
+        targets = self.targets(frame)
+        clip_start = self.command.motion.clip_offsets[self.command._clip_ids]
+        prev_frame = torch.maximum(frame - 1, clip_start)
+        target_vel = (targets - self.targets(prev_frame)) / self.env.step_dt
+
+        current_pos = self.robot.data.body_link_pos_w[:, self.body_ids]
+        current_vel = self.robot.data.body_link_lin_vel_w[:, self.body_ids]
+        rate = self.gains.response_rate
+        damping = self.gains.damping_ratio
+        kp = self.body_mass * rate**2
+        kd = 2.0 * damping * self.body_mass * rate
+        forces = kp[..., None] * (targets - current_pos) + kd[..., None] * (
+            target_vel - current_vel
+        )
+
+        # The torso is the 6-D global anchor and therefore carries the robot's
+        # total mass.  Other landmarks receive translation-only corrections.
+        forces[:, self.anchor_idx] *= (
+            self.total_mass / self.body_mass[:, self.anchor_idx].clamp_min(1e-6)
+        )[:, None]
+        budget = (
+            self.gains.robot_force_budget_g * _GRAVITY * self.total_mass
+        )[:, None]
+        forces, force_scale = _cap_vectors(forces, budget)
+
+        torques = torch.zeros_like(forces)
+        source_quat = self.command.motion.smpl_root_quat[frame]
+        current_quat = self.robot.data.body_link_quat_w[:, self.body_ids[self.anchor_idx]]
+        current_ang_vel = self.robot.data.body_link_ang_vel_w[:, self.body_ids[self.anchor_idx]]
+        torque = self.anchor_inertia[:, None] * (
+            rate**2 * _quat_error_world(current_quat, source_quat)
+            - 2.0 * damping * rate * current_ang_vel
+        )
+        torque_budget = self.total_mass * _GRAVITY * self.morphology_scale
+        torque_norm = torch.linalg.vector_norm(torque, dim=-1)
+        torque_scale = torch.minimum(
+            torch.ones_like(torque_norm), torque_budget / torque_norm.clamp_min(1e-6)
+        )
+        torques[:, self.anchor_idx] = torque * torque_scale[:, None]
+        self.robot.write_external_wrench_to_sim(
+            forces, torques, body_ids=self.body_ids
+        )
+
+        object_target = object_force = object_torque = None
+        object_scale = torch.ones_like(force_scale)
+        if self.object is not None:
+            object_target, object_force, object_torque, object_scale = self._apply_object(frame)
+
+        return AssistanceSnapshot(
+            body_targets_w=targets,
+            body_forces_w=forces,
+            body_torques_w=torques,
+            body_error=torch.linalg.vector_norm(targets - current_pos, dim=-1),
+            saturation=torch.minimum(force_scale, torch.minimum(torque_scale, object_scale)),
+            object_target_pos_w=object_target,
+            object_force_w=object_force,
+            object_torque_w=object_torque,
+        )
+
+    def _apply_object(
+        self, frame: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        assert self.object is not None
+        assert self.object_mass is not None and self.object_inertia is not None
+        motion = self.command.motion
+        source_pelvis = motion.smpl_joints_viz[frame, 0]
+        source_object = motion.obj_pos[frame]
+        delta = self.morphology_scale * (source_object - source_pelvis)
+        object_target = self.robot.data.root_link_pos_w + delta
+
+        rate = self.gains.response_rate
+        damping = self.gains.damping_ratio
+        kp = self.object_mass * rate**2
+        kd = 2.0 * damping * self.object_mass * rate
+        force = kp[:, None] * (object_target - self.object.data.root_link_pos_w)
+        force -= kd[:, None] * self.object.data.root_link_lin_vel_w
+        budget = self.gains.object_force_budget_g * _GRAVITY * self.object_mass
+        norm = torch.linalg.vector_norm(force, dim=-1)
+        force_scale = torch.minimum(torch.ones_like(norm), budget / norm.clamp_min(1e-6))
+        force = force * force_scale[:, None]
+
+        source_root_q = motion.smpl_root_quat[frame]
+        source_obj_q = motion.obj_quat[frame]
+        relative_q = quat_mul(quat_conjugate(source_root_q), source_obj_q)
+        object_target_q = quat_mul(self.robot.data.root_link_quat_w, relative_q)
+        ori_error = _quat_error_world(self.object.data.root_link_quat_w, object_target_q)
+        torque = self.object_inertia[:, None] * (
+            rate**2 * ori_error
+            - 2.0 * damping * rate * self.object.data.root_link_ang_vel_w
+        )
+        torque_budget = self.object_mass * _GRAVITY * self.morphology_scale
+        torque_norm = torch.linalg.vector_norm(torque, dim=-1)
+        torque_scale = torch.minimum(
+            torch.ones_like(torque_norm), torque_budget / torque_norm.clamp_min(1e-6)
+        )
+        torque = torque * torque_scale[:, None]
+        self.object.write_external_wrench_to_sim(
+            force[:, None, :], torque[:, None, :]
+        )
+        return object_target, force, torque, torch.minimum(force_scale, torque_scale)
+
+    def clear(self) -> None:
+        zeros = torch.zeros(
+            self.env.num_envs, len(self.body_ids), 3, device=self.env.device
+        )
+        self.robot.write_external_wrench_to_sim(
+            zeros, zeros, body_ids=self.body_ids
+        )
+        if self.object is not None:
+            object_zeros = torch.zeros(self.env.num_envs, 1, 3, device=self.env.device)
+            self.object.write_external_wrench_to_sim(object_zeros, object_zeros)

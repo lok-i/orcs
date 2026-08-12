@@ -125,6 +125,59 @@ Object motion is a static nominal placeholder unless a matching object npz is
 passed (`--object-dir <dir>`, matched by clip stem) — no smpl+object clips exist
 yet, so the object stream is a placeholder to exercise the plumbing.
 
+### Kinematic retargeting for RSI
+
+`orcs-pseudo-retarget` bakes a one-to-one kinematic G1 retarget from an SMPL
+clip for RSI. The frozen SONIC base produces the actions; mass-scaled virtual
+wrenches provide a torso anchor, 14-point body assistance, and (when present)
+an object target relative to the live robot root. It has no task-facing gains
+or body lists. The robot starts with nominal joints and its floating base
+aligned to the first SMPL pelvis pose, then settles under SONIC and assistance.
+The fixed pre-roll must end on a low-error plateau or no output is written. No
+frame-wise projected or pre-retargeted robot motion is consumed. Policy training
+later turns this initialization into the dynamic retarget.
+
+```bash
+# Raw/synthetic UOLM clip. A raw source needs an explicit persistent output.
+orcs-pseudo-retarget --scene uolm --source <clip.pkl> \
+  --object <object_motion.npz> --output <seed_state.npz>
+
+# Already-staged UOLM sample; defaults to <sample>/seed_state.npz.
+orcs-pseudo-retarget --scene uolm --source <sample-dir>
+
+# GRAIL sample; the source path identifies its real staged terrain tile.
+orcs-pseudo-retarget --scene perloco-grail \
+  --source data/terrain_motions/grail/curb_000/level_0.00/sample0
+```
+
+The output is a separate `seed_state.npz`, never a replacement `motion.npz`.
+It stores root/joint/body/object state, the previous action, per-body assistance
+wrenches, point errors, force-budget saturation and a validity mask, all in the
+same `0..T-1` frame order as `smpl_motion.npz`.
+
+The shared force tuning lives in `DEFAULT_ASSISTANCE_GAINS` in
+`orcs.core.assisted_retarget`. Its main knob is `response_rate=8.0` rad/s. Point
+PD gains are derived from body mass as `kp = m * response_rate²` and
+`kd = 2 * damping_ratio * m * response_rate`; `damping_ratio=1.0` is critically
+damped. `robot_force_budget_g=3.0` and `object_force_budget_g=5.0` cap the total
+assistance independently of those gains. These are global algorithm defaults,
+not task-wise settings.
+
+Inspect the source, result, and processing forces together:
+
+```bash
+orcs-view-seeds --scene uolm --source <sample-dir>
+orcs-view-seeds --scene perloco-grail --source <sample-dir>
+# Or use the embedded source path; no redundant --source is needed.
+orcs-view-seeds --scene uolm --seed <seed_state.npz>
+# -> http://localhost:8080
+```
+
+The browser viewer provides play/pause, frame scrubbing, layer toggles, the
+original SMPL skeleton, the simulated G1/object, assistance arrows, and
+per-frame error/force diagnostics. It is a post-processor and never reruns the
+policy, so what it shows is exactly what was written by kinematic retargeting.
+
 ### SMPL data conventions
 
 Per gear_sonic's split:
@@ -162,7 +215,7 @@ Ids read `Orcs-PerLoco-<Source>-<Agent>[-<CommandSpace>]`:
 | `Orcs-PerLoco-OmRe-AdaptSonic` | OmniRetarget climb | frozen SONIC + LoRA on the height scan |
 | `Orcs-PerLoco-OmRe-TaRa` | " | from-scratch floor |
 | `Orcs-PerLoco-Grail-AdaptSonic` | GRAIL curb | " |
-| `Orcs-PerLoco-Grail-AdaptSonic-Smpl` | " | ...encoder reads the HUMAN, not the retarget |
+| `Orcs-PerLoco-Grail-AdaptSonic-Smpl` | seed-complete GRAIL subset | SMPL point tracking + seed RSI |
 | `Orcs-PerLoco-Grail-TaRa` | " | from-scratch floor |
 
 ```bash
@@ -170,7 +223,14 @@ orcs-view-terrain --source omni                         # inspect + curate -> :8
 
 play  Orcs-PerLoco-OmRe-AdaptSonic --num-envs 10 --agent initial
 train Orcs-PerLoco-Grail-AdaptSonic --num_envs 4096
+play  Orcs-PerLoco-Grail-AdaptSonic-Smpl --agent initial --viewer native
 ```
+
+The `-Smpl` task discovers every staged sample containing both
+`smpl_motion.npz` and `seed_state.npz`. It tracks all 14 homologous SMPL↔G1
+points and their velocities; the seed supplies only RSI root/joint state and
+previous action. Missing seeds are omitted from this task's terrain roster and
+do not affect the standard GRAIL task.
 
 Tasks are skipped (never raised) when the staging directory is absent — **per
 task**, so one unstaged dataset costs one row:

@@ -15,7 +15,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import quat_error_magnitude
 
 __all__ = [
-    "base_collapsed", "bad_anchor_pos", "bad_anchor_ori",
+    "base_collapsed", "bad_anchor_pos", "bad_anchor_ori", "bad_point_anchor_pos",
     "exceeded_motion_by_eps",
 ]
 
@@ -48,6 +48,20 @@ def bad_anchor_ori(
     """Pelvis orientation error from motion reference > threshold. (B,) bool."""
     cmd = env.command_manager.get_term(command_name)
     err = quat_error_magnitude(cmd.robot.data.root_link_quat_w, cmd.anchor_quat_w)
+    return err > threshold
+
+
+def bad_point_anchor_pos(
+    env: ManagerBasedRlEnv, command_name: str, threshold: float = 0.75
+) -> torch.Tensor:
+    """Mapped pelvis distance from its source point exceeds ``threshold``."""
+    cmd = env.command_manager.get_term(command_name)
+    point_index = cmd.point_body_names.index(cmd.cfg.anchor_body_name)
+    err = torch.linalg.vector_norm(
+        cmd.robot_point_pos_w[:, point_index]
+        - cmd.point_target_pos_w[:, point_index],
+        dim=-1,
+    )
     return err > threshold
 
 

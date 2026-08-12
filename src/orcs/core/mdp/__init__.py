@@ -12,4 +12,5 @@ from mjlab.envs.mdp import *  # noqa: F401, F403
 
 from orcs.core.mdp.events import *  # noqa: F403
 from orcs.core.mdp.observations import *  # noqa: F403
+from orcs.core.mdp.rewards import *  # noqa: F403
 from orcs.core.mdp.terminations import *  # noqa: F403

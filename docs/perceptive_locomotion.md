@@ -11,7 +11,7 @@ There is no object. The new noun is a **tile**; the new verb is **pair a clip to
 ```
 Orcs-PerLoco-OmRe-AdaptSonic          frozen SONIC + LoRA, height-scan augmentation
 Orcs-PerLoco-Grail-AdaptSonic         same, GRAIL curb                  ← run-1 task
-Orcs-PerLoco-Grail-AdaptSonic-Smpl    ...encoder reads the HUMAN instead
+Orcs-PerLoco-Grail-AdaptSonic-Smpl    SMPL point tracking, seed-backed RSI
 Orcs-PerLoco-{OmRe,Grail}-TaRa        tabula-rasa floors, same envs
 ```
 
@@ -343,6 +343,7 @@ Budget: ~450 LOC **moved** into core, ~500 new in `perloco/`, ~580 new offline (
 | **3** ✅ | `TileTerrainCfg`, `TerrainMotionCommand`, sensors, obs, rewards/terminations; agents promoted to `core.rl` | ✅ `play Orcs-PerLoco-AdaptSonic --num-envs 10 --agent initial` — 5×29 grid, 483 geoms, `augmentation` 187+15, every env's clip verified to belong to its own tile |
 | **4** | `train --num_envs 4096` + z_scale curriculum | beats `-TaRa` on reward vs `_runtime`; promotion fires |
 | **5** ✅ | `GrailSource` (curb, 63 clips / 8 tiles) + the `-Smpl` command space | ✅ zero-shot tracking reward 6.039 (robot) / 4.660 (smpl) vs OmRe's 4.718; skeleton renders on its curb |
+| **6** ✅ | SMPL all-point rewards + phase-1 seed timeline + isolated `-Smpl` env | ✅ random-frame RSI is frame-exact; frozen SONIC initial policy rolls 50 steps with finite actions and decreasing point error |
 
 **Phase 2's viewer is a deliverable, not a convenience** — the UOLM dataset ships a per-sample
 `retargeted_motion.mp4`; OmniRetarget ships nothing, so this is *how the roster gets chosen*.

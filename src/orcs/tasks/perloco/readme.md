@@ -25,18 +25,33 @@ TYPE is not — curb and stair are the same reader, so they are a roster line.
 | `Orcs-PerLoco-OmRe-AdaptSonic` | 29 climb families x 5 z-scale levels | frozen SONIC + LoRA on the height scan |
 | `Orcs-PerLoco-OmRe-TaRa` | " | from-scratch MLP — the no-frozen-base floor |
 | `Orcs-PerLoco-Grail-AdaptSonic` | 8 curb families x 1 level | frozen SONIC + LoRA |
-| `Orcs-PerLoco-Grail-AdaptSonic-Smpl` | " | ...encoder reads the SMPL-X **human**, not the retarget |
+| `Orcs-PerLoco-Grail-AdaptSonic-Smpl` | seed-complete GRAIL subset | SMPL-X point tracking + seed RSI |
 | `Orcs-PerLoco-Grail-TaRa` | " | from-scratch floor |
 
 Each env stands on one tile and may only sample the clips staged against it — read live from
 `terrain_{types,levels}` at every reset, never cached, because a level curriculum moves that
 map underneath the command.
 
-**The `-Smpl` row is a command SPACE, not a task**: same terrain, rewards, RSI,
-adapter and critic — only the frozen encoder's input changes (and the ported
-ckpt with it), which makes the pair a controlled read on what retargeting costs.
-GRAIL is the only source that can do this because it ships both halves of every
-take. (uolm's `-Smpl` is rollout-only for the opposite reason.)
+**The `-Smpl` row is the retargeting task.** Its source is the SMPL-X human and
+its two tracking rewards compare all 14 homologous G1 body points against
+morphology-scaled SMPL points and velocities. `seed_state.npz` supplies only
+root/joint state and action history at RSI; the GRAIL robot retarget is not a
+reward, command, critic, or reset target. The runtime automatically forms a
+rectangular terrain roster from seed-complete samples, so a partial phase-1 run
+is immediately testable and expands as more kinematic retargets are generated.
+
+```bash
+# Play starts each selected clip from local frame zero.
+play Orcs-PerLoco-Grail-AdaptSonic-Smpl --agent initial --viewer native
+
+# Exercise random-frame seed RSI instead.
+play Orcs-PerLoco-Grail-AdaptSonic-Smpl --agent initial --viewer native \
+  --env.commands.motion.start-from-zero False
+```
+
+The visualizer draws the original cyan SMPL skeleton and the 14 scaled orange
+point targets over the live robot. Training additionally enables a broad
+0.75 m pelvis divergence tube; play removes it so failures remain visible.
 
 ### run-1 regime
 

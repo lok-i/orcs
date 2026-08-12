@@ -20,6 +20,7 @@ not contacts per step. Boxes are what keep that true.
 
 from __future__ import annotations
 
+from dataclasses import fields
 from functools import lru_cache
 from typing import Callable
 
@@ -38,11 +39,15 @@ from mjlab.viewer import ViewerConfig
 from mocke.sonic import profile
 
 from orcs.assets import get_g1_flat_hand_cfg
+from orcs.core.data.seeds import SeedMotion
 from orcs.core.obs import apply_obs_noise
 from orcs.core.paths import DATA_ROOT
 from orcs.core.robustness import apply_robot_robustness, strip_domain
 from orcs.tasks.perloco import mdp
-from orcs.tasks.perloco.mdp.commands import TerrainMotionCommandCfg
+from orcs.tasks.perloco.mdp.commands import (
+    SmplSeedTerrainMotionCommandCfg,
+    TerrainMotionCommandCfg,
+)
 from orcs.tasks.perloco.observation_cfgs import ObsCtx, sonic_obs, tara_obs
 from orcs.tasks.perloco.roster import Roster, load_roster
 from orcs.tasks.perloco.sensors import (
@@ -61,7 +66,13 @@ Recentring geometry AND motion by the same offset at staging would let this
 drop to ~7 m; it is not done because shifting staged data is a change that
 has to be re-verified, and static geoms are not what costs walltime."""
 
-__all__ = ["omni_env_cfg", "grail_env_cfg", "staged_root", "OMNI_RENDER_Z_SCALE"]
+__all__ = [
+    "OMNI_RENDER_Z_SCALE",
+    "grail_env_cfg",
+    "grail_smpl_env_cfg",
+    "omni_env_cfg",
+    "staged_root",
+]
 
 _MOTION_PAD_EPS_SEC = 2.0
 """Post-motion hold padding — the episode, not the motion, owns resets."""
@@ -121,6 +132,62 @@ def _resolve(
             f"`stage_terrain_motions.py --source {source} --smpl`")
     max_len = max(int(np.load(f)["joint_pos"].shape[0]) for f in files)
     return roster, str(files[0]), max_len
+
+
+@lru_cache(maxsize=None)
+def _resolve_grail_smpl_seeds(roster_path: str | None) -> tuple[Roster, str, int]:
+    """The rectangular subset with complete SMPL + kinematic retarget data.
+
+    Phase-1 generation is intentionally resumable, so a partial seed dataset
+    is a valid development state.  A family enters this task only when every
+    selected level has at least one complete clip.  GRAIL has one level today;
+    spelling the rectangular rule keeps terrain columns and clip masks honest.
+    """
+    root = staged_root("grail")
+    requested = load_roster("grail", root, roster_path)
+    ready_by_key: dict[str, tuple[str, ...]] = {}
+    lengths: dict[tuple[str, str], int] = {}
+
+    for key in requested.tile_keys:
+        keep = requested.clips.get(key)
+        ready: list[str] = []
+        for motion_file in sorted((root / key).glob("sample*/motion.npz")):
+            sample = motion_file.parent
+            if keep and sample.name not in keep:
+                continue
+            if not (sample / "smpl_motion.npz").exists() \
+                    or not (sample / "seed_state.npz").exists():
+                continue
+            seed = SeedMotion.load(sample / "seed_state.npz")
+            if not seed.valid.all():
+                continue
+            ready.append(sample.name)
+            lengths[(key, sample.name)] = seed.num_frames
+        if ready:
+            ready_by_key[key] = tuple(ready)
+
+    families = tuple(
+        family
+        for family in requested.families
+        if all(f"{family}/level_{level:.2f}" in ready_by_key
+               for level in requested.levels)
+    )
+    if not families:
+        raise FileNotFoundError(
+            f"no complete GRAIL SMPL seed clips under {root}; run "
+            "orcs-pseudo-retarget --scene perloco-grail --source <sample-dir>"
+        )
+    clips = {
+        key: ready_by_key[key]
+        for family in families
+        for level in requested.levels
+        if (key := f"{family}/level_{level:.2f}") in ready_by_key
+    }
+    selected = [(key, sample) for key, samples in clips.items() for sample in samples]
+    first_key, first_sample = selected[0]
+    first_motion = str(root / first_key / first_sample / "motion.npz")
+    max_len = max(lengths[item] for item in selected)
+    return Roster(families, requested.levels, clips), first_motion, max_len
 
 
 def _core(
@@ -334,12 +401,10 @@ def grail_env_cfg(
     Staged under a single `level_0.00` rather than a faked difficulty: a row
     axis that does not mean height is a curriculum that promotes nothing.
 
-    `command_space="smpl"` swaps ONLY what the frozen encoder reads — the human
-    SMPL-X recon instead of the retargeted G1 clip — and with it the ported
-    ckpt. Rewards, RSI, terminations, adapter and critic are untouched, because
-    GRAIL ships both halves of every take. (uolm's `-Smpl` is rollout-only for
-    exactly the opposite reason: its SMPL clips have no robot retarget, so its
-    motion.npz is a placeholder and there is nothing to reward.)
+    `command_space="smpl"` is retained as the phase-1 rollout mode: the frozen
+    encoder reads the human while the existing GRAIL robot motion seeds the
+    assisted rollout.  The registered `-Smpl` training task does not use this
+    path; :func:`grail_smpl_env_cfg` supplies point rewards and seed-only RSI.
 
     Tighter anchor tubes than OmniRetarget's (0.2 m / 0.3 rad vs 0.4 / 0.8).
     Curb-walking has no legitimate vertical excursion, and the frozen base
@@ -358,6 +423,79 @@ def grail_env_cfg(
     )
 
 
+def _seed_command_cfg(
+    cfg: TerrainMotionCommandCfg,
+) -> SmplSeedTerrainMotionCommandCfg:
+    """Change command implementation without re-declaring its many base fields."""
+    values = {
+        field.name: getattr(cfg, field.name)
+        for field in fields(SmplSeedTerrainMotionCommandCfg)
+        if field.init and hasattr(cfg, field.name)
+    }
+    return SmplSeedTerrainMotionCommandCfg(**values)
+
+
+def grail_smpl_env_cfg(
+    *,
+    play: bool = False,
+    roster: str | None = None,
+    scan_frame: str = "pelvis",
+    tile_size: tuple[float, float] = GRAIL_TILE_SIZE,
+    num_steps_per_env: int = 24,
+    robot_cfg: Callable[[], EntityCfg] | None = None,
+    kill_bodies: tuple[str, ...] = PERLOCO_KILL_BODIES,
+    kill_exclude: tuple[str, ...] = (),
+    point_anchor_threshold: float = 0.75,
+) -> ManagerBasedRlEnvCfg:
+    """GRAIL SMPL point tracking with one-to-one seed-backed RSI.
+
+    Only the paired SMPL source defines rewards, commands, and divergence.
+    ``seed_state.npz`` supplies the reset state and initial action history; the
+    upstream GRAIL robot retarget is not a teacher trajectory.
+    """
+    r, motion_file, max_len = _resolve_grail_smpl_seeds(roster)
+    cfg = _core(
+        "grail",
+        r,
+        motion_file,
+        max_len,
+        agent="sonic",
+        play=play,
+        scan_frame=scan_frame,
+        tile_size=tile_size,
+        num_steps_per_env=num_steps_per_env,
+        robot_cfg=robot_cfg,
+        kill_bodies=kill_bodies,
+        kill_exclude=kill_exclude,
+        anchor_pos_thresh=0.2,
+        anchor_ori_thresh=0.3,
+        command_space="smpl",
+    )
+    cfg.commands["motion"] = _seed_command_cfg(cfg.commands["motion"])
+    cfg.rewards = {
+        "point_pos": RewardTermCfg(
+            func=mdp.point_position_error_exp,
+            weight=4.0,
+            params={**_P, "std": 0.3},
+        ),
+        "point_vel": RewardTermCfg(
+            func=mdp.point_velocity_error_exp,
+            weight=1.0,
+            params={**_P, "std": 1.0},
+        ),
+        "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
+        "joint_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
+    }
+    cfg.terminations.pop("bad_anchor_pos", None)
+    cfg.terminations.pop("bad_anchor_ori", None)
+    if not play:
+        cfg.terminations["bad_point_anchor_pos"] = TerminationTermCfg(
+            func=mdp.bad_point_anchor_pos,
+            params={**_P, "threshold": point_anchor_threshold},
+        )
+    return cfg
+
+
 def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
     """No domain, no anneal, no tracking kills — so a rollout survives long
     enough to SHOW where it fails. `illegal_contact` stays: a pelvis on the
@@ -366,4 +504,4 @@ def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
     cfg.events.pop("policy_update_counter", None)
     for k in ("bad_anchor_pos", "bad_anchor_ori"):
         cfg.terminations.pop(k, None)
-    cfg.commands["motion"].start_from_zero = True
+    # cfg.commands["motion"].start_from_zero = True

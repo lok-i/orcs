@@ -20,17 +20,29 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import torch
-from mjlab.utils.lab_api.math import matrix_from_quat
+from mjlab.utils.lab_api.math import (
+    axis_angle_from_quat,
+    matrix_from_quat,
+    quat_conjugate,
+    quat_mul,
+)
 
 from orcs.core.data.loader import ConcatMotionLoader
+from orcs.core.data.point_reference import G1_SMPL_BODY_MAP, scaled_smpl_targets
 from orcs.core.data.scan import scan_grouped
+from orcs.core.data.seed_loader import SeededSmplMotionLoader
 from orcs.core.data.smpl import draw_smpl_ghost, load_smpl_channels
 from orcs.core.mdp.commands import MultiClipMotionCommand, MultiClipMotionCommandCfg
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
-__all__ = ["TerrainMotionCommand", "TerrainMotionCommandCfg"]
+__all__ = [
+    "SmplSeedTerrainMotionCommand",
+    "SmplSeedTerrainMotionCommandCfg",
+    "TerrainMotionCommand",
+    "TerrainMotionCommandCfg",
+]
 
 
 def _tile_key(sample_dir: Path) -> str:
@@ -147,6 +159,207 @@ class TerrainMotionCommand(MultiClipMotionCommand):
             )
 
 
+class SmplSeedTerrainMotionCommand(TerrainMotionCommand):
+    """SMPL point reference with a paired simulated robot state used only for RSI."""
+
+    cfg: SmplSeedTerrainMotionCommandCfg
+
+    def _build_loader(self) -> ConcatMotionLoader:
+        by_tile = scan_grouped(str(self.cfg.dataset_dir), _tile_key)
+        motion_files: list[str] = []
+        clip_tile: list[int] = []
+        for tile_idx, key in enumerate(self.cfg.tile_keys):
+            files = by_tile.get(key, [])
+            if keep := self.cfg.clips.get(key):
+                files = [f for f in files if Path(f).parent.name in keep]
+            if not files:
+                raise FileNotFoundError(
+                    f"SMPL-seed tile {key!r} has no complete clips"
+                )
+            motion_files.extend(files)
+            clip_tile.extend([tile_idx] * len(files))
+
+        self._clip_tile = torch.tensor(clip_tile, device=self.device)
+        return SeededSmplMotionLoader(
+            str(self.cfg.dataset_dir),
+            self.device,
+            motion_files=motion_files,
+            joint_names=tuple(self.robot.joint_names),
+            body_names=tuple(self.cfg.body_names),
+            expected_fps=1.0 / self._env.step_dt,
+        )
+
+    def _init_task(self) -> None:
+        super()._init_task()
+        self.point_body_names = tuple(name for name, _ in G1_SMPL_BODY_MAP)
+        if self.point_body_names != tuple(self.cfg.body_names):
+            raise ValueError(
+                "SMPL point map must cover the command bodies in the same order; "
+                f"map={self.point_body_names}, command={self.cfg.body_names}"
+            )
+        self.metrics["error_point_pos_mean"] = torch.zeros(
+            self.num_envs, device=self.device
+        )
+        self.metrics["error_point_pos_max"] = torch.zeros(
+            self.num_envs, device=self.device
+        )
+        self.metrics["error_point_vel_mean"] = torch.zeros(
+            self.num_envs, device=self.device
+        )
+
+    def _previous_frames(self, frames: torch.Tensor) -> torch.Tensor:
+        clip_start = self.motion.clip_offsets[self._clip_ids]
+        if frames.ndim == 2:
+            clip_start = clip_start[:, None]
+        return torch.maximum(frames - 1, clip_start)
+
+    def _targets(self, frames: torch.Tensor) -> torch.Tensor:
+        joints = self.motion.smpl_joints_viz[frames]
+        scales = self.motion.morphology_scale[frames]
+        origins = self._env.scene.env_origins
+        if frames.ndim == 2:
+            origins = origins[:, None, :]
+        return scaled_smpl_targets(joints, scales, origins)
+
+    @property
+    def point_target_pos_w(self) -> torch.Tensor:
+        return self._targets(self.time_steps)
+
+    @property
+    def point_target_vel_w(self) -> torch.Tensor:
+        previous = self._previous_frames(self.time_steps)
+        return (self._targets(self.time_steps) - self._targets(previous)) / self._env.step_dt
+
+    @property
+    def robot_point_pos_w(self) -> torch.Tensor:
+        return self.robot_body_pos_w
+
+    @property
+    def robot_point_vel_w(self) -> torch.Tensor:
+        return self.robot_body_lin_vel_w
+
+    @property
+    def anchor_pos_w(self) -> torch.Tensor:
+        return self.point_target_pos_w[:, self.point_body_names.index("pelvis")]
+
+    @property
+    def anchor_quat_w(self) -> torch.Tensor:
+        return self.motion.smpl_root_quat[self.time_steps]
+
+    @property
+    def anchor_lin_vel_w(self) -> torch.Tensor:
+        return self.point_target_vel_w[:, self.point_body_names.index("pelvis")]
+
+    @property
+    def anchor_ang_vel_w(self) -> torch.Tensor:
+        previous = self._previous_frames(self.time_steps)
+        q_rel = quat_mul(
+            self.motion.smpl_root_quat[self.time_steps],
+            quat_conjugate(self.motion.smpl_root_quat[previous]),
+        )
+        return axis_angle_from_quat(q_rel) / self._env.step_dt
+
+    @property
+    def motion_anchor_pos_w_future(self) -> torch.Tensor:
+        pelvis = self.point_body_names.index("pelvis")
+        return self._targets(self._future_time_indices())[:, :, pelvis]
+
+    @property
+    def motion_anchor_quat_w_future(self) -> torch.Tensor:
+        return self.motion.smpl_root_quat[self._future_time_indices()]
+
+    @property
+    def command(self) -> torch.Tensor:
+        """Source-only point trajectory for the privileged critic."""
+        frames = self._future_time_indices()
+        positions = self._targets(frames)
+        previous = self._previous_frames(frames)
+        velocities = (positions - self._targets(previous)) / self._env.step_dt
+        local_positions = positions - positions[:, :, :1]
+        return torch.cat((local_positions, velocities), dim=-1).flatten(1)
+
+    def _reset_task(
+        self,
+        env_ids: torch.Tensor,
+        clip_ids: torch.Tensor,
+        time_steps: torch.Tensor,
+        origins: torch.Tensor,
+    ) -> None:
+        del clip_ids, origins
+        action = self.motion.last_action[time_steps]
+        manager = self._env.action_manager
+        if action.shape[1] != manager.total_action_dim:
+            raise ValueError(
+                f"seed action width {action.shape[1]} != action manager width "
+                f"{manager.total_action_dim}"
+            )
+        # ActionManager has already reset when command reset runs.  Seeding all
+        # three raw-action slots makes the first observation and action-rate
+        # cost continuous with the baked state without invoking an actuator.
+        manager._action[env_ids] = action
+        manager._prev_action[env_ids] = action
+        manager._prev_prev_action[env_ids] = action
+        if not hasattr(self, "_hold_after_reset"):
+            self._hold_after_reset = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        self._hold_after_reset[env_ids] = True
+
+    def _update_command(self) -> None:
+        """Do not consume one source frame during env.reset's ``compute(0)``.
+
+        mjlab invokes every command once with ``dt=0`` after writing reset
+        state.  The base motion command advances unconditionally, which would
+        pair seed frame ``t`` with SMPL frame ``t+1`` in the first policy
+        observation.  The per-env latch preserves exact one-to-one alignment;
+        normal policy-step advancement is unchanged.
+        """
+        hold = getattr(self, "_hold_after_reset", None)
+        held = hold.clone() if hold is not None else None
+        if held is not None and held.any():
+            frames = self.time_steps[held].clone()
+            overrun = self._steps_past_end[held].clone()
+        super()._update_command()
+        if held is not None and held.any():
+            self.time_steps[held] = frames
+            self._steps_past_end[held] = overrun
+            hold[held] = False
+            self.update_relative_body_poses()
+
+    def _update_metrics(self) -> None:
+        pos_error = torch.linalg.vector_norm(
+            self.point_target_pos_w - self.robot_point_pos_w, dim=-1
+        )
+        vel_error = torch.linalg.vector_norm(
+            self.point_target_vel_w - self.robot_point_vel_w, dim=-1
+        )
+        self.metrics["error_point_pos_mean"] = pos_error.mean(-1)
+        self.metrics["error_point_pos_max"] = pos_error.amax(-1)
+        self.metrics["error_point_vel_mean"] = vel_error.mean(-1)
+
+    def _debug_vis_impl(self, visualizer) -> None:
+        origins = self._env.scene.env_origins
+        targets = self.point_target_pos_w
+        for batch in visualizer.get_env_indices(self.num_envs):
+            t = self.time_steps[batch]
+            draw_smpl_ghost(
+                visualizer,
+                self.motion.smpl_joints_viz[t].cpu().numpy()
+                + origins[batch].cpu().numpy(),
+                matrix_from_quat(self.motion.smpl_root_quat[t]).cpu().numpy(),
+                label=f"smpl_{batch}",
+            )
+            for point, name in zip(
+                targets[batch].cpu().numpy(), self.point_body_names, strict=True
+            ):
+                visualizer.add_sphere(
+                    center=point,
+                    radius=0.025,
+                    color=(1.0, 0.45, 0.1, 0.75),
+                    label=f"point_target_{name}_{batch}",
+                )
+
+
 @dataclass(kw_only=True)
 class TerrainMotionCommandCfg(MultiClipMotionCommandCfg):
     """Clip library keyed to the sub-terrain grid.
@@ -166,3 +379,13 @@ class TerrainMotionCommandCfg(MultiClipMotionCommandCfg):
 
     def build(self, env: ManagerBasedRlEnv) -> TerrainMotionCommand:
         return TerrainMotionCommand(self, env)
+
+
+@dataclass(kw_only=True)
+class SmplSeedTerrainMotionCommandCfg(TerrainMotionCommandCfg):
+    """GRAIL terrain command whose RSI channel is ``seed_state.npz``."""
+
+    command_space: Literal["smpl"] = "smpl"
+
+    def build(self, env: ManagerBasedRlEnv) -> SmplSeedTerrainMotionCommand:
+        return SmplSeedTerrainMotionCommand(self, env)
