@@ -1,16 +1,18 @@
 # orcs
 
-Privileged oracle policies for humanoid control on
-[mjlab](https://github.com/mujocolab/mjlab).
 
-ORCS provides the task mechanics and privileged policies used to train teachers,
-retarget motions, and bootstrap downstream visual policies.
+ a package for synthesizing privileged control policies for
+1. teacher-student distilaltion
+2. kinodynamiic retargeting of human motions
 
-| task | privileged input |
-|---|---|
-| `Orcs-Uolm-*` | object kinematics |
-| `Orcs-PerLoco-*` | terrain height scan |
-| `Orcs-Dodge-*` | projectile state |
+
+## supported tasks
+
+| task | tag | privileged input |
+|---|---| ---|
+omni-object loco-manipulation | `Orcs-Uolm-*` | object kinematic state |
+perceptive locomption | `Orcs-PerLoco-*` | terrain height scan |
+dodgeball | `Orcs-Dodge-*` | object kinematic state |
 
 ## install
 
@@ -29,42 +31,37 @@ bash scripts/setup/sync_dependencies.sh
 python dependencies/assets/source/omni_objects/make_object_models.py --all
 ```
 
-`sync_dependencies.sh` reads `deps.lock`, downloads the shared data, and
-installs the pinned `mocke` and `rsl_rl` forks into the active environment.
-Re-running it is safe.
-
-Verify the installation:
+verify the installation:
 
 ```bash
 python -c "import mjlab, orcs; from mjlab.tasks.registry import list_tasks; print('\n'.join(list_tasks()))"
 ```
 
-Import `mjlab` before `orcs` in standalone scripts so task entry-point discovery
+> [!NOTE]
+> import `mjlab` before `orcs` in standalone scripts so task entry-point discovery
 finishes before ORCS registration.
 
 ## data workflows
 
-- [Perceptive locomotion](docs/perceptive_locomotion.md) — fetch and stage the
+- [Perceptive locomotion](docs/perceptive_locomotion.md): fetch and stage the
   OmniRetarget or GRAIL terrain-motion datasets.
-- [SMPL retargeting](docs/smpl_retargeting.md) — kinematically retarget the full
-  staged GRAIL roster, inspect it, and launch `PerLoco-Grail-*-Smpl` training.
+- [SMPL retargeting](docs/smpl_retargeting.md): two-stage first kinematically retarget the full
+  staged GRAIL roster and second launch `PerLoco-Grail-*-Smpl` training for dynamics refinement.
 
-The licensed SMPL-X body model is the only manual download in the GRAIL setup.
-Both workflows are resumable and follow the packaged terrain rosters.
+> [!NOTE]
+> the licensed SMPL-X body model is the only manual download in the GRAIL setup.
+> both workflows are resumable and follow the packaged terrain rosters.
 
 ## play and train
 
 ```bash
+# `--agent initial` runs an initial policy i.e. first training iteration
 play Orcs-Uolm-AdaptSonic --agent initial --viewer native
 play Orcs-PerLoco-Grail-AdaptSonic --agent initial --viewer native
 
 train Orcs-Uolm-AdaptSonic --env.scene.num-envs 4096
 train Orcs-PerLoco-Grail-AdaptSonic --env.scene.num-envs 4096
 ```
-
-`--agent initial` runs the frozen SONIC base with a zero-initialized adapter and
-does not require a training checkpoint. `TaRa` task variants provide
-from-scratch baselines.
 
 ## paths
 
@@ -89,8 +86,10 @@ See [docs/ethos.md](docs/ethos.md) for package boundaries and the task contract.
 
 ## acknowledgements
 
-*Standing on the shoulders of giants:* [SONIC](https://github.com/NVlabs/GR00T-WholeBodyControl),
-[GRAIL](https://github.com/NVlabs/GRAIL),
-[OmniRetarget](https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset),
-[mjlab](https://github.com/mujocolab/mjlab), and
-[RSL-RL](https://github.com/leggedrobotics/rsl_rl).
+*"Standing on the shoulders of giants":* 
+
+1. [SONIC](https://github.com/NVlabs/GR00T-WholeBodyControl)
+2. [GRAIL](https://github.com/NVlabs/GRAIL)
+3. [OmniRetarget](https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset)
+3. [mjlab](https://github.com/mujocolab/mjlab)
+3. [rsl-rl](https://github.com/leggedrobotics/rsl_rl)
