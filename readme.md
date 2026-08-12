@@ -45,8 +45,9 @@ finishes before ORCS registration.
 
 - [Perceptive locomotion](docs/perceptive_locomotion.md): fetch and stage the
   OmniRetarget or GRAIL terrain-motion datasets.
-- [SMPL retargeting](docs/smpl_retargeting.md): two-stage first kinematically retarget the full
-  staged GRAIL roster and second launch `PerLoco-Grail-*-Smpl` training for dynamics refinement.
+- [SMPL retargeting](docs/smpl_retargeting.md): kinematically retarget the full
+  GRAIL or reconstructed UOLM corpus, then launch the matching `*-Smpl` task
+  for dynamics refinement.
 
 > [!NOTE]
 > the licensed SMPL-X body model is the only manual download in the GRAIL setup.

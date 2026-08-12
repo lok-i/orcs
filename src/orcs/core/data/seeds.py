@@ -15,7 +15,8 @@ import numpy as np
 
 __all__ = ["SEED_SCHEMA_VERSION", "SeedMotion"]
 
-SEED_SCHEMA_VERSION = 1
+SEED_SCHEMA_VERSION = 2
+SEED_POSITION_FRAME = "env_local"
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ class SeedMotion:
         path.parent.mkdir(parents=True, exist_ok=True)
         arrays: dict[str, np.ndarray] = {
             "schema_version": np.array(SEED_SCHEMA_VERSION, dtype=np.int64),
+            "position_frame": np.array(SEED_POSITION_FRAME),
             "fps": np.array(self.fps, dtype=np.float32),
             "source_path": np.array(self.source_path),
             "capture_steps": np.array(self.capture_steps, dtype=np.int64),
@@ -165,6 +167,12 @@ class SeedMotion:
             if version != SEED_SCHEMA_VERSION:
                 raise ValueError(
                     f"unsupported seed schema {version}; expected {SEED_SCHEMA_VERSION}"
+                )
+            position_frame = str(d["position_frame"])
+            if position_frame != SEED_POSITION_FRAME:
+                raise ValueError(
+                    f"unsupported seed position frame {position_frame!r}; "
+                    f"expected {SEED_POSITION_FRAME!r}"
                 )
             kwargs = {
                 name: d[name].copy()

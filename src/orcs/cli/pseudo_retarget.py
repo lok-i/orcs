@@ -781,6 +781,7 @@ class _Recorder:
         robot = self.controller.robot
         body_ids = self.controller.body_ids
         body_pos = robot.data.body_link_pos_w[:, body_ids]
+        origin = self.controller.env.scene.env_origins[env_id]
         body_error = torch.linalg.vector_norm(assist.body_targets_w - body_pos, dim=-1)
         finite = torch.isfinite(
             torch.cat(
@@ -797,14 +798,19 @@ class _Recorder:
         ).all(-1)
         row: dict[str, np.ndarray | bool | float] = {
             "source_frame_idx": np.array(frame, dtype=np.int64),
-            "robot_root_pos_w": _cpu(robot.data.root_link_pos_w[env_id]),
+            # Seed positions are environment-local.  A vectorized bake gives
+            # every simulated world a layout origin; persisting that origin
+            # would make RSI add it a second time in the training scene.
+            "robot_root_pos_w": _cpu(
+                robot.data.root_link_pos_w[env_id] - origin
+            ),
             "robot_root_quat_w": _cpu(robot.data.root_link_quat_w[env_id]),
             "robot_root_lin_vel_w": _cpu(robot.data.root_link_lin_vel_w[env_id]),
             "robot_root_ang_vel_w": _cpu(robot.data.root_link_ang_vel_w[env_id]),
             "joint_pos": _cpu(robot.data.joint_pos[env_id]),
             "joint_vel": _cpu(robot.data.joint_vel[env_id]),
             "last_action": _cpu(action[env_id]),
-            "body_pos_w": _cpu(body_pos[env_id]),
+            "body_pos_w": _cpu(body_pos[env_id] - origin),
             "body_quat_w": _cpu(robot.data.body_link_quat_w[env_id, body_ids]),
             "assist_force_w": _cpu(assist.body_forces_w[env_id]),
             "assist_torque_w": _cpu(assist.body_torques_w[env_id]),
@@ -821,11 +827,13 @@ class _Recorder:
             assert assist.object_force_w is not None
             assert assist.object_torque_w is not None
             row.update(
-                object_pos_w=_cpu(obj.data.root_link_pos_w[env_id]),
+                object_pos_w=_cpu(obj.data.root_link_pos_w[env_id] - origin),
                 object_quat_w=_cpu(obj.data.root_link_quat_w[env_id]),
                 object_lin_vel_w=_cpu(obj.data.root_link_lin_vel_w[env_id]),
                 object_ang_vel_w=_cpu(obj.data.root_link_ang_vel_w[env_id]),
-                object_target_pos_w=_cpu(assist.object_target_pos_w[env_id]),
+                object_target_pos_w=_cpu(
+                    assist.object_target_pos_w[env_id] - origin
+                ),
                 object_assist_force_w=_cpu(assist.object_force_w[env_id]),
                 object_assist_torque_w=_cpu(assist.object_torque_w[env_id]),
             )

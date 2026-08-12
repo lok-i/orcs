@@ -158,7 +158,13 @@ def _resolve_grail_smpl_seeds(roster_path: str | None) -> tuple[Roster, str, int
             if not (sample / "smpl_motion.npz").exists() \
                     or not (sample / "seed_state.npz").exists():
                 continue
-            seed = SeedMotion.load(sample / "seed_state.npz")
+            try:
+                seed = SeedMotion.load(sample / "seed_state.npz")
+            except (KeyError, OSError, ValueError):
+                # Stale/corrupt seeds are an incomplete generated dataset,
+                # not an import-time package error.  The batch CLI will
+                # regenerate them under the current seed contract.
+                continue
             if not seed.valid.all():
                 continue
             ready.append(sample.name)

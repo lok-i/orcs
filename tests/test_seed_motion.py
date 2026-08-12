@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from orcs.core.data.seeds import SeedMotion
+from orcs.core.data.seeds import SEED_POSITION_FRAME, SeedMotion
 
 
 def test_seed_motion_round_trip(tmp_path):
@@ -45,6 +45,8 @@ def test_seed_motion_round_trip(tmp_path):
     assert loaded.capture_steps == 12
     assert np.allclose(loaded.source_time_s, [0.0, 0.02, 0.04])
     assert np.array_equal(loaded.valid, seed.valid)
+    with np.load(path) as raw:
+        assert str(raw["position_frame"]) == SEED_POSITION_FRAME == "env_local"
 
 
 def test_seed_motion_rejects_shifted_source_index():

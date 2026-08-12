@@ -12,6 +12,10 @@ training reference remains the source data: rewards track 14 homologous
 SMPL/G1 body points and their velocities, plus the source object trajectory for
 UOLM. The kinematic robot/object trace is never a tracking teacher.
 
+All persisted positions are environment-local. Corpus batching may place each
+simulation world at a different layout origin, but that origin is removed on
+write and applied exactly once by RSI in the destination training scene.
+
 ## prerequisite
 
 First complete [GRAIL fetch and staging](perceptive_locomotion.md#fetch-and-stage-grail).

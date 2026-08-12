@@ -159,7 +159,10 @@ def _resolve_reconstructed_smpl_seeds(
             seed_file = sample / "seed_state.npz"
             if not seed_file.exists():
                 continue
-            seed = SeedMotion.load(seed_file)
+            try:
+                seed = SeedMotion.load(seed_file)
+            except (KeyError, OSError, ValueError):
+                continue
             if not seed.valid.all() or seed.object_pos_w is None:
                 continue
             ready_samples.append((str(smpl_file), seed.num_frames))

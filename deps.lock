@@ -13,6 +13,13 @@
         "pip_install": false,
         "lfs": true
     },
+    "reconstructed_motions": {
+        "url": "https://huggingface.co/datasets/l-k-r/reconstructed_motions",
+        "sha": "e3ec71b43c740d7f412d2f5c4efa378bdfd6336f",
+        "path": "data/reconstructed_motions",
+        "pip_install": false,
+        "lfs": true
+    },
     "mocke": {
         "url": "git@github.com:lok-i/mocke.git",
         "sha": "004d4c02bb1be65c67688f25f95197c865f83d6f",
