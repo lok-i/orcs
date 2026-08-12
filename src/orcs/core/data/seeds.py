@@ -109,6 +109,8 @@ class SeedMotion:
             value = getattr(self, name)
             if value is not None and value.shape != shape:
                 raise ValueError(f"{name} has shape {value.shape}, expected {shape}")
+            if value is not None and not np.isfinite(value).all():
+                raise ValueError(f"{name} contains NaN/Inf")
 
     def save(self, path: str | Path) -> Path:
         """Write a compressed, self-describing ``seed_state.npz``."""

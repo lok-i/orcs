@@ -16,6 +16,7 @@ from orcs.core.assisted_retarget import (
     G1_SMPL_BODY_MAP,
     AssistanceGains,
     infer_morphology_scale,
+    robot_relative_object_target,
     scaled_smpl_targets,
 )
 
@@ -82,6 +83,40 @@ def test_global_assistance_gains_preserve_force_only_defaults():
     )
 
 
+def test_object_target_preserves_authored_pose_on_reference():
+    robot_pos = torch.tensor([[1.0, 2.0, 0.8]])
+    robot_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    object_pos = torch.tensor([[1.4, 2.2, 1.1]])
+    object_quat = torch.tensor([[0.7071068, 0.0, 0.0, 0.7071068]])
+
+    target_pos, target_quat, _, _ = robot_relative_object_target(
+        robot_pos, robot_quat, robot_pos, robot_quat, object_pos, object_quat
+    )
+
+    assert torch.allclose(target_pos, object_pos)
+    assert torch.allclose(target_quat, object_quat)
+
+
+def test_object_target_is_equivariant_to_robot_motion():
+    source_robot_pos = torch.tensor([[0.0, 0.0, 0.8]])
+    identity = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    source_object_pos = torch.tensor([[1.0, 0.0, 1.0]])
+    source_object_quat = identity.clone()
+    yaw_90 = torch.tensor([[0.7071068, 0.0, 0.0, 0.7071068]])
+
+    target_pos, target_quat, _, _ = robot_relative_object_target(
+        torch.tensor([[2.0, 3.0, 0.8]]),
+        yaw_90,
+        source_robot_pos,
+        identity,
+        source_object_pos,
+        source_object_quat,
+    )
+
+    assert torch.allclose(target_pos, torch.tensor([[2.0, 4.0, 1.0]]), atol=1e-6)
+    assert torch.allclose(target_quat, yaw_90, atol=1e-6)
+
+
 def test_settling_monitor_accepts_only_a_low_error_plateau():
     high_error = _SettlingMonitor()
     for _ in range(100):
@@ -140,3 +175,63 @@ def test_complete_seed_requires_valid_source_aligned_frames(monkeypatch, tmp_pat
         num_frames=2, valid=np.ones(2, dtype=bool)
     )
     assert not _seed_is_complete(sample)
+
+
+def test_grail_batch_uses_one_vectorized_rollout_without_subprocesses(
+    monkeypatch, tmp_path
+):
+    samples = [tmp_path / "sample0", tmp_path / "sample1"]
+    calls: list[tuple[list, str]] = []
+
+    monkeypatch.setattr(pseudo_retarget, "_selected_grail_samples", lambda: samples)
+    monkeypatch.setattr(pseudo_retarget, "_seed_is_complete", lambda _sample: False)
+    monkeypatch.setattr(
+        pseudo_retarget,
+        "_run_grail_vectorized",
+        lambda pending, *, device: calls.append((pending, device)) or [],
+    )
+    monkeypatch.setattr(
+        pseudo_retarget.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("successful corpus batch must not spawn workers")
+        ),
+    )
+
+    pseudo_retarget._run_grail_batch(device="cuda:0", overwrite=False)
+
+    assert calls == [(samples, "cuda:0")]
+
+
+def test_uolm_batch_uses_one_vectorized_rollout_without_subprocesses(
+    monkeypatch, tmp_path
+):
+    samples = [tmp_path / "sample0", tmp_path / "sample1"]
+    calls: list[tuple[list, str]] = []
+
+    import orcs.tasks.uolm.sources.reconstructed as reconstructed
+
+    monkeypatch.setattr(
+        reconstructed, "stage_motion_set", lambda *_args, **_kwargs: samples
+    )
+    monkeypatch.setattr(
+        pseudo_retarget, "_object_seed_is_complete", lambda _sample: False
+    )
+    monkeypatch.setattr(
+        pseudo_retarget,
+        "_run_uolm_vectorized",
+        lambda pending, *, device: calls.append((pending, device)) or [],
+    )
+    monkeypatch.setattr(
+        pseudo_retarget.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("successful corpus batch must not spawn workers")
+        ),
+    )
+
+    pseudo_retarget._run_reconstructed_batch(
+        motion_sets=("big-cube-floor",), device="cuda:0", overwrite=False
+    )
+
+    assert calls == [(samples, "cuda:0")]

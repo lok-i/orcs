@@ -24,16 +24,38 @@ from orcs.assets.objects import (
     Collision,
     omni_object_entity_cfg,
 )
+from orcs.assets.uolm_scenes import (
+    BIG_CUBE_HALF_EXTENT,
+    BIG_CUBE_MASS,
+    SMALL_CUBE_HALF_EXTENT,
+    SMALL_CUBE_MASS,
+    TABLE_CENTER_HEIGHT,
+    TABLE_SIZE,
+    UolmReconstructedScene,
+    reconstructed_object_entity_cfg,
+    reconstructed_object_variants_entity_cfg,
+    table_entity_cfg,
+)
 
 __all__ = [
     "BALL_BODY_NAME",
     "BALL_GEOM_NAME",
     "OBJECT_BODY_NAME",
     "Collision",
+    "BIG_CUBE_HALF_EXTENT",
+    "BIG_CUBE_MASS",
+    "SMALL_CUBE_HALF_EXTENT",
+    "SMALL_CUBE_MASS",
+    "TABLE_CENTER_HEIGHT",
+    "TABLE_SIZE",
+    "UolmReconstructedScene",
     "ball_entity_cfg",
     "find_body",
     "find_body_or_none",
     "flat_hand_spec",
     "get_g1_flat_hand_cfg",
     "omni_object_entity_cfg",
+    "reconstructed_object_entity_cfg",
+    "reconstructed_object_variants_entity_cfg",
+    "table_entity_cfg",
 ]

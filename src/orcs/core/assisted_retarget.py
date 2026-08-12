@@ -12,7 +12,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
-from mjlab.utils.lab_api.math import quat_conjugate, quat_mul
+from mjlab.utils.lab_api.math import (
+    axis_angle_from_quat,
+    quat_apply,
+    quat_apply_inverse,
+    quat_conjugate,
+    quat_mul,
+)
 
 from orcs.core.data.point_reference import (
     G1_SMPL_BODY_MAP,
@@ -30,6 +36,7 @@ __all__ = [
     "AssistanceSnapshot",
     "AssistedMotionController",
     "infer_morphology_scale",
+    "robot_relative_object_target",
     "scaled_smpl_targets",
 ]
 
@@ -79,6 +86,34 @@ def _cap_vectors(vectors: torch.Tensor, budget: torch.Tensor) -> tuple[torch.Ten
     return vectors * scale[..., None], scale.squeeze(-1)
 
 
+def robot_relative_object_target(
+    robot_pos_w: torch.Tensor,
+    robot_quat_w: torch.Tensor,
+    mapped_source_robot_pos_w: torch.Tensor,
+    mapped_source_robot_quat_w: torch.Tensor,
+    source_object_pos_w: torch.Tensor,
+    source_object_quat_w: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Map an authored human-object relation onto the current robot pose.
+
+    Returns ``(target_pos_w, target_quat_w, relative_pos_b, relative_quat)``.
+    The source robot pose is the morphology-mapped G1 pelvis target, not the
+    raw human pelvis.  Consequently, when the robot is exactly on its mapped
+    reference, the returned object target is exactly the authored world pose
+    (critical for a cube landing on its authored table).
+    """
+    relative_pos_b = quat_apply_inverse(
+        mapped_source_robot_quat_w,
+        source_object_pos_w - mapped_source_robot_pos_w,
+    )
+    relative_quat = quat_mul(
+        quat_conjugate(mapped_source_robot_quat_w), source_object_quat_w
+    )
+    target_pos_w = robot_pos_w + quat_apply(robot_quat_w, relative_pos_b)
+    target_quat_w = quat_mul(robot_quat_w, relative_quat)
+    return target_pos_w, target_quat_w, relative_pos_b, relative_quat
+
+
 @dataclass(frozen=True)
 class AssistanceSnapshot:
     body_targets_w: torch.Tensor
@@ -101,6 +136,7 @@ class AssistedMotionController:
         command_name: str = "motion",
         robot_name: str = "robot",
         object_name: str | None = None,
+        clip_ids: torch.Tensor | None = None,
         gains: AssistanceGains = DEFAULT_ASSISTANCE_GAINS,
     ) -> None:
         self.env = env
@@ -123,11 +159,36 @@ class AssistedMotionController:
         anchor_model_id = model_body_ids[self.anchor_idx]
         self.anchor_inertia = model.body_inertia[:, anchor_model_id].mean(-1).to(env.device)
 
-        source = self.command.motion.smpl_joints_viz
         nominal_body_pos = self.robot.data.body_link_pos_w[:, self.body_ids]
-        self.morphology_scale = infer_morphology_scale(
-            source, nominal_body_pos[0], self.body_names
-        )
+        if clip_ids is None:
+            source = self.command.motion.smpl_joints_viz
+            self.morphology_scale: float | torch.Tensor = infer_morphology_scale(
+                source, nominal_body_pos[0], self.body_names
+            )
+        else:
+            if clip_ids.shape != (env.num_envs,):
+                raise ValueError(
+                    f"clip_ids has shape {clip_ids.shape}, expected "
+                    f"({env.num_envs},)"
+                )
+            # Batched corpus generation keeps the same per-clip morphology
+            # estimate as isolated generation.  A global corpus median would
+            # make output depend on which other clips happened to share the
+            # batch.
+            scales = []
+            for env_id, clip_id in enumerate(clip_ids.tolist()):
+                start = int(self.command.motion.clip_offsets[clip_id].item())
+                end = int(self.command.motion.clip_ends[clip_id].item())
+                scales.append(
+                    infer_morphology_scale(
+                        self.command.motion.smpl_joints_viz[start:end],
+                        nominal_body_pos[env_id],
+                        self.body_names,
+                    )
+                )
+            self.morphology_scale = torch.tensor(
+                scales, dtype=nominal_body_pos.dtype, device=env.device
+            )
 
         self.object_mass = None
         self.object_inertia = None
@@ -185,14 +246,16 @@ class AssistedMotionController:
             torch.ones_like(torque_norm), torque_budget / torque_norm.clamp_min(1e-6)
         )
         torques[:, self.anchor_idx] = torque * torque_scale[:, None]
-        self.robot.write_external_wrench_to_sim(
-            forces, torques, body_ids=self.body_ids
-        )
-
         object_target = object_force = object_torque = None
         object_scale = torch.ones_like(force_scale)
         if self.object is not None:
-            object_target, object_force, object_torque, object_scale = self._apply_object(frame)
+            object_target, object_force, object_torque, object_scale = (
+                self._apply_object(frame)
+            )
+
+        self.robot.write_external_wrench_to_sim(
+            forces, torques, body_ids=self.body_ids
+        )
 
         return AssistanceSnapshot(
             body_targets_w=targets,
@@ -211,30 +274,75 @@ class AssistedMotionController:
         assert self.object is not None
         assert self.object_mass is not None and self.object_inertia is not None
         motion = self.command.motion
-        source_pelvis = motion.smpl_joints_viz[frame, 0]
-        source_object = motion.obj_pos[frame]
-        delta = self.morphology_scale * (source_object - source_pelvis)
-        object_target = self.robot.data.root_link_pos_w + delta
+        clip_start = motion.clip_offsets[self.command._clip_ids]
+        previous = torch.maximum(frame - 1, clip_start)
+        pelvis = self.body_names.index("pelvis")
+        origins = self.env.scene.env_origins
+
+        mapped_robot_pos = self.targets(frame)[:, pelvis]
+        mapped_robot_quat = motion.smpl_root_quat[frame]
+        source_object_pos = motion.obj_pos[frame] + origins
+        source_object_quat = motion.obj_quat[frame]
+        object_target, object_target_q, relative_pos, _ = robot_relative_object_target(
+            self.robot.data.root_link_pos_w,
+            self.robot.data.root_link_quat_w,
+            mapped_robot_pos,
+            mapped_robot_quat,
+            source_object_pos,
+            source_object_quat,
+        )
+
+        previous_mapped_pos = self.targets(previous)[:, pelvis]
+        previous_mapped_quat = motion.smpl_root_quat[previous]
+        previous_source_object_pos = motion.obj_pos[previous] + origins
+        previous_source_object_quat = motion.obj_quat[previous]
+        _, previous_target_q, previous_relative_pos, _ = robot_relative_object_target(
+            self.robot.data.root_link_pos_w,
+            self.robot.data.root_link_quat_w,
+            previous_mapped_pos,
+            previous_mapped_quat,
+            previous_source_object_pos,
+            previous_source_object_quat,
+        )
+
+        # Moving-base feedforward.  The relative trajectory is differentiated
+        # in the robot frame, then transported through the current robot pose;
+        # the lever-arm term accounts for robot angular velocity.
+        relative_lin_vel = (relative_pos - previous_relative_pos) / self.env.step_dt
+        relative_pos_w = quat_apply(self.robot.data.root_link_quat_w, relative_pos)
+        object_target_lin_vel = (
+            self.robot.data.root_link_lin_vel_w
+            + torch.linalg.cross(
+                self.robot.data.root_link_ang_vel_w, relative_pos_w, dim=-1
+            )
+            + quat_apply(self.robot.data.root_link_quat_w, relative_lin_vel)
+        )
+        relative_target_delta = quat_mul(
+            object_target_q, quat_conjugate(previous_target_q)
+        )
+        object_target_ang_vel = (
+            self.robot.data.root_link_ang_vel_w
+            + axis_angle_from_quat(relative_target_delta) / self.env.step_dt
+        )
 
         rate = self.gains.response_rate
         damping = self.gains.damping_ratio
         kp = self.object_mass * rate**2
         kd = 2.0 * damping * self.object_mass * rate
         force = kp[:, None] * (object_target - self.object.data.root_link_pos_w)
-        force -= kd[:, None] * self.object.data.root_link_lin_vel_w
+        force += kd[:, None] * (
+            object_target_lin_vel - self.object.data.root_link_lin_vel_w
+        )
         budget = self.gains.object_force_budget_g * _GRAVITY * self.object_mass
         norm = torch.linalg.vector_norm(force, dim=-1)
         force_scale = torch.minimum(torch.ones_like(norm), budget / norm.clamp_min(1e-6))
         force = force * force_scale[:, None]
 
-        source_root_q = motion.smpl_root_quat[frame]
-        source_obj_q = motion.obj_quat[frame]
-        relative_q = quat_mul(quat_conjugate(source_root_q), source_obj_q)
-        object_target_q = quat_mul(self.robot.data.root_link_quat_w, relative_q)
         ori_error = _quat_error_world(self.object.data.root_link_quat_w, object_target_q)
         torque = self.object_inertia[:, None] * (
             rate**2 * ori_error
-            - 2.0 * damping * rate * self.object.data.root_link_ang_vel_w
+            + 2.0 * damping * rate
+            * (object_target_ang_vel - self.object.data.root_link_ang_vel_w)
         )
         torque_budget = self.object_mass * _GRAVITY * self.morphology_scale
         torque_norm = torch.linalg.vector_norm(torque, dim=-1)

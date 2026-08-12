@@ -36,15 +36,23 @@ from mocke.sonic import profile
 
 from orcs.assets import (
     OBJECT_BODY_NAME,
+    TABLE_CENTER_HEIGHT,
     Collision,
     get_g1_flat_hand_cfg,
     omni_object_entity_cfg,
+    reconstructed_object_entity_cfg,
+    reconstructed_object_variants_entity_cfg,
+    table_entity_cfg,
 )
+from orcs.core.data.seeds import SeedMotion
 from orcs.core.obs import apply_obs_noise
 from orcs.core.paths import DATA_ROOT
 from orcs.core.robustness import strip_domain
 from orcs.tasks.uolm import mdp
-from orcs.tasks.uolm.mdp.commands import ObjectMotionCommandCfg
+from orcs.tasks.uolm.mdp.commands import (
+    ObjectMotionCommandCfg,
+    SmplSeedObjectMotionCommandCfg,
+)
 from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
 from orcs.tasks.uolm.observation_cfgs import ObsCtx, sonic_obs, tara_obs
 from orcs.tasks.uolm.robustness import apply_robustness
@@ -57,12 +65,14 @@ from orcs.tasks.uolm.sensors import (
     ground_contact_sensor,
     object_contact_graph_sensor,
 )
+from orcs.tasks.uolm.sources.reconstructed import MOTION_SETS, cache_root
 
 _G1_DATASETS_ROOT = str(DATA_ROOT / "retargeted_motions/data/unitree_g1")
 # SMPL command-space dataset (flat <root>/<clip>/<sampleN>/*.npz), built by
 # scripts/build_smpl_dataset.py. Absent until the contributor builds it —
 # registration degrades gracefully (see _resolve_smpl_motions).
 _SMPL_DATASETS_ROOT = str(DATA_ROOT / "smpl_motions")
+_RECONSTRUCTED_SMPL_ROOT = str(cache_root())
 
 # fcrl's default roster (assets + motions verified locally). Order matters:
 # it is the variant order, i.e. the object-id space.
@@ -124,6 +134,47 @@ def _resolve_smpl_motions() -> tuple[str | None, int]:
     return files[0], max_len
 
 
+@lru_cache(maxsize=None)
+def _resolve_reconstructed_smpl_seeds(
+    motion_sets: tuple[str, ...],
+) -> tuple[str, int, int]:
+    """Return first locator, complete clip count, and longest seed length."""
+    unknown = tuple(name for name in motion_sets if name not in MOTION_SETS)
+    if unknown:
+        raise ValueError(
+            f"unknown reconstructed motion sets {unknown}; choose from "
+            f"{tuple(MOTION_SETS)}"
+        )
+    if not motion_sets or len(set(motion_sets)) != len(motion_sets):
+        raise ValueError("motion_sets must be non-empty and contain no duplicates")
+
+    ready_samples: list[tuple[str, int]] = []
+    for motion_set in motion_sets:
+        root = cache_root() / motion_set
+        ready = 0
+        for smpl_file in sorted(root.rglob("smpl_motion.npz")):
+            sample = smpl_file.parent
+            if not (sample / "object_motion.npz").exists():
+                continue
+            seed_file = sample / "seed_state.npz"
+            if not seed_file.exists():
+                continue
+            seed = SeedMotion.load(seed_file)
+            if not seed.valid.all() or seed.object_pos_w is None:
+                continue
+            ready_samples.append((str(smpl_file), seed.num_frames))
+            ready += 1
+        if ready == 0:
+            raise FileNotFoundError(
+                f"no complete kinematic retargets under {root}; run "
+                "orcs-pseudo-retarget --scene uolm "
+                f"--motion-set {motion_set} --all"
+            )
+    return ready_samples[0][0], len(ready_samples), max(
+        length for _, length in ready_samples
+    )
+
+
 # ---------------------------------------------------------------------------
 # THE factory
 # ---------------------------------------------------------------------------
@@ -139,6 +190,8 @@ def uolm_env_cfg(
     robot_cfg: Callable[[], EntityCfg] | None = None,
     kill_bodies: tuple[str, ...] = UOLM_KILL_BODIES,
     kill_exclude: tuple[str, ...] = (),
+    _bootstrap_motion: tuple[str, str, int] | None = None,
+    _object_entity: EntityCfg | None = None,
 ) -> ManagerBasedRlEnvCfg:
     """THE Orcs-Uolm-AdaptSonic env config factory (SONIC augment layout, MoTr rewards).
 
@@ -169,7 +222,14 @@ def uolm_env_cfg(
     obj = SceneEntityCfg(OBJECT_BODY_NAME)
     _p = {"command_name": "motion"}
 
-    if command_space == "smpl":
+    if _bootstrap_motion is not None:
+        # Internal composition seam for source-only pipelines. The command and
+        # scene entity are replaced by their specialized factory before env
+        # build; supplying the bootstrap explicitly prevents an accidental
+        # dependency on the legacy retargeted-motion corpus.
+        motion_file, dataset_dir, max_clip_len = _bootstrap_motion
+        cmd_object_names, cmd_excludes = None, None
+    elif command_space == "smpl":
         # rollout-only (rewards + RSI nullified below); documented in
         # tasks/uolm/__init__ rather than printed at every import.
         motion_file, max_clip_len = _resolve_smpl_motions()
@@ -185,7 +245,7 @@ def uolm_env_cfg(
         scene=SceneCfg(
             terrain=TerrainEntityCfg(terrain_type="plane"),
             entities={
-                OBJECT_BODY_NAME: omni_object_entity_cfg(
+                OBJECT_BODY_NAME: _object_entity or omni_object_entity_cfg(
                     names, collision or _DEFAULT_COLLISION),
             },
             num_envs=1,
@@ -368,6 +428,146 @@ def uolm_env_cfg(
     return cfg
 
 
+def uolm_smpl_env_cfg(
+    *,
+    play: bool = False,
+    motion_sets: tuple[str, ...] = (
+        "small-cube-table",
+        "big-cube-floor",
+    ),
+    num_steps_per_env: int = 24,
+    robot_cfg: Callable[[], EntityCfg] | None = None,
+    kill_bodies: tuple[str, ...] = UOLM_KILL_BODIES,
+    kill_exclude: tuple[str, ...] = (),
+    point_anchor_threshold: float = 0.75,
+) -> ManagerBasedRlEnvCfg:
+    """Reconstructed SMPL/object tracking with kinematic-retarget RSI.
+
+    ``motion_sets`` is the only dataset selector: one name produces a
+    specialized homogeneous batch; multiple names produce matched per-world
+    object variants and clip masks.  Seed robot/object states initialize the
+    simulator, while rewards refer only to source SMPL points and source
+    object motion.
+    """
+    motion_sets = tuple(motion_sets)
+    bootstrap_file, _, max_clip_len = _resolve_reconstructed_smpl_seeds(motion_sets)
+
+    if len(motion_sets) == 1:
+        object_entity = reconstructed_object_entity_cfg(motion_sets[0])
+        ordered_motion_sets = None
+    else:
+        object_entity = reconstructed_object_variants_entity_cfg(motion_sets)
+        ordered_motion_sets = motion_sets
+
+    # Reuse the proven UOLM physics/action/event shell. Everything specific to
+    # its retargeted robot demonstrations is replaced below before env build.
+    cfg = uolm_env_cfg(
+        command_space="robot",
+        agent="sonic",
+        play=False,
+        num_steps_per_env=num_steps_per_env,
+        robot_cfg=robot_cfg,
+        kill_bodies=kill_bodies,
+        kill_exclude=kill_exclude,
+        _bootstrap_motion=(
+            bootstrap_file,
+            _RECONSTRUCTED_SMPL_ROOT,
+            max_clip_len,
+        ),
+        _object_entity=object_entity,
+    )
+    # One movable fixed support is cheaper and more exact than a scene switch:
+    # command reset puts it below the world for floor clips, or beneath the
+    # selected table clip's authored final object XY.
+    cfg.scene.entities["table"] = table_entity_cfg()
+
+    bootstrap_motion = cfg.commands["motion"].motion_file
+    cfg.commands["motion"] = SmplSeedObjectMotionCommandCfg(
+        motion_file=bootstrap_motion,
+        dataset_dir=_RECONSTRUCTED_SMPL_ROOT,
+        motion_set_names=motion_sets,
+        ordered_object_names=ordered_motion_sets,
+        exclude_motions=None,
+        object_entity_name=OBJECT_BODY_NAME,
+        support_entity_name="table",
+        table_center_height=TABLE_CENTER_HEIGHT,
+        command_space="smpl",
+        future_steps=5,
+        resampling_time_range=(1e9, 1e9),
+        debug_vis=True,
+        pose_range={},
+        velocity_range={},
+        joint_position_range=(0.0, 0.0),
+        # Reconstructed clips carry no authored robot contact schedule. The
+        # live sensor remains for perturbations, but no fake contact labels are
+        # introduced into observations or rewards.
+        contact_graph_body_names=None,
+        contact_graph_sensor_name=None,
+    )
+
+    p = {"command_name": "motion"}
+    obj = SceneEntityCfg(OBJECT_BODY_NAME)
+    cfg.rewards = {
+        "object_goal": RewardTermCfg(
+            func=mdp.object_goal_pose_reward,
+            weight=0.5,
+            params={"object_cfg": obj, **p, "std_pos": 0.3, "std_quat": 0.4},
+        ),
+        "object_pos": RewardTermCfg(
+            func=mdp.object_pos_tracking_reward,
+            weight=2.0,
+            params={**p, "std": 0.3},
+        ),
+        "object_ori": RewardTermCfg(
+            func=mdp.object_ori_tracking_reward,
+            weight=1.0,
+            params={**p, "std": 0.4},
+        ),
+        "point_pos": RewardTermCfg(
+            func=mdp.point_position_error_exp,
+            weight=4.0,
+            params={**p, "std": 0.3},
+        ),
+        "point_vel": RewardTermCfg(
+            func=mdp.point_velocity_error_exp,
+            weight=1.0,
+            params={**p, "std": 1.0},
+        ),
+        "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
+        "joint_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
+    }
+    cfg.terminations["bad_point_anchor_pos"] = TerminationTermCfg(
+        func=mdp.bad_point_anchor_pos,
+        params={**p, "threshold": point_anchor_threshold},
+    )
+    step_dt = cfg.sim.mujoco.timestep * cfg.decimation
+    cfg.episode_length_s = max_clip_len * step_dt + _MOTION_PAD_EPS_SEC
+    cfg.terminations["exceeded_motion"].params["epsilon_steps"] = int(
+        _MOTION_PAD_EPS_SEC / step_dt
+    )
+
+    ctx = ObsCtx(obj=obj, p=p)
+    cfg.observations = sonic_obs(ctx, mode="smpl", include_contact=False)
+
+    # Re-apply after replacing the motion command and observation groups. The
+    # SMPL command uses clip-start object pose noise but deliberately has no
+    # invented mid-clip reference-contact gate.
+    apply_robustness(
+        cfg,
+        object_name=OBJECT_BODY_NAME,
+        sensor_name=CONTACT_GRAPH_SENSOR_NAME,
+        hand_body_names=HAND_BODY_NAMES,
+    )
+    cfg.commands["motion"].object_in_contact_velocity_range = None
+    apply_obs_noise(cfg)
+
+    if play:
+        _play_overrides(cfg)
+        cfg.terminations.pop("bad_point_anchor_pos", None)
+
+    return cfg
+
+
 def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
     """Play-mode overrides: no domain, no anneal/VOF, no tracking kills.
 
@@ -381,7 +581,7 @@ def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
         cfg.events.pop(event, None)
     for k in ("bad_object_pos", "bad_object_ori"):
         cfg.terminations.pop(k, None)
-    cfg.commands["motion"].start_from_zero = True
+    # cfg.commands["motion"].start_from_zero = True
     # remove the intial statn randomization in motion
     cfg.commands["motion"].pose_range = {}
     cfg.commands["motion"].velocity_range = {}

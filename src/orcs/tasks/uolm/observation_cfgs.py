@@ -51,16 +51,16 @@ class ObsCtx:
 # Atomic term bundles — defined ONCE, composed into many groups
 # ---------------------------------------------------------------------------
 
-def robot_motion_cmd_terms(p: dict) -> dict:
+def robot_motion_cmd_terms(p: dict, *, include_contact: bool = True) -> dict:
     """sys1 command stream (SUGAR c_t parity): per-body contact + root twist cmd.
 
     Robot-state language only — no time-varying object refs, which stay
     critic-side and are thrown away post-training.
     """
-    return {
-        "bodywise_contact_cmd": _T(mdp.bodywise_contact_cmd, p),
-        **robot_root_twist_cmd_terms(p),
-    }
+    terms = robot_root_twist_cmd_terms(p)
+    if include_contact:
+        terms = {"bodywise_contact_cmd": _T(mdp.bodywise_contact_cmd, p), **terms}
+    return terms
 
 
 def object_goal_terms(p: dict) -> dict:
@@ -154,7 +154,11 @@ def tokenizer_groups(mode: str = "g1", command_name: str = "motion") -> dict:
 
 
 def augmentation_group(
-    c: ObsCtx, *, frame: str = "env", identity: bool = True
+    c: ObsCtx,
+    *,
+    frame: str = "env",
+    identity: bool = True,
+    include_contact: bool = True,
 ) -> ObservationGroupCfg:
     """The adapter's conditioning stream — ObjKin feedback + sys1 feedforward.
 
@@ -188,11 +192,11 @@ def augmentation_group(
         **state,
         **extra,
         **object_goal_terms(c.p),
-        **robot_motion_cmd_terms(c.p),
+        **robot_motion_cmd_terms(c.p, include_contact=include_contact),
     })
 
 
-def critic_group(c: ObsCtx) -> ObservationGroupCfg:
+def critic_group(c: ObsCtx, *, include_contact: bool = True) -> ObservationGroupCfg:
     """Privileged critic obs: full proprio + object + goal + reference (un-zeroed).
 
     Never deployed, so it may read anything the sim knows.
@@ -222,7 +226,7 @@ def critic_group(c: ObsCtx) -> ObservationGroupCfg:
         "object_ref_pos_b": _T(mdp.motion_object_pos_b_future, c.p),
         "object_ref_ori_b": _T(mdp.motion_object_ori_b_future, c.p),
         # sys1 command stream (reward-relevant: contact_consistency)
-        **robot_motion_cmd_terms(c.p),
+        **robot_motion_cmd_terms(c.p, include_contact=include_contact),
         # reward conditioning: V(concat(s, r_vec))
         "reward_vec": _T(mdp.unweighted_reward_vector, {"enabled": True}),
     })
@@ -241,7 +245,9 @@ def tracking_ref_terms(p: dict) -> dict:
 # Agent layouts — one per agent architecture
 # ---------------------------------------------------------------------------
 
-def sonic_obs(c: ObsCtx, mode: str = "g1") -> dict[str, ObservationGroupCfg]:
+def sonic_obs(
+    c: ObsCtx, mode: str = "g1", *, include_contact: bool = True
+) -> dict[str, ObservationGroupCfg]:
     """3-stream (frozen base): SONIC policy + tokenizer / augmentation / critic.
 
     The adapter injects into `augmentation`; the base streams are mocke's
@@ -250,8 +256,8 @@ def sonic_obs(c: ObsCtx, mode: str = "g1") -> dict[str, ObservationGroupCfg]:
     return {
         "policy": policy_group(),
         **tokenizer_groups(mode, c.p["command_name"]),
-        "augmentation": augmentation_group(c),
-        "critic": critic_group(c),
+        "augmentation": augmentation_group(c, include_contact=include_contact),
+        "critic": critic_group(c, include_contact=include_contact),
     }
 
 

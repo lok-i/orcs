@@ -78,3 +78,44 @@ def test_seed_motion_rejects_shifted_source_index():
         assert "0..T-1" in str(exc)
     else:
         raise AssertionError("shifted source index was accepted")
+
+
+def test_seed_motion_rejects_nonfinite_object_state():
+    t = 1
+    zeros3 = np.zeros((t, 3), dtype=np.float32)
+    quat = np.zeros((t, 4), dtype=np.float32)
+    quat[:, 0] = 1.0
+    bad_object_pos = zeros3.copy()
+    bad_object_pos[0, 0] = np.nan
+    try:
+        SeedMotion(
+            fps=50.0,
+            source_frame_idx=np.arange(t),
+            robot_root_pos_w=zeros3,
+            robot_root_quat_w=quat,
+            robot_root_lin_vel_w=zeros3,
+            robot_root_ang_vel_w=zeros3,
+            joint_pos=np.zeros((t, 1)),
+            joint_vel=np.zeros((t, 1)),
+            last_action=np.zeros((t, 1)),
+            body_pos_w=np.zeros((t, 1, 3)),
+            body_quat_w=quat[:, None],
+            assist_force_w=np.zeros((t, 1, 3)),
+            assist_torque_w=np.zeros((t, 1, 3)),
+            body_tracking_error=np.zeros((t, 1)),
+            assist_saturation=np.ones(t),
+            valid=np.ones(t, dtype=bool),
+            joint_names=("j0",),
+            body_names=("b0",),
+            object_pos_w=bad_object_pos,
+            object_quat_w=quat,
+            object_lin_vel_w=zeros3,
+            object_ang_vel_w=zeros3,
+            object_target_pos_w=zeros3,
+            object_assist_force_w=zeros3,
+            object_assist_torque_w=zeros3,
+        )
+    except ValueError as exc:
+        assert "object_pos_w contains NaN/Inf" in str(exc)
+    else:
+        raise AssertionError("non-finite object state was accepted")

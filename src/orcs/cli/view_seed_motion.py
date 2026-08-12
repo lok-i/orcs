@@ -78,6 +78,12 @@ def main() -> None:
         "--scene", choices=("uolm", "perloco-grail"), default="uolm"
     )
     parser.add_argument(
+        "--motion-set",
+        choices=("small-cube-table", "big-cube-floor"),
+        default=None,
+        help="UOLM reconstructed scene; inferred from cache metadata when omitted",
+    )
+    parser.add_argument(
         "--source",
         default=None,
         help="source sample/raw clip; omitted when --seed embeds a persistent source",
@@ -113,12 +119,24 @@ def main() -> None:
         sample, temporary = stack.enter_context(
             _resolve_source(source, object_path=args.object, z_up=args.z_up)
         )
+        motion_set = args.motion_set
+        metadata_file = sample / "metadata.json"
+        if motion_set is None and metadata_file.exists():
+            import json
+
+            motion_set = json.loads(metadata_file.read_text()).get("motion_set")
         if seed is None and temporary:
             parser.error("a raw source requires --seed")
         if seed is None:
             seed = SeedMotion.load(sample / "seed_state.npz")
         with np.load(sample / "smpl_motion.npz") as d:
             smpl = d["smpl_joints_viz_w"].astype(np.float32)
+        source_object_pos = source_object_quat = None
+        if (sample / "object_motion.npz").exists():
+            with np.load(sample / "object_motion.npz") as d:
+                if "obj_pos_w" in d and "obj_quat_w" in d:
+                    source_object_pos = d["obj_pos_w"].astype(np.float32)
+                    source_object_quat = d["obj_quat_w"].astype(np.float32)
         if len(smpl) != seed.num_frames:
             raise ValueError(
                 f"source has {len(smpl)} frames but seed has {seed.num_frames}"
@@ -127,7 +145,9 @@ def main() -> None:
         flat_root = None
         if args.scene == "uolm":
             flat_root, _ = stack.enter_context(_isolated_flat_dataset(sample))
-        cfg, object_name = _build_cfg(args.scene, sample, flat_root, stack)
+        cfg, object_name = _build_cfg(
+            args.scene, sample, flat_root, stack, motion_set=motion_set
+        )
 
         from mjlab.envs import ManagerBasedRlEnv
 
@@ -176,6 +196,23 @@ def main() -> None:
                 color=(210, 80, 255),
                 position=seed.object_target_pos_w[0],
             )
+        source_object = None
+        if motion_set is not None and source_object_pos is not None:
+            from orcs.assets import BIG_CUBE_HALF_EXTENT, SMALL_CUBE_HALF_EXTENT
+
+            half_extent = (
+                SMALL_CUBE_HALF_EXTENT
+                if motion_set == "small-cube-table"
+                else BIG_CUBE_HALF_EXTENT
+            )
+            source_object = server.scene.add_box(
+                "/source/object",
+                color=(45, 220, 235),
+                dimensions=(2.0 * half_extent,) * 3,
+                wireframe=True,
+                position=source_object_pos[0] + origin,
+                wxyz=source_object_quat[0],
+            )
 
         with server.gui.add_folder("Playback"):
             gui_frame = server.gui.add_slider(
@@ -189,6 +226,9 @@ def main() -> None:
             gui_smpl = server.gui.add_checkbox("original SMPL", initial_value=True)
             gui_forces = server.gui.add_checkbox("virtual forces", initial_value=True)
             gui_target = server.gui.add_checkbox("object target", initial_value=True)
+            gui_source_object = server.gui.add_checkbox(
+                "original object", initial_value=True
+            )
         gui_info = server.gui.add_markdown("")
 
         display_scale = _force_display_scale(seed)
@@ -211,11 +251,24 @@ def main() -> None:
             if object_target is not None and seed.object_target_pos_w is not None:
                 object_target.position = seed.object_target_pos_w[frame]
                 object_target.visible = gui_target.value
+            if (
+                source_object is not None
+                and source_object_pos is not None
+                and source_object_quat is not None
+            ):
+                source_object.position = source_object_pos[frame] + origin
+                source_object.wxyz = source_object_quat[frame]
+                source_object.visible = gui_source_object.value
 
             force_norm = np.linalg.norm(seed.assist_force_w[frame], axis=-1)
             object_force = (
                 float(np.linalg.norm(seed.object_assist_force_w[frame]))
                 if seed.object_assist_force_w is not None else 0.0
+            )
+            object_error = (
+                float(np.linalg.norm(seed.object_pos_w[frame] - source_object_pos[frame]))
+                if seed.object_pos_w is not None and source_object_pos is not None
+                else 0.0
             )
             gui_info.content = (
                 f"**frame {frame}/{seed.num_frames - 1}** · "
@@ -225,7 +278,8 @@ def main() -> None:
                 f"`{seed.body_tracking_error[frame].max():.3f} m`  \n"
                 f"robot force max: `{force_norm.max():.1f} N` · "
                 f"object force: `{object_force:.1f} N` · "
-                f"budget scale: `{seed.assist_saturation[frame]:.3f}`"
+                f"budget scale: `{seed.assist_saturation[frame]:.3f}`  \n"
+                f"object source/seed error: `{object_error:.3f} m`"
             )
 
         @gui_frame.on_update

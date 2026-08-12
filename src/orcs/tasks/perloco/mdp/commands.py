@@ -305,7 +305,7 @@ class SmplSeedTerrainMotionCommand(TerrainMotionCommand):
             )
         self._hold_after_reset[env_ids] = True
 
-    def _update_command(self) -> None:
+    def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
         """Do not consume one source frame during env.reset's ``compute(0)``.
 
         mjlab invokes every command once with ``dt=0`` after writing reset
@@ -316,10 +316,14 @@ class SmplSeedTerrainMotionCommand(TerrainMotionCommand):
         """
         hold = getattr(self, "_hold_after_reset", None)
         held = hold.clone() if hold is not None else None
+        if held is not None and env_ids is not None:
+            selected = torch.zeros_like(held)
+            selected[env_ids] = True
+            held &= selected
         if held is not None and held.any():
             frames = self.time_steps[held].clone()
             overrun = self._steps_past_end[held].clone()
-        super()._update_command()
+        super()._update_command(env_ids)
         if held is not None and held.any():
             self.time_steps[held] = frames
             self._steps_past_end[held] = overrun
