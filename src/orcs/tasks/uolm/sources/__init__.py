@@ -3,6 +3,7 @@
 from orcs.tasks.uolm.sources.reconstructed import (
     MOTION_SETS,
     MotionSetSpec,
+    cache_motion_files,
     cache_root,
     source_clips,
     stage_motion_set,
@@ -12,6 +13,7 @@ from orcs.tasks.uolm.sources.reconstructed import (
 __all__ = [
     "MOTION_SETS",
     "MotionSetSpec",
+    "cache_motion_files",
     "cache_root",
     "source_clips",
     "stage_motion_set",

@@ -50,7 +50,10 @@ from orcs.core.mdp.commands import (
 )
 from orcs.tasks.uolm.mdp.contact_schedule import ContactSchedule
 from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
-from orcs.tasks.uolm.sources.reconstructed import is_current_cache_sample
+from orcs.tasks.uolm.sources.reconstructed import (
+    cache_motion_files,
+    is_current_cache_sample,
+)
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -611,7 +614,9 @@ class SmplSeedObjectMotionCommand(ObjectMotionCommand):
         for motion_set_id, motion_set in enumerate(self.cfg.motion_set_names):
             ready: list[Path] = []
             incomplete: list[Path] = []
-            candidates = sorted((root / motion_set).rglob("smpl_motion.npz"))
+            candidates = cache_motion_files(
+                motion_set, self.cfg.interaction_names, root=root
+            )
             for path in candidates:
                 sample = path.parent
                 if not is_current_cache_sample(sample):
@@ -627,9 +632,14 @@ class SmplSeedObjectMotionCommand(ObjectMotionCommand):
                 else:
                     incomplete.append(sample)
             if not candidates or incomplete:
+                selection = (
+                    f" for interactions {self.cfg.interaction_names}"
+                    if self.cfg.interaction_names is not None
+                    else ""
+                )
                 raise FileNotFoundError(
                     f"{len(incomplete)}/{len(candidates)} staged samples under "
-                    f"{root / motion_set} do not have a current, complete "
+                    f"{root / motion_set}{selection} do not have a current, complete "
                     "kinematic retarget; "
                     "run orcs-pseudo-retarget --scene uolm "
                     f"--motion-set {motion_set} --all"
@@ -926,6 +936,7 @@ class SmplSeedObjectMotionCommandCfg(ObjectMotionCommandCfg):
         "small-cube-table",
         "big-cube-floor",
     )
+    interaction_names: tuple[str, ...] | None = None
     support_entity_name: str | None = "table"
     table_center_height: float = 1.0
 

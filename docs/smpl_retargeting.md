@@ -147,8 +147,15 @@ Train the combined corpus or a named specialization:
 ```bash
 train Orcs-Uolm-AdaptSonic-Smpl --env.scene.num-envs 4096
 train Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl --env.scene.num-envs 4096
+train Orcs-Uolm-SmallCubeTable-PickPlace-AdaptSonic-Smpl --env.scene.num-envs 4096
+train Orcs-Uolm-SmallCubeTable-Throw-AdaptSonic-Smpl --env.scene.num-envs 4096
 train Orcs-Uolm-BigCubeFloor-AdaptSonic-Smpl --env.scene.num-envs 4096
 ```
+
+The two SmallCubeTable specializations select the existing `carryflip`
+(pick/place) and `throw` interaction directories. The combined
+SmallCubeTable task remains available for backward compatibility and broad
+training; no data is duplicated or regenerated for a specialization.
 
 In the combined task, object size/mass and clip selection are matched per
 world. The table is placed beneath the selected clip's authored destination

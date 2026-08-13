@@ -65,7 +65,12 @@ from orcs.tasks.uolm.sensors import (
     ground_contact_sensor,
     object_contact_graph_sensor,
 )
-from orcs.tasks.uolm.sources.reconstructed import MOTION_SETS, cache_root
+from orcs.tasks.uolm.sources.reconstructed import (
+    MOTION_SETS,
+    cache_motion_files,
+    cache_root,
+    is_current_cache_sample,
+)
 
 _G1_DATASETS_ROOT = str(DATA_ROOT / "retargeted_motions/data/unitree_g1")
 # SMPL command-space dataset (flat <root>/<clip>/<sampleN>/*.npz), built by
@@ -137,6 +142,7 @@ def _resolve_smpl_motions() -> tuple[str | None, int]:
 @lru_cache(maxsize=None)
 def _resolve_reconstructed_smpl_seeds(
     motion_sets: tuple[str, ...],
+    interaction_names: tuple[str, ...] | None = None,
 ) -> tuple[str, int, int]:
     """Return first locator, complete clip count, and longest seed length."""
     unknown = tuple(name for name in motion_sets if name not in MOTION_SETS)
@@ -147,29 +153,49 @@ def _resolve_reconstructed_smpl_seeds(
         )
     if not motion_sets or len(set(motion_sets)) != len(motion_sets):
         raise ValueError("motion_sets must be non-empty and contain no duplicates")
+    if interaction_names is not None and (
+        not interaction_names
+        or len(set(interaction_names)) != len(interaction_names)
+    ):
+        raise ValueError(
+            "interaction_names must be non-empty and contain no duplicates"
+        )
 
     ready_samples: list[tuple[str, int]] = []
     for motion_set in motion_sets:
         root = cache_root() / motion_set
+        candidates = cache_motion_files(motion_set, interaction_names)
+        incomplete: list[str] = []
         ready = 0
-        for smpl_file in sorted(root.rglob("smpl_motion.npz")):
+        for smpl_file in candidates:
             sample = smpl_file.parent
-            if not (sample / "object_motion.npz").exists():
+            if not is_current_cache_sample(sample):
+                incomplete.append(str(sample))
                 continue
             seed_file = sample / "seed_state.npz"
             if not seed_file.exists():
+                incomplete.append(str(sample))
                 continue
             try:
                 seed = SeedMotion.load(seed_file)
             except (KeyError, OSError, ValueError):
+                incomplete.append(str(sample))
                 continue
             if not seed.valid.all() or seed.object_pos_w is None:
+                incomplete.append(str(sample))
                 continue
             ready_samples.append((str(smpl_file), seed.num_frames))
             ready += 1
-        if ready == 0:
+        if ready == 0 or incomplete:
+            selection = (
+                f" for interactions {interaction_names}"
+                if interaction_names is not None
+                else ""
+            )
             raise FileNotFoundError(
-                f"no complete kinematic retargets under {root}; run "
+                f"{len(incomplete)}/{len(candidates)} staged samples under "
+                f"{root}{selection} do not have a current, complete "
+                "kinematic retarget; run "
                 "orcs-pseudo-retarget --scene uolm "
                 f"--motion-set {motion_set} --all"
             )
@@ -438,6 +464,7 @@ def uolm_smpl_env_cfg(
         "small-cube-table",
         "big-cube-floor",
     ),
+    interaction_names: tuple[str, ...] | None = None,
     num_steps_per_env: int = 24,
     robot_cfg: Callable[[], EntityCfg] | None = None,
     kill_bodies: tuple[str, ...] = UOLM_KILL_BODIES,
@@ -446,14 +473,17 @@ def uolm_smpl_env_cfg(
 ) -> ManagerBasedRlEnvCfg:
     """Reconstructed SMPL/object tracking with kinematic-retarget RSI.
 
-    ``motion_sets`` is the only dataset selector: one name produces a
-    specialized homogeneous batch; multiple names produce matched per-world
-    object variants and clip masks.  Seed robot/object states initialize the
-    simulator, while rewards refer only to source SMPL points and source
-    object motion.
+    One ``motion_sets`` name produces a specialized homogeneous batch;
+    multiple names produce matched per-world object variants and clip masks.
+    ``interaction_names`` optionally selects named interaction directories
+    inside those sets without copying or restaging data. Seed robot/object
+    states initialize the simulator, while rewards refer only to source SMPL
+    points and source object motion.
     """
     motion_sets = tuple(motion_sets)
-    bootstrap_file, _, max_clip_len = _resolve_reconstructed_smpl_seeds(motion_sets)
+    bootstrap_file, _, max_clip_len = _resolve_reconstructed_smpl_seeds(
+        motion_sets, interaction_names
+    )
 
     if len(motion_sets) == 1:
         object_entity = reconstructed_object_entity_cfg(motion_sets[0])
@@ -479,6 +509,11 @@ def uolm_smpl_env_cfg(
         ),
         _object_entity=object_entity,
     )
+    # Kinematic-retarget RSI is already the assistance mechanism for SMPL
+    # training.  Keep the object fully dynamic so success cannot depend on a
+    # hidden reference wrench.  Native (retargeted-motion) UOLM retains VOF.
+    cfg.events.pop("virtual_object_force", None)
+
     # One movable fixed support is cheaper and more exact than a scene switch:
     # command reset puts it below the world for floor clips, or beneath the
     # selected table clip's authored final object XY.
@@ -489,6 +524,7 @@ def uolm_smpl_env_cfg(
         motion_file=bootstrap_motion,
         dataset_dir=_RECONSTRUCTED_SMPL_ROOT,
         motion_set_names=motion_sets,
+        interaction_names=interaction_names,
         ordered_object_names=ordered_motion_sets,
         exclude_motions=None,
         object_entity_name=OBJECT_BODY_NAME,
@@ -584,7 +620,7 @@ def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
         cfg.events.pop(event, None)
     for k in ("bad_object_pos", "bad_object_ori"):
         cfg.terminations.pop(k, None)
-    # cfg.commands["motion"].start_from_zero = True
+    cfg.commands["motion"].start_from_zero = True
     # remove the intial statn randomization in motion
     cfg.commands["motion"].pose_range = {}
     cfg.commands["motion"].velocity_range = {}

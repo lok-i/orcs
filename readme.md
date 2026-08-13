@@ -87,7 +87,7 @@ See [docs/ethos.md](docs/ethos.md) for package boundaries and the task contract.
 
 ## acknowledgements
 
-*"Standing on the shoulders of giants":* 
+*"Standing on the shoulders of giants":*
 
 1. [SONIC](https://github.com/NVlabs/GR00T-WholeBodyControl)
 2. [GRAIL](https://github.com/NVlabs/GRAIL)

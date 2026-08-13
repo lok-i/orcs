@@ -28,6 +28,7 @@ from orcs.core.paths import DATA_ROOT, DEPS_ROOT
 __all__ = [
     "MOTION_SETS",
     "MotionSetSpec",
+    "cache_motion_files",
     "cache_root",
     "is_current_cache_sample",
     "source_clips",
@@ -76,6 +77,21 @@ def source_root() -> Path:
 
 def cache_root() -> Path:
     return DATA_ROOT / "smpl_motions/uolm/reconstructed"
+
+
+def cache_motion_files(
+    motion_set: str,
+    interaction_names: tuple[str, ...] | None = None,
+    *,
+    root: Path | None = None,
+) -> list[Path]:
+    """Normalized SMPL files selected by their interaction directory."""
+    motion_set_root = (root or cache_root()) / _spec(motion_set).name
+    files = sorted(motion_set_root.rglob("smpl_motion.npz"))
+    if interaction_names is None:
+        return files
+    selected = set(interaction_names)
+    return [path for path in files if path.parent.parent.name in selected]
 
 
 def _spec(motion_set: str) -> MotionSetSpec:

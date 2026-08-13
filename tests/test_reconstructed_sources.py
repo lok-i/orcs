@@ -14,6 +14,7 @@ from orcs.tasks.uolm.sources.reconstructed import (
     MOTION_SETS,
     _ground_human_to_floor,
     _timeline,
+    cache_motion_files,
     is_current_cache_sample,
 )
 
@@ -67,3 +68,21 @@ def test_current_cache_requires_grounding_schema(tmp_path) -> None:
 
     (tmp_path / "metadata.json").write_text('{"schema_version": 2}\n')
     assert is_current_cache_sample(tmp_path)
+
+
+def test_cache_motion_files_selects_interaction_directories(
+    tmp_path, monkeypatch
+) -> None:
+    from orcs.tasks.uolm.sources import reconstructed
+
+    root = tmp_path / "small-cube-table"
+    carry = root / "carryflip" / "carry-01" / "smpl_motion.npz"
+    throw = root / "throw" / "throw-01" / "smpl_motion.npz"
+    for path in (carry, throw):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    monkeypatch.setattr(reconstructed, "cache_root", lambda: tmp_path)
+
+    assert cache_motion_files("small-cube-table") == [carry, throw]
+    assert cache_motion_files("small-cube-table", ("carryflip",)) == [carry]
+    assert cache_motion_files("small-cube-table", ("throw",)) == [throw]
