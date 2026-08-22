@@ -22,6 +22,7 @@ from orcs.assets.g1 import (
 from orcs.assets.objects import (
     OBJECT_BODY_NAME,
     Collision,
+    object_spec,
     omni_object_entity_cfg,
 )
 from orcs.assets.uolm_scenes import (
@@ -31,6 +32,7 @@ from orcs.assets.uolm_scenes import (
     SMALL_CUBE_MASS,
     TABLE_CENTER_HEIGHT,
     TABLE_SIZE,
+    WOODCHAIR2_MESH_SCALE,
     UolmReconstructedScene,
     reconstructed_object_entity_cfg,
     reconstructed_object_variants_entity_cfg,
@@ -49,11 +51,13 @@ __all__ = [
     "TABLE_CENTER_HEIGHT",
     "TABLE_SIZE",
     "UolmReconstructedScene",
+    "WOODCHAIR2_MESH_SCALE",
     "ball_entity_cfg",
     "find_body",
     "find_body_or_none",
     "flat_hand_spec",
     "get_g1_flat_hand_cfg",
+    "object_spec",
     "omni_object_entity_cfg",
     "reconstructed_object_entity_cfg",
     "reconstructed_object_variants_entity_cfg",

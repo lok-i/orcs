@@ -1,6 +1,7 @@
 """Source adapters for reconstructed human-object motion collections."""
 
 from orcs.tasks.uolm.sources.reconstructed import (
+    DEFAULT_MOTION_SETS,
     MOTION_SETS,
     MotionSetSpec,
     cache_motion_files,
@@ -11,6 +12,7 @@ from orcs.tasks.uolm.sources.reconstructed import (
 )
 
 __all__ = [
+    "DEFAULT_MOTION_SETS",
     "MOTION_SETS",
     "MotionSetSpec",
     "cache_motion_files",

@@ -8,13 +8,11 @@ the native robot one.
   Orcs-Uolm-AdaptSonic        frozen SONIC base + LoRA adapter. THE task.
   Orcs-Uolm-TaRa             tabula rasa from-scratch MLP — the no-frozen-base
                              floor to measure the adapter against.
-  Orcs-Uolm-AdaptSonic-Smpl   both reconstructed cube sets, source SMPL/object
-                             rewards, kinematic-retarget RSI.
+  Orcs-Uolm-AdaptSonic-Smpl   reconstructed chair-flip + selected tire-roll,
+                             source SMPL/object rewards, kinematic-retarget RSI.
   Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl
-  Orcs-Uolm-SmallCubeTable-PickPlace-AdaptSonic-Smpl
-  Orcs-Uolm-SmallCubeTable-Throw-AdaptSonic-Smpl
   Orcs-Uolm-BigCubeFloor-AdaptSonic-Smpl
-                             convenient single-set specializations of the same
+                             isolated Cube scene specializations of the same
                              factory and recipe.
 
 Importing orcs is SILENT and never raises. `orcs.core.paths` resolves data and
@@ -109,16 +107,6 @@ _TASKS = (
     ("Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl",
      partial(uolm_smpl_env_cfg, motion_sets=("small-cube-table",)),
      partial(adapt_sonic_agent_cfg, "orcs_uolm_smpl_small_cube_table",
-             base_checkpoint=SMPL_CKPT)),
-    ("Orcs-Uolm-SmallCubeTable-PickPlace-AdaptSonic-Smpl",
-     partial(uolm_smpl_env_cfg, motion_sets=("small-cube-table",),
-             interaction_names=("carryflip",)),
-     partial(adapt_sonic_agent_cfg, "orcs_uolm_smpl_small_cube_table_pick_place",
-             base_checkpoint=SMPL_CKPT)),
-    ("Orcs-Uolm-SmallCubeTable-Throw-AdaptSonic-Smpl",
-     partial(uolm_smpl_env_cfg, motion_sets=("small-cube-table",),
-             interaction_names=("throw",)),
-     partial(adapt_sonic_agent_cfg, "orcs_uolm_smpl_small_cube_table_throw",
              base_checkpoint=SMPL_CKPT)),
     ("Orcs-Uolm-BigCubeFloor-AdaptSonic-Smpl",
      partial(uolm_smpl_env_cfg, motion_sets=("big-cube-floor",)),

@@ -3,7 +3,7 @@
 The source repository stays immutable.  Its human and object streams are
 converted into the task-blind ORCS channels under a local generated cache:
 
-  reconstructed_motions/drcl/<collection>/<interaction>/<clip>/
+  reconstructed_motions/drcl/<collection>/[<interaction>/]<clip>/
       motion.npz + object_motion.npz
 
   smpl_motions/uolm/reconstructed/<motion-set>/<interaction>/<clip>/
@@ -26,6 +26,7 @@ import numpy as np
 from orcs.core.paths import DATA_ROOT, DEPS_ROOT
 
 __all__ = [
+    "DEFAULT_MOTION_SETS",
     "MOTION_SETS",
     "MotionSetSpec",
     "cache_motion_files",
@@ -50,7 +51,12 @@ class MotionSetSpec:
     source_root: str
     object_asset: str
     support: str
-    object_half_extent: float
+    object_half_extent: float | None = None
+    source_glob: str = "*/*/motion.npz"
+    interaction: str | None = None
+    include_clips: tuple[str, ...] | None = None
+    object_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    cache_version: int = 1
 
 
 MOTION_SETS: dict[str, MotionSetSpec] = {
@@ -68,7 +74,33 @@ MOTION_SETS: dict[str, MotionSetSpec] = {
         support="floor",
         object_half_extent=0.3048,
     ),
+    "woodchair2-floor": MotionSetSpec(
+        name="woodchair2-floor",
+        source_root="drcl/Chair",
+        object_asset="custom_objects/woodchair2",
+        support="floor",
+        source_glob="*/motion.npz",
+        interaction="chair_flip",
+        include_clips=("Data01_Sub01_chair_flip_cam0",),
+        # The reconstructed Chair is the shared woodchair2 mesh narrowed along
+        # local X. Apply the same scale to visual and collision geometry in the
+        # reconstructed scene rather than mutating the shared asset checkout.
+        object_scale=(0.9072, 1.0, 1.0),
+    ),
+    "tire-floor": MotionSetSpec(
+        name="tire-floor",
+        source_root="drcl/Tire",
+        object_asset="custom_objects/tire",
+        support="floor",
+        source_glob="*/motion.npz",
+        interaction="tire_roll",
+        include_clips=("Data01_Sub02_tire_roll_cam0",),
+    ),
 }
+
+# The unsuffixed task is the current training roster. Cube corpora stay
+# available through their explicit scene task ids and --motion-set selectors.
+DEFAULT_MOTION_SETS = ("woodchair2-floor", "tire-floor")
 
 
 def source_root() -> Path:
@@ -85,13 +117,20 @@ def cache_motion_files(
     *,
     root: Path | None = None,
 ) -> list[Path]:
-    """Normalized SMPL files selected by their interaction directory."""
-    motion_set_root = (root or cache_root()) / _spec(motion_set).name
+    """Normalized SMPL files selected by the set roster and interaction."""
+    spec = _spec(motion_set)
+    motion_set_root = (root or cache_root()) / spec.name
     files = sorted(motion_set_root.rglob("smpl_motion.npz"))
-    if interaction_names is None:
-        return files
-    selected = set(interaction_names)
-    return [path for path in files if path.parent.parent.name in selected]
+    if spec.include_clips is not None:
+        selected_clips = set(spec.include_clips)
+        files = [path for path in files if path.parent.name in selected_clips]
+    if interaction_names is not None:
+        selected_interactions = set(interaction_names)
+        files = [
+            path for path in files
+            if path.parent.parent.name in selected_interactions
+        ]
+    return files
 
 
 def _spec(motion_set: str) -> MotionSetSpec:
@@ -113,24 +152,39 @@ def source_clips(motion_set: str) -> list[Path]:
             f"reconstructed motion set {motion_set!r} not found at {root}; "
             "sync the reconstructed_motions entry from deps.lock"
         )
-    clips = sorted(
-        path.parent
-        for path in root.glob("*/*/motion.npz")
-        if path.parent.parent.name != "object"
-    )
+    clips = sorted(path.parent for path in root.glob(spec.source_glob))
+    if spec.include_clips is not None:
+        available = {path.name: path for path in clips}
+        missing = tuple(name for name in spec.include_clips if name not in available)
+        if missing:
+            raise FileNotFoundError(
+                f"reconstructed motion set {motion_set!r} is missing selected "
+                f"clips {missing} under {root}"
+            )
+        clips = [available[name] for name in spec.include_clips]
     if not clips:
         raise FileNotFoundError(f"no reconstructed clips under {root}")
     return clips
 
 
 def _cache_sample(source: Path, motion_set: str) -> Path:
-    root = source_root() / _spec(motion_set).source_root
+    spec = _spec(motion_set)
+    root = source_root() / spec.source_root
     relative = source.resolve().relative_to(root.resolve())
-    if len(relative.parts) != 2:
-        raise ValueError(
-            f"expected <interaction>/<clip> below {root}, got {relative}"
+    if spec.interaction is None and len(relative.parts) == 2:
+        interaction, clip = relative.parts
+    elif spec.interaction is not None and len(relative.parts) == 1:
+        interaction, clip = spec.interaction, relative.parts[0]
+    else:
+        expected = (
+            "<clip>"
+            if spec.interaction is not None
+            else "<interaction>/<clip>"
         )
-    return cache_root() / motion_set / relative
+        raise ValueError(
+            f"expected {expected} below {root}, got {relative}"
+        )
+    return cache_root() / motion_set / interaction / clip
 
 
 def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -347,8 +401,17 @@ def is_current_cache_sample(output: Path) -> bool:
             has_ground_offset = "human_ground_offset_z" in smpl.files
     except (json.JSONDecodeError, KeyError, OSError, ValueError):
         return False
+    motion_set = metadata.get("motion_set")
+    spec = MOTION_SETS.get(motion_set)
+    if spec is None:
+        return False
+    # Legacy Cube caches predate this per-set field. Version 1 is deliberately
+    # the compatibility default so adding a new reconstructed set never
+    # invalidates their already-successful kinematic retargets.
+    cache_version = metadata.get("motion_set_cache_version", 1)
     return (
         metadata.get("schema_version") == _CACHE_SCHEMA_VERSION
+        and cache_version == spec.cache_version
         and has_ground_offset
     )
 
@@ -396,15 +459,17 @@ def stage_source_clip(
     )
     metadata = {
         "schema_version": _CACHE_SCHEMA_VERSION,
+        "motion_set_cache_version": spec.cache_version,
         "motion_set": motion_set,
         "source": "reconstructed_motions",
         "source_clip": str(source.resolve().relative_to(source_root().resolve())),
         "source_fps": source_fps,
         "fps": _TARGET_FPS,
         "num_frames": len(joints),
-        "interaction": source.parent.name,
+        "interaction": output.parent.name,
         "object_asset": spec.object_asset,
         "object_half_extent": spec.object_half_extent,
+        "object_scale": spec.object_scale,
         "support": spec.support,
         "human_ground_offset_z": ground_offset_z,
         "body_model_evaluator": evaluator,

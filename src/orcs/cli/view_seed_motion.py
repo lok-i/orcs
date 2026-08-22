@@ -60,6 +60,27 @@ def _force_display_scale(seed: SeedMotion) -> float:
     return 0.75 / max(p95, 1e-6)
 
 
+def _load_obj_mesh(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Load the small OBJ subset used by reconstructed source overlays."""
+    vertices: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+    for line in path.read_text(errors="ignore").splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if fields[0] == "v" and len(fields) >= 4:
+            vertices.append(tuple(float(value) for value in fields[1:4]))
+        elif fields[0] == "f" and len(fields) >= 4:
+            indices = [int(value.split("/", 1)[0]) - 1 for value in fields[1:]]
+            faces.extend(
+                (indices[0], indices[index], indices[index + 1])
+                for index in range(1, len(indices) - 1)
+            )
+    if not vertices or not faces:
+        raise ValueError(f"source object mesh has no vertices/faces: {path}")
+    return np.asarray(vertices, dtype=np.float32), np.asarray(faces, dtype=np.int32)
+
+
 def _set_qpos(data, robot, seed: SeedMotion, frame: int, object_entity=None) -> None:
     free = robot.indexing.free_joint_q_adr.cpu().numpy()
     joints = robot.indexing.joint_q_adr.cpu().numpy()
@@ -73,13 +94,15 @@ def _set_qpos(data, robot, seed: SeedMotion, frame: int, object_entity=None) -> 
 
 
 def main() -> None:
+    from orcs.tasks.uolm.sources.reconstructed import MOTION_SETS
+
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
         "--scene", choices=("uolm", "perloco-grail"), default="uolm"
     )
     parser.add_argument(
         "--motion-set",
-        choices=("small-cube-table", "big-cube-floor"),
+        choices=tuple(MOTION_SETS),
         default=None,
         help="UOLM reconstructed scene; inferred from cache metadata when omitted",
     )
@@ -198,21 +221,34 @@ def main() -> None:
             )
         source_object = None
         if motion_set is not None and source_object_pos is not None:
-            from orcs.assets import BIG_CUBE_HALF_EXTENT, SMALL_CUBE_HALF_EXTENT
+            spec = MOTION_SETS[motion_set]
+            if spec.object_half_extent is not None:
+                source_object = server.scene.add_box(
+                    "/source/object",
+                    color=(45, 220, 235),
+                    dimensions=(2.0 * spec.object_half_extent,) * 3,
+                    wireframe=True,
+                    position=source_object_pos[0] + origin,
+                    wxyz=source_object_quat[0],
+                )
+            else:
+                from orcs.core.paths import assets_source
 
-            half_extent = (
-                SMALL_CUBE_HALF_EXTENT
-                if motion_set == "small-cube-table"
-                else BIG_CUBE_HALF_EXTENT
-            )
-            source_object = server.scene.add_box(
-                "/source/object",
-                color=(45, 220, 235),
-                dimensions=(2.0 * half_extent,) * 3,
-                wireframe=True,
-                position=source_object_pos[0] + origin,
-                wxyz=source_object_quat[0],
-            )
+                object_dir = assets_source() / spec.object_asset
+                vertices, faces = _load_obj_mesh(
+                    object_dir / f"{object_dir.name}.obj"
+                )
+                vertices *= np.asarray(spec.object_scale, dtype=np.float32)
+                source_object = server.scene.add_mesh_simple(
+                    "/source/object",
+                    vertices,
+                    faces,
+                    color=(45, 220, 235),
+                    wireframe=True,
+                    side="double",
+                    position=source_object_pos[0] + origin,
+                    wxyz=source_object_quat[0],
+                )
 
         with server.gui.add_folder("Playback"):
             gui_frame = server.gui.add_slider(

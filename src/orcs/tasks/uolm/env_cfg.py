@@ -66,6 +66,7 @@ from orcs.tasks.uolm.sensors import (
     object_contact_graph_sensor,
 )
 from orcs.tasks.uolm.sources.reconstructed import (
+    DEFAULT_MOTION_SETS,
     MOTION_SETS,
     cache_motion_files,
     cache_root,
@@ -460,10 +461,7 @@ def uolm_env_cfg(
 def uolm_smpl_env_cfg(
     *,
     play: bool = False,
-    motion_sets: tuple[str, ...] = (
-        "small-cube-table",
-        "big-cube-floor",
-    ),
+    motion_sets: tuple[str, ...] = DEFAULT_MOTION_SETS,
     interaction_names: tuple[str, ...] | None = None,
     num_steps_per_env: int = 24,
     robot_cfg: Callable[[], EntityCfg] | None = None,
@@ -514,10 +512,15 @@ def uolm_smpl_env_cfg(
     # hidden reference wrench.  Native (retargeted-motion) UOLM retains VOF.
     cfg.events.pop("virtual_object_force", None)
 
-    # One movable fixed support is cheaper and more exact than a scene switch:
-    # command reset puts it below the world for floor clips, or beneath the
-    # selected table clip's authored final object XY.
-    cfg.scene.entities["table"] = table_entity_cfg()
+    table_motion_sets = tuple(
+        name for name in motion_sets if MOTION_SETS[name].support == "table"
+    )
+    support_entity_name = None
+    if table_motion_sets:
+        # A table exists only in table-backed specializations. Command reset
+        # places it beneath the selected clip's authored final object XY.
+        support_entity_name = "table"
+        cfg.scene.entities[support_entity_name] = table_entity_cfg()
 
     bootstrap_motion = cfg.commands["motion"].motion_file
     cfg.commands["motion"] = SmplSeedObjectMotionCommandCfg(
@@ -528,7 +531,8 @@ def uolm_smpl_env_cfg(
         ordered_object_names=ordered_motion_sets,
         exclude_motions=None,
         object_entity_name=OBJECT_BODY_NAME,
-        support_entity_name="table",
+        support_entity_name=support_entity_name,
+        table_motion_set_names=table_motion_sets,
         table_center_height=TABLE_CENTER_HEIGHT,
         command_space="smpl",
         future_steps=5,
@@ -620,7 +624,7 @@ def _play_overrides(cfg: ManagerBasedRlEnvCfg) -> None:
         cfg.events.pop(event, None)
     for k in ("bad_object_pos", "bad_object_ori"):
         cfg.terminations.pop(k, None)
-    cfg.commands["motion"].start_from_zero = True
+    # cfg.commands["motion"].start_from_zero = True
     # remove the intial statn randomization in motion
     cfg.commands["motion"].pose_range = {}
     cfg.commands["motion"].velocity_range = {}

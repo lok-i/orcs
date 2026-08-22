@@ -92,8 +92,10 @@ excluded only from the `-Smpl` task and do not alter
 ## UOLM reconstructed motions
 
 `deps.lock` pins the reconstructed corpus at `data/reconstructed_motions`.
-Sync it, normalize and kinematically retarget both supported sets with one
-resumable command:
+Sync it, then normalize and kinematically retarget the base Chair/Tire roster
+with one resumable command. The roster contains only
+`Data01_Sub01_chair_flip_cam0` and `Data01_Sub02_tire_roll_cam0`; the other
+reconstructed Chair and Tire clips are excluded:
 
 ```bash
 bash scripts/setup/sync_dependencies.sh
@@ -101,22 +103,25 @@ orcs-pseudo-retarget --scene uolm --all
 ```
 
 As with GRAIL, every pending clip becomes one mjlab world in a single rollout.
-UOLM batches additionally assign the matching cube size/mass per world,
-initialize each authored object stream at frame zero, and place or park its
-table support according to the motion set. This also holds for a mixed
-`--scene uolm --all` batch; no subprocess is launched unless one world fails
-settling or output validity.
+UOLM batches additionally assign the matching object asset per world and
+initialize each authored object stream at frame zero. The base batch contains
+only source-matched woodchair2 and tire assets; no Cube or table scene is
+instantiated. No subprocess is launched unless one world fails settling or
+output validity.
 
 The generated cache is grouped by behavior/scene rather than flattened:
 
 ```text
 data/smpl_motions/uolm/reconstructed/
+├── woodchair2-floor/chair_flip/Data01_Sub01_chair_flip_cam0/
+├── tire-floor/tire_roll/Data01_Sub02_tire_roll_cam0/
 ├── small-cube-table/<interaction>/<clip>/
 └── big-cube-floor/<interaction>/<clip>/
 ```
 
 Each leaf contains `smpl_motion.npz`, `object_motion.npz`, `metadata.json`, and
-`seed_state.npz`. Process only one set when iterating:
+`seed_state.npz`. Cube corpora are isolated behind their named scenes and are
+processed explicitly:
 
 ```bash
 orcs-pseudo-retarget --scene uolm --motion-set small-cube-table --all
@@ -133,8 +138,8 @@ rather than silently training on it.
 Inspect any cached sample after retargeting:
 
 ```bash
-orcs-view-seeds --scene uolm --motion-set small-cube-table \
-  --source data/smpl_motions/uolm/reconstructed/small-cube-table/carryflip/<clip>
+orcs-view-seeds --scene uolm --motion-set tire-floor \
+  --source data/smpl_motions/uolm/reconstructed/tire-floor/tire_roll/Data01_Sub02_tire_roll_cam0
 ```
 
 The viewer overlays the original SMPL and object motions, simulated seed
@@ -142,24 +147,22 @@ rollouts, and robot/object virtual-force markers. The object controller tracks
 the authored pelvis-object transform; it has no hand spring or gravity
 compensation.
 
-Train the combined corpus or a named specialization:
+Train the base corpus or an isolated Cube scene:
 
 ```bash
 train Orcs-Uolm-AdaptSonic-Smpl --env.scene.num-envs 4096
 train Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl --env.scene.num-envs 4096
-train Orcs-Uolm-SmallCubeTable-PickPlace-AdaptSonic-Smpl --env.scene.num-envs 4096
-train Orcs-Uolm-SmallCubeTable-Throw-AdaptSonic-Smpl --env.scene.num-envs 4096
 train Orcs-Uolm-BigCubeFloor-AdaptSonic-Smpl --env.scene.num-envs 4096
 ```
 
-The two SmallCubeTable specializations select the existing `carryflip`
-(pick/place) and `throw` interaction directories. The combined
-SmallCubeTable task remains available for backward compatibility and broad
-training; no data is duplicated or regenerated for a specialization.
+The unsuffixed task selects the Chair/Tire base roster. The SmallCubeTable task
+selects the successful union of its existing `carryflip` and `throw`
+directories; the BigCubeFloor task selects only that floor corpus. No data is
+duplicated or regenerated for a specialization.
 
-In the combined task, object size/mass and clip selection are matched per
-world. The table is placed beneath the selected clip's authored destination
-for `small-cube-table` and parked below the world for `big-cube-floor`.
+In each task, object physics and clip selection are matched per world. A table
+entity exists only for `small-cube-table`, where it is placed beneath the
+selected clip's authored destination.
 Reconstructed clips do not claim authored robot-contact labels, so this task
 uses SMPL point rewards and standard UOLM object pose/goal rewards without the
 retargeted-motion contact-consistency term.

@@ -15,7 +15,7 @@
     },
     "reconstructed_motions": {
         "url": "https://huggingface.co/datasets/l-k-r/reconstructed_motions",
-        "sha": "e3ec71b43c740d7f412d2f5c4efa378bdfd6336f",
+        "sha": "600ebb3c016c4adca0b2ffe41be4122a4f59dce1",
         "path": "data/reconstructed_motions",
         "pip_install": false,
         "lfs": true

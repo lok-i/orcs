@@ -793,12 +793,9 @@ class SmplSeedObjectMotionCommand(ObjectMotionCommand):
             support_pose[:, 2] = -10.0
             support_pose[:, 3] = 1.0
             set_ids = self._clip_motion_set_ids[clip_ids]
-            table_id = (
-                self.cfg.motion_set_names.index("small-cube-table")
-                if "small-cube-table" in self.cfg.motion_set_names
-                else -1
-            )
-            on_table = set_ids == table_id
+            on_table = torch.zeros_like(set_ids, dtype=torch.bool)
+            for motion_set in self.cfg.table_motion_set_names:
+                on_table |= set_ids == self.cfg.motion_set_names.index(motion_set)
             if on_table.any():
                 support_pose[on_table, :2] = (
                     origins[on_table, :2]
@@ -933,11 +930,12 @@ class SmplSeedObjectMotionCommandCfg(ObjectMotionCommandCfg):
     """Named reconstructed sets plus kinematic-retarget RSI."""
 
     motion_set_names: tuple[str, ...] = (
-        "small-cube-table",
-        "big-cube-floor",
+        "woodchair2-floor",
+        "tire-floor",
     )
     interaction_names: tuple[str, ...] | None = None
-    support_entity_name: str | None = "table"
+    support_entity_name: str | None = None
+    table_motion_set_names: tuple[str, ...] = ()
     table_center_height: float = 1.0
 
     def build(self, env: ManagerBasedRlEnv) -> SmplSeedObjectMotionCommand:

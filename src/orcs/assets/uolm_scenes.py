@@ -17,6 +17,8 @@ import numpy as np
 from mjlab.entity import EntityCfg
 from mjlab.entity.variants import VariantEntityCfg
 
+from orcs.assets.objects import object_spec
+
 __all__ = [
     "BIG_CUBE_HALF_EXTENT",
     "BIG_CUBE_MASS",
@@ -24,13 +26,19 @@ __all__ = [
     "SMALL_CUBE_MASS",
     "TABLE_CENTER_HEIGHT",
     "TABLE_SIZE",
+    "WOODCHAIR2_MESH_SCALE",
     "UolmReconstructedScene",
     "reconstructed_object_entity_cfg",
     "reconstructed_object_variants_entity_cfg",
     "table_entity_cfg",
 ]
 
-UolmReconstructedScene = Literal["small-cube-table", "big-cube-floor"]
+UolmReconstructedScene = Literal[
+    "small-cube-table",
+    "big-cube-floor",
+    "woodchair2-floor",
+    "tire-floor",
+]
 
 BIG_CUBE_HALF_EXTENT = 0.3048
 BIG_CUBE_MASS = 1.5
@@ -39,6 +47,7 @@ SMALL_CUBE_MASS = 0.3
 
 TABLE_SIZE = (0.75, 0.75, 0.05)
 TABLE_CENTER_HEIGHT = 1.0
+WOODCHAIR2_MESH_SCALE = (0.9072, 1.0, 1.0)
 
 
 def _cube_spec(*, half_extent: float, mass: float) -> mujoco.MjSpec:
@@ -57,11 +66,25 @@ def _cube_spec(*, half_extent: float, mass: float) -> mujoco.MjSpec:
 
 
 def reconstructed_object_entity_cfg(scene: UolmReconstructedScene) -> EntityCfg:
-    """The exact small/big primitive used by Vibe's corresponding scene."""
+    """The exact object used by one reconstructed motion set."""
     if scene == "small-cube-table":
         half_extent, mass = SMALL_CUBE_HALF_EXTENT, SMALL_CUBE_MASS
     elif scene == "big-cube-floor":
         half_extent, mass = BIG_CUBE_HALF_EXTENT, BIG_CUBE_MASS
+    elif scene == "woodchair2-floor":
+        return EntityCfg(
+            spec_fn=partial(
+                object_spec,
+                "woodchair2",
+                mesh_scale=WOODCHAIR2_MESH_SCALE,
+            ),
+            init_state=EntityCfg.InitialStateCfg(pos=(0.6, 0.0, 0.45)),
+        )
+    elif scene == "tire-floor":
+        return EntityCfg(
+            spec_fn=partial(object_spec, "tire"),
+            init_state=EntityCfg.InitialStateCfg(pos=(0.6, 0.0, 0.32)),
+        )
     else:
         raise ValueError(f"unknown reconstructed UOLM scene: {scene!r}")
     return EntityCfg(
@@ -125,24 +148,35 @@ def reconstructed_object_variants_entity_cfg(
     *,
     assignment: Callable[[int], Sequence[int]] | None = None,
 ) -> VariantEntityCfg:
-    """One correctly-sized reconstructed cube per world, in declaration order."""
+    """One source-matched reconstructed object per world, in set order."""
     scenes = tuple(scenes)
     if not scenes:
         raise ValueError("at least one reconstructed UOLM scene is required")
-    params = {
-        "small-cube-table": (SMALL_CUBE_HALF_EXTENT, SMALL_CUBE_MASS),
-        "big-cube-floor": (BIG_CUBE_HALF_EXTENT, BIG_CUBE_MASS),
+    variants = {
+        "small-cube-table": partial(
+            _cube_mesh_spec,
+            half_extent=SMALL_CUBE_HALF_EXTENT,
+            mass=SMALL_CUBE_MASS,
+        ),
+        "big-cube-floor": partial(
+            _cube_mesh_spec,
+            half_extent=BIG_CUBE_HALF_EXTENT,
+            mass=BIG_CUBE_MASS,
+        ),
+        "woodchair2-floor": partial(
+            object_spec,
+            "woodchair2",
+            mesh_scale=WOODCHAIR2_MESH_SCALE,
+        ),
+        "tire-floor": partial(object_spec, "tire"),
     }
     try:
-        variants = {
-            scene: partial(_cube_mesh_spec, half_extent=params[scene][0], mass=params[scene][1])
-            for scene in scenes
-        }
+        selected = {scene: variants[scene] for scene in scenes}
     except KeyError as exc:
         raise ValueError(f"unknown reconstructed UOLM scene: {exc.args[0]!r}") from exc
     return VariantEntityCfg(
-        variants=variants,
-        assignment=assignment or _round_robin(len(variants)),
+        variants=selected,
+        assignment=assignment or _round_robin(len(selected)),
     )
 
 

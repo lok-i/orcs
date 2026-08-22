@@ -11,6 +11,7 @@ Examples:
   orcs-pseudo-retarget --scene perloco-grail --source \
       data/terrain_motions/grail/curb_000/level_0.00/sample0
   orcs-pseudo-retarget --scene perloco-grail --all
+  orcs-pseudo-retarget --scene uolm --all
   orcs-pseudo-retarget --scene uolm --motion-set small-cube-table --all
 """
 
@@ -343,7 +344,7 @@ def _run_uolm_vectorized(samples: list[Path], *, device: str) -> list[Path]:
         table_entity_cfg,
     )
     from orcs.tasks.uolm.env_cfg import uolm_env_cfg
-    from orcs.tasks.uolm.sources.reconstructed import cache_root
+    from orcs.tasks.uolm.sources.reconstructed import MOTION_SETS, cache_root
 
     sample_sets = [
         sample.resolve().relative_to(cache_root().resolve()).parts[0]
@@ -389,7 +390,11 @@ def _run_uolm_vectorized(samples: list[Path], *, device: str) -> list[Path]:
         command_cfg.exclude_motions = None
         command_cfg.motion_file = str(mirrors[0] / "motion.npz")
         command_cfg.start_from_zero = True
-        cfg.scene.entities["table"] = table_entity_cfg()
+        table_motion_sets = tuple(
+            name for name in motion_sets if MOTION_SETS[name].support == "table"
+        )
+        if table_motion_sets:
+            cfg.scene.entities["table"] = table_entity_cfg()
         cfg.scene.num_envs = len(samples)
         cfg.episode_length_s = 1e6
         cfg.terminations = {}
@@ -409,28 +414,28 @@ def _run_uolm_vectorized(samples: list[Path], *, device: str) -> list[Path]:
             )
             raw_env.scene["object"].write_root_state_to_sim(obj_state)
 
-            table_pose = torch.zeros(
-                raw_env.num_envs, 7, device=raw_env.device
-            )
-            table_pose[:, :3] = origins
-            table_pose[:, 2] = -10.0
-            table_pose[:, 3] = 1.0
-            small_ids = torch.tensor(
-                [name == "small-cube-table" for name in sample_sets],
-                dtype=torch.bool,
-                device=raw_env.device,
-            )
-            if small_ids.any():
-                final_frames = command.motion.clip_ends[clip_ids] - 1
-                table_pose[small_ids, :2] = (
-                    origins[small_ids, :2]
-                    + command.motion.obj_pos[final_frames[small_ids], :2]
+            if table_motion_sets:
+                table_pose = torch.zeros(
+                    raw_env.num_envs, 7, device=raw_env.device
                 )
-                table_pose[small_ids, 2] = TABLE_CENTER_HEIGHT
-            env_ids = torch.arange(raw_env.num_envs, device=raw_env.device)
-            raw_env.scene["table"].write_mocap_pose_to_sim(
-                table_pose, env_ids=env_ids
-            )
+                table_pose[:, :3] = origins
+                table_pose[:, 2] = -10.0
+                table_pose[:, 3] = 1.0
+                table_ids = torch.tensor(
+                    [name in table_motion_sets for name in sample_sets],
+                    dtype=torch.bool,
+                    device=raw_env.device,
+                )
+                final_frames = command.motion.clip_ends[clip_ids] - 1
+                table_pose[table_ids, :2] = (
+                    origins[table_ids, :2]
+                    + command.motion.obj_pos[final_frames[table_ids], :2]
+                )
+                table_pose[table_ids, 2] = TABLE_CENTER_HEIGHT
+                env_ids = torch.arange(raw_env.num_envs, device=raw_env.device)
+                raw_env.scene["table"].write_mocap_pose_to_sim(
+                    table_pose, env_ids=env_ids
+                )
 
         return _run_vectorized_corpus(
             cfg,
@@ -624,6 +629,7 @@ def _build_cfg(
     if scene == "uolm":
         from orcs.assets import reconstructed_object_entity_cfg, table_entity_cfg
         from orcs.tasks.uolm.env_cfg import uolm_env_cfg
+        from orcs.tasks.uolm.sources.reconstructed import MOTION_SETS
 
         assert flat_root is not None
         object_entity = (
@@ -648,11 +654,10 @@ def _build_cfg(
         command.exclude_motions = None
         command.motion_file = str(flat_root / "clip/sample0/motion.npz")
         object_name = "object"
-        if motion_set is not None:
-            if motion_set == "small-cube-table":
-                with np.load(sample / "object_motion.npz") as obj:
-                    final_xy = tuple(float(x) for x in obj["obj_pos_w"][-1, :2])
-                cfg.scene.entities["table"] = table_entity_cfg(xy=final_xy)
+        if motion_set is not None and MOTION_SETS[motion_set].support == "table":
+            with np.load(sample / "object_motion.npz") as obj:
+                final_xy = tuple(float(x) for x in obj["obj_pos_w"][-1, :2])
+            cfg.scene.entities["table"] = table_entity_cfg(xy=final_xy)
     else:
         from orcs.tasks.perloco.env_cfg import grail_env_cfg
 
@@ -959,6 +964,11 @@ def _run(
 
 
 def main() -> None:
+    from orcs.tasks.uolm.sources.reconstructed import (
+        DEFAULT_MOTION_SETS,
+        MOTION_SETS,
+    )
+
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
         "--scene", choices=("uolm", "perloco-grail"), default="uolm"
@@ -976,9 +986,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--motion-set",
-        choices=("small-cube-table", "big-cube-floor"),
+        choices=tuple(MOTION_SETS),
         default=None,
-        help="UOLM reconstructed collection; --all without it selects both",
+        help="UOLM reconstructed collection; --all defaults to the base roster",
     )
     parser.add_argument(
         "--overwrite",
@@ -1004,7 +1014,7 @@ def main() -> None:
             motion_sets = (
                 (args.motion_set,)
                 if args.motion_set is not None
-                else ("small-cube-table", "big-cube-floor")
+                else DEFAULT_MOTION_SETS
             )
             _run_reconstructed_batch(
                 motion_sets=motion_sets,
