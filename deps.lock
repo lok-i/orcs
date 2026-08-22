@@ -1,14 +1,14 @@
 {
     "assets": {
         "url": "git@github.com:drcl-deploy/assets.git",
-        "sha": "bcf1fff3bdf90d4739d872e374e8757c4bc4422d",
+        "sha": "da6ef9a81b22e3af5882a308b25a69ed912c434f",
         "path": "dependencies/assets",
         "pip_install": true,
         "lfs": true
     },
     "retargeted_motions": {
         "url": "https://huggingface.co/datasets/l-k-r/retargeted_motions",
-        "sha": "5b766829f5e35d186ee54fb47694ced4c74a8aa5",
+        "sha": "e635ed670162c8b4cc91dd6247d4f3b47368ab3c",
         "path": "data/retargeted_motions",
         "pip_install": false,
         "lfs": true
@@ -22,7 +22,7 @@
     },
     "mocke": {
         "url": "git@github.com:lok-i/mocke.git",
-        "sha": "004d4c02bb1be65c67688f25f95197c865f83d6f",
+        "sha": "dcdb8f2380f4147b67ac378dc6b022ce1d909551",
         "path": "dependencies/mocke",
         "pip_install": true,
         "pip_no_deps": true,
