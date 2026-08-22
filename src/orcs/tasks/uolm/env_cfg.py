@@ -77,10 +77,14 @@ _DEFAULT_OBJECT_NAMES = (
 _EXCLUDE_MOTIONS = ("sub5_suitcase_015", 
                     "woodchair2_sit", 
 
+                    # tire: `custom/tire_roll/sample1` over sugar's three. The
+                    # sugar takes move the tire further (net 1.46 m vs 1.29) but
+                    # that is the trap — the demo walks fast enough that the
+                    # policy settles on "roll it away, then stand", which is the
+                    # sub-optimum we see. custom's take is slower and shorter
+                    # with clean stepping, so the walk stays learnable.
                     "tire_flip",
-                    "custom/tire_roll",
-                    "sugar/tire_roll/sample1",
-                    "sugar/tire_roll/sample3",
+                    "sugar/tire_roll",
 
                     "custom/woodchair2_flip/sample1",
                     "custom/woodchair2_flip/sample3",
