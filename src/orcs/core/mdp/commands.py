@@ -216,7 +216,7 @@ class MultiClipMotionCommand(MotionCommand):
 
     # ── step ──
 
-    def _update_command(self) -> None:
+    def _update_command(self, env_ids: None) -> None:
         # Phase annealing: _init_phase_max 1→0 over N policy updates.
         if self.cfg.init_phase_anneal_iterations > 0 and hasattr(
             self._env, "policy_update_count"
