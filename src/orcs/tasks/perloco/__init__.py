@@ -26,11 +26,11 @@ the same reader and the same env, so they are a roster line, not a task.
 
 Registration needs staged data (`scripts/setup/perceptive_locomotion.sh`).
 Absent, it is SKIPPED, never raised — an incomplete checkout must not break
-`import orcs` for every consumer downstream, and each row registers on its own
+MJLab discovery for every consumer downstream, and each row registers on its own
 (the `-Smpl` row needs `--smpl` staging plus seed preprocessing). A missing task is
 the signal; `SKIP_REASON` is the explanation:
 
-    python -c "import orcs; print(orcs.tasks.perloco.SKIP_REASON)"
+    python -c "import mjlab, orcs; print(orcs.tasks.perloco.SKIP_REASON)"
 """
 
 from functools import partial

@@ -39,8 +39,10 @@ Missing optional datasets suppress only their corresponding task rows. Inspect
 `orcs.SKIP_REASON` for the exact reason without enabling import-time warnings.
 
 > [!NOTE]
-> Import `mjlab` before `orcs` in standalone scripts so task entry-point
-> discovery finishes before ORCS registration.
+> Importing `mjlab` discovers and registers ORCS tasks. Bare `import orcs` is
+> intentionally lightweight; accessing `orcs.SKIP_REASON` also triggers discovery.
+> Import `mjlab` first before importing ORCS task, asset, or MJLab-backed core
+> submodules directly.
 
 ## data workflows
 

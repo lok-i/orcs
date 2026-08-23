@@ -2,7 +2,7 @@
 
   paths           filesystem roots (repo/data/deps/assets), env-overridable
   deps            shared-dependency drift check
-  _mjlab_compat   import-time mjlab patches (multi-clip cmd, --agent initial, VRAM)
+  _mjlab_compat   discovery-time mjlab patches (multi-clip cmd, --agent initial, VRAM)
   data            clip discovery (`scan`) + the concatenated timeline (`loader`)
   mdp             mjlab's stock terms + every orcs term that is task-blind,
                   including `MultiClipMotionCommand`

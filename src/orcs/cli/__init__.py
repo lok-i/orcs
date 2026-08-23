@@ -13,6 +13,6 @@ runtime and no way to produce data for it. `scripts/*.py` survive as thin
 wrappers so the paths in readme.md and muscle memory keep working.
 
 Layer note: `cli` sits above `tasks` (staging imports the source readers), so
-it is exempt from the no-upward-imports rule the same way `orcs/__init__` is.
-Nothing may import FROM here.
+it is exempt from the no-upward-imports rule the same way `orcs.registration`
+is. Nothing may import FROM here.
 """

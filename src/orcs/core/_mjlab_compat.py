@@ -17,10 +17,10 @@ each script for a metaclass sentinel whose ``isinstance`` reports those cfgs as 
 tracking cfgs. Genuine mjlab single-file tracking tasks are untouched (still report True).
 
 Task classes arrive as :func:`apply`'s ``multi_clip_cfgs`` argument — core never imports from
-:mod:`orcs.tasks`; ``orcs/__init__.py`` wires the two together.
+:mod:`orcs.tasks`; :mod:`orcs.registration` wires the two together.
 
-Idempotent, import-time. ``import orcs`` runs before either script's ``run_*``, since both call
-``import mjlab.tasks`` (which imports this package via the entry point) before doing any work.
+Idempotent, discovery-time. MJLab imports :mod:`orcs.registration` through its task entry point
+before either script's ``run_*`` does any work.
 """
 
 from __future__ import annotations

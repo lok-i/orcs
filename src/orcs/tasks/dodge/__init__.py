@@ -9,10 +9,10 @@ this task makes is about a frozen base, and a from-scratch row belongs with the
 run that needs it.
 
 Registration needs the nominal-stand reference (`orcs-make-nominal`). Absent, it
-is SKIPPED, never raised — an incomplete checkout must not break `import orcs`
+is SKIPPED, never raised — an incomplete checkout must not break MJLab discovery
 for every consumer downstream:
 
-    python -c "import orcs; print(orcs.tasks.dodge.SKIP_REASON)"
+    python -c "import mjlab, orcs; print(orcs.tasks.dodge.SKIP_REASON)"
 """
 
 from functools import partial

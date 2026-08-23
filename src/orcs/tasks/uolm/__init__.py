@@ -15,18 +15,18 @@ the native robot one.
                              isolated Cube scene specializations of the same
                              factory and recipe.
 
-Importing orcs is SILENT and never raises. `orcs.core.paths` resolves data and
-assets against the nearest repo root that HAS them, so a host project vendoring
-orcs under `dependencies/` is found automatically — no env vars, no import-order
-coupling. When the data genuinely is absent (a fresh checkout before
-`sync_dependencies.sh`, which also runs `assets generate`), registration is skipped
-rather than raising: an incomplete checkout must not break `import orcs` for
-every consumer downstream. Each row registers on its own, so one unstaged
-dataset costs one task, not three.
+Bare `import orcs` is lightweight. `orcs.core.paths` resolves data and assets
+against the nearest repo root that HAS them, so a host project vendoring ORCS
+under `dependencies/` is found automatically — no env vars or checkout-depth
+assumptions. When the data genuinely is absent (a fresh checkout before
+`sync_dependencies.sh`, which also runs `assets generate`), registration is
+skipped rather than raising: an incomplete checkout must not break MJLab
+discovery for every consumer downstream. Each row registers on its own, so one
+unstaged dataset costs one task, not three.
 
 A missing task is the signal; `SKIP_REASON` is the explanation:
 
-    python -c "import orcs; print(orcs.tasks.uolm.SKIP_REASON)"
+    python -c "import mjlab, orcs; print(orcs.tasks.uolm.SKIP_REASON)"
 """
 
 from functools import partial

@@ -83,6 +83,37 @@ def test_entry_points_resolve():
         )
 
 
+def test_package_import_is_lightweight():
+    """The library root must not recursively start MJLab discovery."""
+    code = "import sys; import orcs; assert 'mjlab' not in sys.modules"
+    subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_mjlab_entry_point_targets_registration_module():
+    assert PYPROJECT["project"]["entry-points"]["mjlab.tasks"] == {
+        "orcs": "orcs.registration"
+    }
+
+
+def test_cli_help_does_not_break_sibling_discovery(tmp_path):
+    """A direct ORCS CLI import used to expose ORCS half-initialized to Vibe."""
+    env = os.environ.copy()
+    env["MPLCONFIGDIR"] = str(tmp_path / "matplotlib")
+    result = subprocess.run(
+        [sys.executable, "-m", "orcs.cli.pseudo_retarget", "--help"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert "Failed to load task package" not in result.stderr
+
+
 def test_console_scripts_ship_in_wheel(wheel):
     """The artifact owns its script metadata; the active dev env is irrelevant."""
     candidates = [

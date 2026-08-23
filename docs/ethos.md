@@ -64,7 +64,8 @@ and PPO only moves the adapter. Verify this claim, don't trust it:
 
 ```
 src/orcs/
-├── __init__.py   registry point: import each task, wire the mjlab shim
+├── __init__.py   lightweight public API; no task or mjlab import side effects
+├── registration.py  mjlab entry point: import tasks, wire the compat shim
 ├── core/         task-blind, shared robot/control infra
 │   ├── paths · deps · _mjlab_compat      no semantics at all
 │   ├── data/     scan · concatenated timelines · SMPL seed/point contracts
@@ -91,7 +92,8 @@ Import rules — enforced by review and `tests/test_registration.py`:
 | `assets` | `orcs.core` | `orcs.tasks` |
 | `tasks` | `orcs.core`, `orcs.assets`, sibling-free | another task |
 | `cli` | everything | — (nothing imports FROM it) |
-| `__init__` | everything (the only wiring point) | — |
+| `registration` | everything (the only wiring point) | — |
+| `__init__` | stdlib; lazy public registration diagnostics | eager task/MJLab imports |
 
 **`scripts/` is not a layer.** It does not ship in a wheel, so anything with
 logic in it is unreachable from a `pip install`. Executable code lives in
@@ -107,7 +109,7 @@ Two rules earn their keep:
    timelines. It must **not** know what an *object*, *terrain*, *table*, or
    *ball* means to a task. The mjlab compat shim needs a task's command cfg, so
    it takes the common base class as an argument —
-   `apply(multi_clip_cfgs=...)`, wired in `orcs/__init__.py`. Core never reaches
+   `apply(multi_clip_cfgs=...)`, wired in `orcs/registration.py`. Core never reaches
    upward.
 
    > **Amended 2026-08-02.** Rule 2 used to read "zero semantics". That held only
@@ -139,10 +141,11 @@ contract, not a checkout assumption.
 | non-editable install | site-packages | `$XDG_DATA_HOME/orcs/{data,dependencies}` |
 
 `ORCS_ROOT`, `ORCS_DATA_ROOT`, and `ORCS_DEPS_ROOT` override those defaults.
-Missing optional data never makes `import orcs` fail: each task row either
-registers or contributes one entry to the top-level `orcs.SKIP_REASON` mapping.
-Consumers should inspect that mapping explicitly; normal optional omissions do
-not produce import-time warnings.
+Bare `import orcs` is a side-effect-free library import. During MJLab discovery,
+missing optional data never breaks package registration: each task row either
+registers or contributes one entry to the lazy top-level `orcs.SKIP_REASON`
+mapping. Consumers should inspect that mapping explicitly; normal optional
+omissions do not produce import-time warnings.
 
 ## 6. task slots
 
@@ -164,7 +167,7 @@ not produce import-time warnings.
    default. The SOURCE slot appears only when provenance changes code — reader,
    file format, joint order, conventions (perloco's `OmRe`/`Grail` do; its curb
    vs stair terrains do not, so those are a roster line, not a task).
-3. Add one `import orcs.tasks.<name>` line to `src/orcs/__init__.py`.
+3. Add one `import orcs.tasks.<name>` line to `src/orcs/registration.py`.
 4. Draw robots/objects from `orcs.assets`, paths from `orcs.core.paths`. If you
    need a new robot, add `orcs/assets/<robot>.py` and re-export it.
 5. Anything shared with a second task moves down a layer — **only once the second

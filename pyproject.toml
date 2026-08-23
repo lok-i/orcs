@@ -41,10 +41,11 @@ where = ["src"]
 
 # mjlab auto-discovers tasks by importing this module at startup.
 # Format: <key> = "<python-module-to-import>"  (key is arbitrary, module is what gets imported)
-# Adding a package here triggers its __init__.py -> register_mjlab_task() calls.
+# The package root stays lightweight; registration imports task packages and
+# triggers their register_mjlab_task() calls.
 # Multi-package: add one line per package that registers tasks.
 [project.entry-points."mjlab.tasks"]
-orcs = "orcs"
+orcs = "orcs.registration"
 
 # The data pipeline ships INSIDE the package (`orcs.cli`), so a pip-installed
 # orcs can produce the data it consumes. `scripts/*.py` are thin wrappers.

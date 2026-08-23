@@ -42,7 +42,6 @@ def main() -> None:
     from mjlab.rl.runner import MjlabOnPolicyRunner
     from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
-    import orcs  # noqa: F401 — task registration + mjlab compat
     from orcs.tasks.uolm.smpl_data import load_smpl_clip, stage_clip
 
     joints, root_quat, joints_viz = load_smpl_clip(args.smpl, args.z_up)

@@ -1,8 +1,9 @@
 """Task registration that survives an incomplete checkout.
 
-`import orcs` must never raise. A consumer that vendors orcs for ONE task
-should not lose it because another task's dataset is unstaged — so every row
-registers independently and a failure becomes an entry in the returned dict.
+MJLab task discovery must survive missing optional data. A consumer that
+vendors ORCS for ONE task should not lose it because another task's dataset is
+unstaged — so every row registers independently and a failure becomes an entry
+in the returned dict.
 
     SKIP_REASON = register_all(_TASKS)   # {} when everything registered
 

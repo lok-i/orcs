@@ -1,4 +1,4 @@
-"""`import orcs` is a contract: never raises, and says why a task is missing.
+"""ORCS discovery is a contract: never raises, and says why a task is missing.
 
 The one property every downstream consumer depends on. Needs no GPU; needs no
 data either — a checkout with nothing staged must pass this, with SKIP_REASON

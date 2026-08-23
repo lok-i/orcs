@@ -37,8 +37,9 @@ them that way. Same rule for non-`.py` runtime files (`rosters/*.toml`): declare
 ## Hard rules
 
 1. **`pytest` tests CONTRACTS, not behavior** (`tests/`, ~30 s, no GPU): that a
-   non-editable install still ships the rosters + CLI, and that `import orcs`
-   degrades to `SKIP_REASON` instead of raising. Behavior is verified by running
+   non-editable install still ships the rosters + CLI, bare `import orcs` stays
+   lightweight, and task discovery degrades to `SKIP_REASON` instead of raising.
+   Behavior is verified by running
    `play <task> --agent initial` headless and watching obs shapes + reward.
    `--agent initial` (an orcs addition) builds the real agent with NO checkpoint — the frozen
    base bit-exact for adapter tasks.
@@ -100,9 +101,9 @@ orcs is thin; the substance lives in four pinned deps (`deps.lock`, materialized
   [smpl_data.py](src/orcs/tasks/uolm/smpl_data.py) owns it.
 - **Object collision**: all objects use convex decomposition (`cvx_dcmp`), never whole hulls —
   container-shaped hulls are a narrowphase trap (~11× slower). Hull is a per-object override only.
-- **[core/_mjlab_compat.py](src/orcs/core/_mjlab_compat.py)** patches mjlab at import time
+- **[core/_mjlab_compat.py](src/orcs/core/_mjlab_compat.py)** patches mjlab at task-discovery time
   (idempotent): (1) an isinstance sentinel so play/train don't force single-file `--motion-file`
   resolution on multi-clip commands — task cfgs arrive via `apply(multi_clip_cfgs=...)`, wired in
-  [orcs/__init__.py](src/orcs/__init__.py); (2) adds `--agent initial` to `play`; (3) caps
+  [orcs/registration.py](src/orcs/registration.py); (2) adds `--agent initial` to `play`; (3) caps
   mujoco-warp's CCD workspace VRAM (`ORCS_NCCDMAX`, default 64); (4) muffles a cosmetic libmujoco
   mesh-support warning.
