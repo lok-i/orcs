@@ -1,9 +1,9 @@
 """Shared-dependency SHA guard.
 
-`orcs` and its consumers (today: `vibe`) both pin `mocke` / `rsl_rl` / `assets` in
-their own ``deps.lock``, but each is a single editable install — one SHA per env,
-whichever sync ran last. When orcs is the dependency, the CONSUMER's lock wins and
-orcs's own lock becomes advisory.
+`orcs` and its consumers (today: `vibe`) both pin `mocke` and `rsl_rl` in their
+own ``deps.lock``, but each is a single editable install — one SHA per env,
+whichever sync ran last. When orcs is the dependency, the CONSUMER's lock wins
+and orcs's own lock becomes advisory.
 
 That is fine as long as the drift is visible. `mocke` in particular carries the
 frozen-WBC obs/action contract that the ported SONIC checkpoints are bit-coupled
@@ -22,7 +22,7 @@ import subprocess
 from pathlib import Path
 
 VALIDATED: dict[str, str] = {
-    "mocke": "004d4c02bb1be65c67688f25f95197c865f83d6f",
+    "mocke": "7d2d274a5f14bf92952d7cd9a34ac52b389ca729",
     "rsl_rl": "4f8b9b3b657f27397a3337dabafb7ef7398387b4",
 }
 """SHAs orcs was last validated against. Bump only after `play Orcs-Uolm-AdaptSonic

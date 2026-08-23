@@ -19,7 +19,7 @@ Importing orcs is SILENT and never raises. `orcs.core.paths` resolves data and
 assets against the nearest repo root that HAS them, so a host project vendoring
 orcs under `dependencies/` is found automatically — no env vars, no import-order
 coupling. When the data genuinely is absent (a fresh checkout before
-`sync_dependencies.sh` / `make_object_models.py`), registration is skipped
+`sync_dependencies.sh`, which also runs `assets generate`), registration is skipped
 rather than raising: an incomplete checkout must not break `import orcs` for
 every consumer downstream. Each row registers on its own, so one unstaged
 dataset costs one task, not three.

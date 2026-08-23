@@ -13,7 +13,7 @@ orcs = pytest.importorskip("orcs")
 
 from mjlab.tasks.registry import list_tasks  # noqa: E402
 
-TASK_MODULES = (orcs.tasks.uolm, orcs.tasks.perloco)
+TASK_MODULES = (orcs.tasks.dodge, orcs.tasks.uolm, orcs.tasks.perloco)
 
 
 def test_import_is_silent_about_failure():
@@ -38,6 +38,47 @@ def test_registered_and_skipped_partition_the_table(mod):
     registered = set(list_tasks())
     for task_id in declared:
         assert (task_id in registered) ^ (task_id in mod.SKIP_REASON), task_id
+
+
+def test_top_level_skip_reasons_aggregate_every_task_module():
+    expected = {
+        task_id: reason
+        for module in TASK_MODULES
+        for task_id, reason in module.SKIP_REASON.items()
+    }
+    assert orcs.SKIP_REASON == expected
+
+
+def test_missing_optional_data_skips_only_its_task_row(monkeypatch):
+    from orcs.core import registry
+
+    registered: list[str] = []
+    monkeypatch.setattr(
+        registry,
+        "register_mjlab_task",
+        lambda **kwargs: registered.append(kwargs["task_id"]),
+    )
+
+    def missing(*, play: bool = False):
+        del play
+        raise FileNotFoundError("optional reconstructed motions are absent")
+
+    def ready(*, play: bool = False):
+        return {"play": play}
+
+    skipped = registry.register_all(
+        (
+            ("Orcs-Missing", missing, lambda: object()),
+            ("Orcs-Ready", ready, lambda: object()),
+        )
+    )
+
+    assert registered == ["Orcs-Ready"]
+    assert skipped == {
+        "Orcs-Missing": (
+            "FileNotFoundError: optional reconstructed motions are absent"
+        )
+    }
 
 
 def test_agents_live_only_in_core():

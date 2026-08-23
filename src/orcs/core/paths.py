@@ -1,19 +1,24 @@
 """Filesystem roots — the single source of path truth. No caller does ``__file__``
 depth math, so moving a module never silently orphans a dataset.
 
-Resolution order for every root: env override -> auto-find -> marker walk-up.
+Resolution order for every root: env override -> checkout discovery ->
+per-user installed-package fallback.
 
-  ORCS_ROOT         repo root                (default: walk up for _MARKERS)
-  ORCS_DATA_ROOT    datasets                 (default: <repo>/data)
-  ORCS_DEPS_ROOT    synced dependencies      (default: <repo>/dependencies)
-  ORCS_ASSETS_SOURCE  robot/object asset tree (default: installed ``assets`` pkg,
-                      else <deps>/assets/source)
+  ORCS_ROOT         owning/runtime root       (default: checkout or user data)
+  ORCS_DATA_ROOT    datasets                  (default: <owner>/data)
+  ORCS_DEPS_ROOT    synced dependencies       (default: <owner>/dependencies)
+  ORCS_ASSETS_SOURCE  robot/object asset tree (default: <deps>/assets/source,
+                      then installed ``assets`` pkg)
 
-``DATA_ROOT``/``DEPS_ROOT`` follow ONE rule: **when orcs is vendored, the host
-owns them.** Standalone, they are orcs's own ``data/``/``dependencies/``. Either
-way the env var is the explicit channel and the walk-up is the default — do not
-rely on a consumer setting the var, since entry-point import order across
-``mjlab.tasks`` is not guaranteed and this module resolves at import.
+There are three supported ownership modes:
+
+* vendored checkout: the nearest host repository owns data and dependencies;
+* standalone checkout: the ORCS repository owns them;
+* non-editable install: ``$XDG_DATA_HOME/orcs`` (normally
+  ``~/.local/share/orcs``) owns them.
+
+The environment variables are the explicit channel in every mode. In
+particular, ``ORCS_ROOT`` must work even when no source checkout exists.
 
 ``REPO_ROOT``/``DATA_ROOT``/``DEPS_ROOT`` are import-time constants and never
 assert existence — absent data must degrade to a skipped task registration, not
@@ -54,16 +59,33 @@ def _repo_roots() -> list[Path]:
 
 
 _ROOTS = _repo_roots()
-if not _ROOTS:
-    raise FileNotFoundError(
-        f"orcs repo root not found above {Path(__file__).resolve()} — no "
-        f"ancestor holds all of {_MARKERS}. Set ORCS_ROOT to override."
-    )
-
 _HOST_ROOTS = _ROOTS[1:]
 """Repo roots ABOVE orcs's own checkout — non-empty exactly when orcs is
 vendored as a dependency. Nearest first, so the immediate consumer wins over
 its own consumer in a deeper chain."""
+
+
+def _installed_root() -> Path:
+    """Stable, user-writable owner for a non-editable installation."""
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg_data).expanduser() if xdg_data else Path.home() / ".local/share"
+    return (base / "orcs").resolve()
+
+
+_EXPLICIT_ROOT = _env("ORCS_ROOT")
+_SOURCE_ROOT = _ROOTS[0] if _ROOTS else None
+REPO_ROOT: Path = _EXPLICIT_ROOT or _SOURCE_ROOT or _installed_root()
+
+
+def _owner_roots() -> list[Path]:
+    """Roots allowed to own runtime data, in precedence order."""
+    if _EXPLICIT_ROOT is not None:
+        return [_EXPLICIT_ROOT]
+    if _HOST_ROOTS:
+        return _HOST_ROOTS
+    if _SOURCE_ROOT is not None:
+        return [_SOURCE_ROOT]
+    return [REPO_ROOT]
 
 
 def _resolve(var: str, child: str) -> Path:
@@ -86,14 +108,13 @@ def _resolve(var: str, child: str) -> Path:
     override = _env(var)
     if override:
         return override
-    roots = _HOST_ROOTS or _ROOTS
+    roots = _owner_roots()
     for root in roots:
         if (root / child).is_dir():
             return root / child
     return roots[0] / child
 
 
-REPO_ROOT: Path = _env("ORCS_ROOT") or _ROOTS[0]
 DATA_ROOT: Path = _resolve("ORCS_DATA_ROOT", "data")
 DEPS_ROOT: Path = _resolve("ORCS_DEPS_ROOT", "dependencies")
 

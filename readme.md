@@ -35,6 +35,9 @@ Verify the installation:
 python -c "import mjlab, orcs; from mjlab.tasks.registry import list_tasks; print('\n'.join(list_tasks()))"
 ```
 
+Missing optional datasets suppress only their corresponding task rows. Inspect
+`orcs.SKIP_REASON` for the exact reason without enabling import-time warnings.
+
 > [!NOTE]
 > Import `mjlab` before `orcs` in standalone scripts so task entry-point
 > discovery finishes before ORCS registration.
@@ -71,7 +74,7 @@ Override them only when the default layout is unsuitable:
 |---|---|
 | `ORCS_DATA_ROOT` | `<repo>/data` |
 | `ORCS_DEPS_ROOT` | `<repo>/dependencies` |
-| `ORCS_ASSETS_SOURCE` | installed `assets` package, then `<deps>/assets/source` |
+| `ORCS_ASSETS_SOURCE` | host assets checkout, then installed `assets` package |
 | `ORCS_SMPLX_DIR` | `<deps>/GRAIL/imports/GEM-SMPL/inputs/checkpoints/body_models` |
 
 ## development

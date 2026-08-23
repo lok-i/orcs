@@ -17,10 +17,11 @@ humanoid control on mjlab. It is **not** a task — tasks self-register under `s
 |---|---|---|
 | **UOLM** `tasks/uolm/` | Uni-Object Loco-Manipulation — adapter reads OBJECT kinematics | this file, §UOLM mechanisms |
 | **PerLoco** `tasks/perloco/` | Perceptive Locomotion over staged (terrain, motion) pairs — adapter reads a TERRAIN height scan | [docs/perceptive_locomotion.md](docs/perceptive_locomotion.md), [tasks/perloco/readme.md](src/orcs/tasks/perloco/readme.md) |
+| **Dodge** `tasks/dodge/` | Whole-body evasion — adapter reads BALL kinematics | task package docstring |
 
-The two differ in exactly ONE obs group (`augmentation`). Everything else — frozen base,
-multi-clip command, agents, critic — is literally shared code. That is the thesis, not a
-coincidence; a term duplicated across the two is a bug.
+Tasks specialize the `augmentation` observation group while sharing the frozen base,
+multi-clip command, agents, and critic wherever their mechanics agree. Duplicating a shared
+term is a bug; forcing task semantics into core is also a bug.
 
 **Agents live in `core/rl.py`, never in a task.** `adapt_sonic_agent_cfg` / `tara_agent_cfg` /
 `sidecar_agent_cfg` — a task picks one and names its experiment. There is no `rl_cfg.py` under
@@ -28,7 +29,7 @@ any task, and adding one back is how the two definitions of "PPO" start to drift
 (`tests/test_registration.py` asserts the absence.)
 
 **Executable code lives in `orcs/cli/`, never in `scripts/`.** `scripts/` does not ship in a
-wheel, so logic there is unreachable from a `pip install`; the four `scripts/*.py` are
+wheel, so logic there is unreachable from a `pip install`; the `scripts/*.py` files are
 three-line wrappers over `[project.scripts]` entry points and `tests/test_packaging.py` keeps
 them that way. Same rule for non-`.py` runtime files (`rosters/*.toml`): declare them in
 `[tool.setuptools.package-data]` or they exist only in your checkout.
@@ -56,9 +57,6 @@ them that way. Same rule for non-`.py` runtime files (`rosters/*.toml`): declare
    `core/deps.py` records what orcs was validated against and prints drift at import —
    believe it, especially for `mocke`. Dev on orcs alone belongs in its own venv; running
    `sync_dependencies.sh` inside a consumer's venv silently re-points the shared deps.
-   **Unmerged:** the `assets` commits this lock used to pin (`6822f3b`, `46511a8` —
-   optimized tire/woodchair2/largetable decompositions) are not in the pinned SHA; they
-   want merging in the assets repo.
 
 ## Dependency web (non-obvious)
 
@@ -70,7 +68,7 @@ orcs is thin; the substance lives in four pinned deps (`deps.lock`, materialized
 | `mjlab` (PyPI/editable) | sim + manager-based env framework | `ManagerBasedRlEnvCfg`, `register_mjlab_task`, `play`/`train` |
 | `mocke` (git, `pip -e`) | **frozen-WBC contract** + ported SONIC ckpts | `mocke.sonic.profile`, `mocke.mdp.joint_maps` (IL↔MJ), `PRETRAINED_DIR`; ckpts ship **tracked** — no port step |
 | `rsl_rl` (lok-i fork, `pip --no-deps -e`) | the models | `SonicWithAdapterModel` (LoRA over frozen SONIC), `SonicBaseModel` |
-| `assets` (git, `pip -e`) | robot + object MuJoCo assets | object XMLs are **machine-generated, untracked** — run `make_object_models.py --all` on a fresh checkout |
+| `assets` (git, `pip -e`) | robot + object MuJoCo assets | `sync_dependencies.sh` runs `assets generate`; generated XMLs live in the per-user asset cache |
 
 ## UOLM mechanisms
 
@@ -84,17 +82,18 @@ orcs is thin; the substance lives in four pinned deps (`deps.lock`, materialized
   port script bakes the IL→MJ permutation into the ported ckpt's first/last layers, so the runtime
   consumes/emits MJ order with no runtime converters. `mocke.mdp.joint_maps.{IL2MJ,MJ2IL}` is the
   single source of truth (used e.g. for the SMPL wrist-joint slots).
-- **Two command spaces** — `uolm_env_cfg(command_space=...)` in
-  [env_cfg.py](src/orcs/tasks/uolm/env_cfg.py) is the single branching factory. Same object
-  plumbing, RSI, goals, terminations; what differs:
+- **Two command spaces** — native robot-reference tasks use `uolm_env_cfg`; registered
+  SMPL-reference tasks use `uolm_smpl_env_cfg` with source SMPL/object rewards and
+  kinematic-retarget seeds for RSI. The older `uolm_env_cfg(command_space="smpl")` path remains
+  a rollout/debug path, not the registered training recipe.
 
-  | | `robot` (`Orcs-Uolm-AdaptSonic`) | `smpl` (`Orcs-Uolm-AdaptSonic-Smpl`) |
+  | | `robot` (`Orcs-Uolm-AdaptSonic`) | reconstructed `smpl` (`Orcs-Uolm-*-Smpl`) |
   |---|---|---|
-  | reference | retargeted G1 clips (object-keyed, omni multi-object) | human SMPL clips (flat, single object) |
-  | dataset root | `data/retargeted_motions/.../unitree_g1` | `data/smpl_motions` (built by `build_smpl_dataset.py`) |
+  | reference | retargeted G1 clips (object-keyed, omni multi-object) | reconstructed human SMPL + object clips |
+  | dataset root | `data/retargeted_motions/.../unitree_g1` | `data/smpl_motions/uolm/reconstructed` |
   | tokenizer obs | g1 (640-d) | smpl (840-d), `mocke.sonic.sonic_smpl_tokenizer` |
   | base ckpt | `last_ported.pt` | `smpl_ported.pt` |
-  | rewards/RSI | full MoTr rewards + robustness domain | **nullified — rollout only** (PR pending) |
+  | rewards/RSI | full MoTr rewards + robustness domain | source point/object rewards; seed state supplies RSI only |
 
 - **SMPL frames** are a real gotcha — conventions table in [readme.md](readme.md#smpl-data-conventions).
   `smpl_joints` reach the encoder RAW; only `pose_aa` root + `transl` get y-up→z-up converted.

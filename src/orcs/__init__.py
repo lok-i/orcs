@@ -34,9 +34,9 @@ its import line below. Philosophy, layer contract and roadmap: docs/ethos.md.
 Usage: readme.md.
 """
 
-import orcs.tasks.dodge  # noqa: F401 — task registration
-import orcs.tasks.perloco  # noqa: F401 — task registration
-import orcs.tasks.uolm  # noqa: F401 — task registration
+import orcs.tasks.dodge as _dodge
+import orcs.tasks.perloco as _perloco
+import orcs.tasks.uolm as _uolm
 from orcs.core import deps as _deps
 from orcs.core._mjlab_compat import apply as _apply_mjlab_compat
 from orcs.core.mdp.commands import MultiClipMotionCommandCfg
@@ -44,6 +44,17 @@ from orcs.core.mdp.commands import MultiClipMotionCommandCfg
 # Shared deps (mocke, rsl_rl) are one editable install per env and the CONSUMER's
 # lock wins — drift becomes a printed line, never a silent bug. See core/deps.py.
 _deps.check()
+
+SKIP_REASON = {
+    **_dodge.SKIP_REASON,
+    **_perloco.SKIP_REASON,
+    **_uolm.SKIP_REASON,
+}
+"""Every task omitted because its optional data is unavailable.
+
+Missing optional datasets are normal for consumers such as Vibe, so import
+stays quiet. This aggregate is the explicit diagnostic surface.
+"""
 
 MULTI_CLIP_CFGS = (MultiClipMotionCommandCfg,)
 """Every orcs command cfg that owns a multi-clip library — **public, because a

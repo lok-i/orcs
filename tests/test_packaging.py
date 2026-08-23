@@ -8,9 +8,10 @@ that undersells the real floor both look fine locally and break the first
 
 from __future__ import annotations
 
+import configparser
+import os
 import subprocess
 import sys
-import sysconfig
 import tomllib
 import zipfile
 from pathlib import Path
@@ -82,9 +83,46 @@ def test_entry_points_resolve():
         )
 
 
-def test_console_scripts_installed():
-    """Present in the active env (i.e. `pip install -e .` was re-run after the
-    entry points were added)."""
-    bindir = Path(sysconfig.get_path("scripts"))
-    for name in PYPROJECT["project"]["scripts"]:
-        assert (bindir / name).exists(), f"{name} not installed — re-run pip install -e ."
+def test_console_scripts_ship_in_wheel(wheel):
+    """The artifact owns its script metadata; the active dev env is irrelevant."""
+    candidates = [
+        name for name in wheel.namelist()
+        if name.endswith(".dist-info/entry_points.txt")
+    ]
+    assert len(candidates) == 1, candidates
+    parser = configparser.ConfigParser()
+    parser.read_string(wheel.read(candidates[0]).decode())
+    assert dict(parser["console_scripts"]) == PYPROJECT["project"]["scripts"]
+
+
+def test_wheel_imports_without_checkout_markers(wheel, tmp_path):
+    """A wheel has neither pyproject.toml nor deps.lock beside its package."""
+    site = tmp_path / "site-packages"
+    wheel.extractall(site)
+    runtime = tmp_path / "runtime"
+    env = os.environ.copy()
+    env.update(
+        {
+            "MPLCONFIGDIR": str(tmp_path / "matplotlib"),
+            "ORCS_SKIP_DEP_CHECK": "1",
+            "PYTHONPATH": os.pathsep.join(
+                value
+                for value in (str(site), env.get("PYTHONPATH"))
+                if value
+            ),
+            "XDG_DATA_HOME": str(runtime),
+        }
+    )
+    code = (
+        "from pathlib import Path; import mjlab, orcs; "
+        "from orcs.core.paths import REPO_ROOT; "
+        f"assert Path(orcs.__file__).is_relative_to(Path({str(site)!r})); "
+        f"assert REPO_ROOT == Path({str(runtime / 'orcs')!r})"
+    )
+    subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )

@@ -46,13 +46,14 @@ Status is explicit — orcs is early. Nothing below is aspirational except where
 |---|---|---|---|
 | `policy` | proprio history-10 | no | ✅ frozen SONIC contract |
 | `tokenizer` | future reference window | yes (future) | ✅ frozen SONIC contract |
-| `augmentation` | task/object kinematics — the adapter's conditioning | yes (needs perception on hw) | ✅ |
+| `augmentation` | task kinematics — the adapter's conditioning | yes (needs perception on hw) | ✅ |
 | `critic` | full state | yes (never deployed) | ✅ asymmetric actor-critic |
 | student | proprio + perception, distilled | — | ⬜ roadmap |
 
-So today's privilege is **asymmetric actor-critic + ground-truth object state**.
-The distillation stage that closes the sensing gap is the next build, not a
-shipped feature.
+So today's privilege is **asymmetric actor-critic + ground-truth task state**:
+object state for UOLM, terrain scans for PerLoco, and ball state for Dodge. The
+distillation stage that closes the sensing gap is the next build, not a shipped
+feature.
 
 **Adapt, don't retrain.** A task straps a zero-init LoRA adapter onto a frozen
 competent base (SONIC WBC) — at construction it reproduces the base bit-exact,
@@ -64,21 +65,21 @@ and PPO only moves the adapter. Verify this claim, don't trust it:
 ```
 src/orcs/
 ├── __init__.py   registry point: import each task, wire the mjlab shim
-├── core/         robot-generic, task-blind infra
+├── core/         task-blind, shared robot/control infra
 │   ├── paths · deps · _mjlab_compat      no semantics at all
-│   ├── data/     scan (clip discovery) · loader (concatenated timeline)
+│   ├── data/     scan · concatenated timelines · SMPL seed/point contracts
 │   ├── mdp/      commands (MultiClipMotionCommand) · observations
 │   │             · terminations · events
 │   ├── obs.py    group plumbing + robot-only term bundles
 │   ├── rl.py     PPO runner spine + actor builders
-│   └── sensors.py  robot<->terrain contact + kill-body vocabulary
 │   ├── registry.py per-task registration that degrades, never raises
 │   └── sensors.py  robot<->ground contact + kill-body vocabulary
-├── assets/       robots + objects as mjlab entity cfgs. g1.py, objects.py
+├── assets/       reusable robot/object/support entity and scene cfgs
 ├── tasks/        one self-registering package per task
-│   ├── uolm/     env_cfg · robustness · smpl_data · mdp/
-│   └── perloco/  env_cfg · terrain · terrain_spec · sensors · sources/ · mdp/
+│   ├── dodge/    env_cfg · observation_cfgs · mdp/
+│   ├── perloco/  env_cfg · terrain · terrain_spec · sensors · sources/ · mdp/
 │                 · roster.py + rosters/*.toml (shipped as package-data)
+│   └── uolm/     env_cfg · robustness · sensors · sources/ · mdp/
 └── cli/          console entry points — the data pipeline, INSIDE the package
 ```
 
@@ -101,12 +102,13 @@ Two rules earn their keep:
 
 1. **No `__file__` depth math.** Every path comes from `orcs.core.paths`. Moving
    a module can never silently orphan a dataset.
-2. **`core` is robot-generic and task-blind.** It may know what a joint, a body,
-   a clip and a reference are. It must **not** know what an *object* or a
-   *terrain* is — the moment a name in `core` mentions one, it belongs to the
-   task that has one. The mjlab compat shim needs a task's command cfg, so it
-   takes it as an argument — `apply(multi_clip_cfgs=...)`, wired in
-   `orcs/__init__.py`. Core never reaches upward.
+2. **`core` is task-blind shared control infrastructure.** It may know the
+   common robot morphology, joints, bodies, clips, source points, and reference
+   timelines. It must **not** know what an *object*, *terrain*, *table*, or
+   *ball* means to a task. The mjlab compat shim needs a task's command cfg, so
+   it takes the common base class as an argument —
+   `apply(multi_clip_cfgs=...)`, wired in `orcs/__init__.py`. Core never reaches
+   upward.
 
    > **Amended 2026-08-02.** Rule 2 used to read "zero semantics". That held only
    > while core carried no terms, which held only while there was one task. The
@@ -125,15 +127,33 @@ Two rules earn their keep:
    > is a preference.** If the next shared term forces the word back into
    > `core/`, the honest move is to amend this rule again, not to smuggle it.
 
-## 5. task slots
+## 5. package ownership modes
+
+ORCS supports the same code in three ownership modes. Paths are a runtime
+contract, not a checkout assumption.
+
+| mode | code | data and dependencies |
+|---|---|---|
+| vendored | `<host>/dependencies/orcs` | the host's `data/` and `dependencies/` |
+| standalone checkout | ORCS repository | that repository's `data/` and `dependencies/` |
+| non-editable install | site-packages | `$XDG_DATA_HOME/orcs/{data,dependencies}` |
+
+`ORCS_ROOT`, `ORCS_DATA_ROOT`, and `ORCS_DEPS_ROOT` override those defaults.
+Missing optional data never makes `import orcs` fail: each task row either
+registers or contributes one entry to the top-level `orcs.SKIP_REASON` mapping.
+Consumers should inspect that mapping explicitly; normal optional omissions do
+not produce import-time warnings.
+
+## 6. task slots
 
 | task | what | sources | command spaces | status |
 |---|---|---|---|---|
-| `uolm` | Uni-Object Loco-Manipulation | retargeted G1 | `robot`, `smpl` | ✅ robot trains; smpl rollout-only |
-| `perloco` | terrain from a height scan | OmniRetarget, GRAIL | `robot`, `smpl` (GRAIL) | ✅ 5 tasks register and roll |
+| `uolm` | Uni-Object Loco-Manipulation | retargeted G1, reconstructed human-object motion | `robot`, `smpl` | ✅ native and seed-backed SMPL recipes train |
+| `perloco` | terrain from a height scan | OmniRetarget, GRAIL | `robot`, `smpl` (GRAIL) | ✅ native and seed-backed SMPL recipes train |
+| `dodge` | whole-body ball evasion | generated nominal stand | `robot` | ✅ adapter task registers and trains |
 | student distillation | oracle → deployable | — | — | ⬜ the next build |
 
-## 6. adding a task
+## 7. adding a task
 
 1. `src/orcs/tasks/<name>/__init__.py` builds a `_TASKS` table and calls
    `orcs.core.registry.register_all(_TASKS)` — per-row, so one unstaged dataset
