@@ -29,7 +29,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
 import torch
+from mjlab.managers import CommandTerm
 from mjlab.tasks.tracking.mdp.commands import MotionCommand, MotionCommandCfg
 from mjlab.utils.lab_api.math import (
     quat_from_euler_xyz,
@@ -64,10 +66,62 @@ class MultiClipMotionCommand(MotionCommand):
     cfg: MultiClipMotionCommandCfg
 
     def __init__(self, cfg: MultiClipMotionCommandCfg, env: ManagerBasedRlEnv):
-        super().__init__(cfg, env)
-
-        # Replace mjlab's single-file MotionLoader with the concatenated one.
+        # MotionCommand.__init__ eagerly loads cfg.motion_file, only for ORCS to
+        # discard it on the next line. Initialize its state directly so a
+        # multi-clip command has no hidden dependency on a dummy single clip.
+        # This mirrors mjlab's constructor fields; tracking properties and
+        # debug visualization remain inherited from MotionCommand.
+        CommandTerm.__init__(self, cfg, env)
+        self.robot = env.scene[cfg.entity_name]
+        self.robot_anchor_body_index = self.robot.body_names.index(
+            cfg.anchor_body_name
+        )
+        self.motion_anchor_body_index = cfg.body_names.index(cfg.anchor_body_name)
+        self.body_indexes = torch.tensor(
+            self.robot.find_bodies(cfg.body_names, preserve_order=True)[0],
+            dtype=torch.long,
+            device=self.device,
+        )
         self.motion = self._build_loader()
+        self.time_steps = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self.body_pos_relative_w = torch.zeros(
+            self.num_envs, len(cfg.body_names), 3, device=self.device
+        )
+        self.body_quat_relative_w = torch.zeros(
+            self.num_envs, len(cfg.body_names), 4, device=self.device
+        )
+        self.body_quat_relative_w[:, :, 0] = 1.0
+
+        self.bin_count = int(self.motion.time_step_total // (1 / env.step_dt)) + 1
+        self.bin_failed_count = torch.zeros(
+            self.bin_count, dtype=torch.float, device=self.device
+        )
+        self._current_bin_failed = torch.zeros(
+            self.bin_count, dtype=torch.float, device=self.device
+        )
+        self.kernel = torch.tensor(
+            [cfg.adaptive_lambda**i for i in range(cfg.adaptive_kernel_size)],
+            device=self.device,
+        )
+        self.kernel = self.kernel / self.kernel.sum()
+        for metric in (
+            "error_anchor_pos",
+            "error_anchor_rot",
+            "error_anchor_lin_vel",
+            "error_anchor_ang_vel",
+            "error_body_pos",
+            "error_body_rot",
+            "error_joint_pos",
+            "error_joint_vel",
+            "sampling_entropy",
+            "sampling_top1_prob",
+            "sampling_top1_bin",
+        ):
+            self.metrics[metric] = torch.zeros(self.num_envs, device=self.device)
+        self._ghost_model = None
+        self._ghost_color = np.array(cfg.viz.ghost_color, dtype=np.float32)
 
         # Per-env clip tracking
         self._clip_ids = torch.zeros(
@@ -216,7 +270,14 @@ class MultiClipMotionCommand(MotionCommand):
 
     # ── step ──
 
-    def _update_command(self) -> None:
+    def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
+        """Advance all commands on a policy step, or only reset environments.
+
+        mjlab's command hook gained ``env_ids`` so its reset-time update does
+        not advance unrelated environments.  Keeping ``None`` as the default
+        also supports mjlab releases that still call this hook with no
+        argument.
+        """
         # Phase annealing: _init_phase_max 1→0 over N policy updates.
         if self.cfg.init_phase_anneal_iterations > 0 and hasattr(
             self._env, "policy_update_count"
@@ -237,11 +298,14 @@ class MultiClipMotionCommand(MotionCommand):
         # `exceeded_motion_by_eps` truncates (time_out → V(s') bootstraps) after
         # ε frozen steps. Resampling happens only via env reset
         # (CommandTerm.reset → _resample_command).
-        self.time_steps += 1
-        clip_last = self.motion.clip_ends[self._clip_ids] - 1
-        overrun = self.time_steps > clip_last
-        self._steps_past_end += overrun.long()
-        self.time_steps = torch.minimum(self.time_steps, clip_last)
+        selected = slice(None) if env_ids is None else env_ids
+        self.time_steps[selected] += 1
+        clip_last = self.motion.clip_ends[self._clip_ids[selected]] - 1
+        overrun = self.time_steps[selected] > clip_last
+        self._steps_past_end[selected] += overrun.long()
+        self.time_steps[selected] = torch.minimum(
+            self.time_steps[selected], clip_last
+        )
 
         self.update_relative_body_poses()
 

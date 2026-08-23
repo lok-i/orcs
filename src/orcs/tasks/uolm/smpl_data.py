@@ -109,7 +109,7 @@ def stage_clip(
     zero -> valid, degraded wrist orientation only). object_motion is a static
     nominal pose when ``object_npz`` is None (no smpl+object clips exist yet).
     """
-    from orcs.tasks.uolm.env_cfg import _CONTACT_GRAPH_BODY_NAMES
+    from orcs.tasks.uolm.sensors import CONTACT_GRAPH_BODY_NAMES
 
     T = joints.shape[0]
     sample_dir.mkdir(parents=True, exist_ok=True)
@@ -146,7 +146,7 @@ def stage_clip(
                  obj_pos_w=obj_pos, obj_quat_w=obj_quat)
 
     # zeros contact matrix — establishes the ContactSchedule legend
-    names = list(_CONTACT_GRAPH_BODY_NAMES) + ["object", "world"]
+    names = list(CONTACT_GRAPH_BODY_NAMES) + ["object", "world"]
     np.savez(sample_dir / "contact_matrix.npz",
              body_names=np.array(names),
              matrix=np.zeros((T, len(names), len(names)), dtype=np.int8))

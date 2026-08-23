@@ -18,24 +18,30 @@ Functionally 1:1 with fcrl's ObjectMotionCommand, built on mjlab.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import mujoco
 import numpy as np
 import torch
 from mjlab.utils.lab_api.math import (
+    axis_angle_from_quat,
     matrix_from_quat,
+    quat_conjugate,
     quat_error_magnitude,
     quat_from_euler_xyz,
     quat_mul,
 )
 
 from orcs.core.data.loader import ConcatMotionLoader
+from orcs.core.data.point_reference import G1_SMPL_BODY_MAP, scaled_smpl_targets
 from orcs.core.data.scan import (
     load_field_or_make_zeros,
     motion_dirs,
     scan_flat,
 )
+from orcs.core.data.seed_loader import SeededSmplMotionLoader
+from orcs.core.data.seeds import SeedMotion
 from orcs.core.data.smpl import draw_smpl_ghost, load_smpl_channels
 from orcs.core.mdp.commands import (
     MultiClipMotionCommand,
@@ -44,11 +50,21 @@ from orcs.core.mdp.commands import (
 )
 from orcs.tasks.uolm.mdp.contact_schedule import ContactSchedule
 from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
+from orcs.tasks.uolm.sources.reconstructed import (
+    cache_motion_files,
+    is_current_cache_sample,
+)
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
-__all__ = ["ObjectMotionCommandCfg", "ObjectMotionCommand", "motion_dirs"]
+__all__ = [
+    "ObjectMotionCommandCfg",
+    "ObjectMotionCommand",
+    "SmplSeedObjectMotionCommandCfg",
+    "SmplSeedObjectMotionCommand",
+    "motion_dirs",
+]
 
 # Body-name roster for the tracked-body cfg default — canonical copy lives in
 # mocke.mdp.joint_maps. The IL->MJ joint permutation and the tracked-body slice
@@ -149,6 +165,88 @@ class _ConcatMotionLoader(ConcatMotionLoader):
         self.obj_quat = torch.cat(self._all_oq)        # (T_tot, 4)
         self.obj_lin_vel = torch.cat(self._all_olv)    # (T_tot, 3)
         self.obj_ang_vel = torch.cat(self._all_oav)    # (T_tot, 3)
+
+
+class _SeededSmplObjectMotionLoader(SeededSmplMotionLoader):
+    """Seed-backed robot RSI plus independent source object references."""
+
+    tag = "uolm-smpl-seed"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        seed_pos: list[torch.Tensor] = []
+        seed_quat: list[torch.Tensor] = []
+        seed_lin_vel: list[torch.Tensor] = []
+        seed_ang_vel: list[torch.Tensor] = []
+        source_pos: list[torch.Tensor] = []
+        source_quat: list[torch.Tensor] = []
+        source_lin_vel: list[torch.Tensor] = []
+        source_ang_vel: list[torch.Tensor] = []
+
+        def _tensor(value: np.ndarray) -> torch.Tensor:
+            return torch.as_tensor(value, dtype=torch.float32, device=self.device)
+
+        for locator, expected_frames in zip(
+            self.motion_files, self.clip_lengths.tolist(), strict=True
+        ):
+            sample = Path(locator).parent
+            seed_path = sample / "seed_state.npz"
+            seed = SeedMotion.load(seed_path)
+            object_seed = (
+                seed.object_pos_w,
+                seed.object_quat_w,
+                seed.object_lin_vel_w,
+                seed.object_ang_vel_w,
+            )
+            if any(value is None for value in object_seed):
+                raise ValueError(f"{seed_path}: UOLM seed has no object state")
+
+            object_path = sample / "object_motion.npz"
+            if not object_path.exists():
+                raise FileNotFoundError(f"{sample}: missing object_motion.npz")
+            with np.load(object_path) as data:
+                object_source = tuple(
+                    data[name].copy()
+                    for name in (
+                        "obj_pos_w",
+                        "obj_quat_w",
+                        "obj_lin_vel_w",
+                        "obj_ang_vel_w",
+                    )
+                )
+            for label, values in (("seed", object_seed), ("source", object_source)):
+                for value in values:
+                    assert value is not None
+                    if value.shape[0] != expected_frames:
+                        raise ValueError(
+                            f"{sample}: {label} object/source frame mismatch "
+                            f"({value.shape[0]} != {expected_frames})"
+                        )
+                    if not np.isfinite(value).all():
+                        raise ValueError(f"{sample}: {label} object state contains NaN/Inf")
+
+            for destination, value in zip(
+                (seed_pos, seed_quat, seed_lin_vel, seed_ang_vel),
+                object_seed,
+                strict=True,
+            ):
+                assert value is not None
+                destination.append(_tensor(value))
+            for destination, value in zip(
+                (source_pos, source_quat, source_lin_vel, source_ang_vel),
+                object_source,
+                strict=True,
+            ):
+                destination.append(_tensor(value))
+
+        self.seed_obj_pos = torch.cat(seed_pos)
+        self.seed_obj_quat = torch.cat(seed_quat)
+        self.seed_obj_lin_vel = torch.cat(seed_lin_vel)
+        self.seed_obj_ang_vel = torch.cat(seed_ang_vel)
+        self.obj_pos = torch.cat(source_pos)
+        self.obj_quat = torch.cat(source_quat)
+        self.obj_lin_vel = torch.cat(source_lin_vel)
+        self.obj_ang_vel = torch.cat(source_ang_vel)
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +602,268 @@ class ObjectMotionCommand(MultiClipMotionCommand):
         )
 
 
+class SmplSeedObjectMotionCommand(ObjectMotionCommand):
+    """SMPL point reference with seed-only robot and object initialization."""
+
+    cfg: SmplSeedObjectMotionCommandCfg
+
+    def _build_loader(self) -> ConcatMotionLoader:
+        motion_files: list[str] = []
+        clip_motion_set: list[int] = []
+        root = Path(self.cfg.dataset_dir)
+        for motion_set_id, motion_set in enumerate(self.cfg.motion_set_names):
+            ready: list[Path] = []
+            incomplete: list[Path] = []
+            candidates = cache_motion_files(
+                motion_set, self.cfg.interaction_names, root=root
+            )
+            for path in candidates:
+                sample = path.parent
+                if not is_current_cache_sample(sample):
+                    incomplete.append(sample)
+                    continue
+                try:
+                    seed = SeedMotion.load(sample / "seed_state.npz")
+                except (FileNotFoundError, KeyError, OSError, ValueError):
+                    incomplete.append(sample)
+                    continue
+                if seed.valid.all() and seed.object_pos_w is not None:
+                    ready.append(path)
+                else:
+                    incomplete.append(sample)
+            if not candidates or incomplete:
+                selection = (
+                    f" for interactions {self.cfg.interaction_names}"
+                    if self.cfg.interaction_names is not None
+                    else ""
+                )
+                raise FileNotFoundError(
+                    f"{len(incomplete)}/{len(candidates)} staged samples under "
+                    f"{root / motion_set}{selection} do not have a current, complete "
+                    "kinematic retarget; "
+                    "run orcs-pseudo-retarget --scene uolm "
+                    f"--motion-set {motion_set} --all"
+                )
+            motion_files.extend(str(path) for path in ready)
+            clip_motion_set.extend([motion_set_id] * len(ready))
+
+        self._clip_motion_set_ids = torch.tensor(
+            clip_motion_set, dtype=torch.long, device=self.device
+        )
+        self._clip_object_ids = (
+            self._clip_motion_set_ids if len(self.cfg.motion_set_names) > 1 else None
+        )
+        return _SeededSmplObjectMotionLoader(
+            str(root),
+            self.device,
+            motion_files=motion_files,
+            joint_names=tuple(self.robot.joint_names),
+            body_names=tuple(self.cfg.body_names),
+            expected_fps=1.0 / self._env.step_dt,
+        )
+
+    def _init_task(self) -> None:
+        super()._init_task()
+        self.point_body_names = tuple(name for name, _ in G1_SMPL_BODY_MAP)
+        if self.point_body_names != tuple(self.cfg.body_names):
+            raise ValueError(
+                "SMPL point map must cover command bodies in the same order; "
+                f"map={self.point_body_names}, command={self.cfg.body_names}"
+            )
+        self.support = (
+            self._env.scene[self.cfg.support_entity_name]
+            if self.cfg.support_entity_name is not None
+            else None
+        )
+        for metric in (
+            "error_point_pos_mean",
+            "error_point_pos_max",
+            "error_point_vel_mean",
+        ):
+            self.metrics[metric] = torch.zeros(self.num_envs, device=self.device)
+
+    def _previous_frames(self, frames: torch.Tensor) -> torch.Tensor:
+        clip_start = self.motion.clip_offsets[self._clip_ids]
+        if frames.ndim == 2:
+            clip_start = clip_start[:, None]
+        return torch.maximum(frames - 1, clip_start)
+
+    def _targets(self, frames: torch.Tensor) -> torch.Tensor:
+        origins = self._env.scene.env_origins
+        if frames.ndim == 2:
+            origins = origins[:, None, :]
+        return scaled_smpl_targets(
+            self.motion.smpl_joints_viz[frames],
+            self.motion.morphology_scale[frames],
+            origins,
+        )
+
+    @property
+    def point_target_pos_w(self) -> torch.Tensor:
+        return self._targets(self.time_steps)
+
+    @property
+    def point_target_vel_w(self) -> torch.Tensor:
+        previous = self._previous_frames(self.time_steps)
+        return (self._targets(self.time_steps) - self._targets(previous)) / self._env.step_dt
+
+    @property
+    def robot_point_pos_w(self) -> torch.Tensor:
+        return self.robot_body_pos_w
+
+    @property
+    def robot_point_vel_w(self) -> torch.Tensor:
+        return self.robot_body_lin_vel_w
+
+    @property
+    def anchor_pos_w(self) -> torch.Tensor:
+        return self.point_target_pos_w[:, self.point_body_names.index("pelvis")]
+
+    @property
+    def anchor_quat_w(self) -> torch.Tensor:
+        return self.motion.smpl_root_quat[self.time_steps]
+
+    @property
+    def anchor_lin_vel_w(self) -> torch.Tensor:
+        return self.point_target_vel_w[:, self.point_body_names.index("pelvis")]
+
+    @property
+    def anchor_ang_vel_w(self) -> torch.Tensor:
+        previous = self._previous_frames(self.time_steps)
+        relative = quat_mul(
+            self.motion.smpl_root_quat[self.time_steps],
+            quat_conjugate(self.motion.smpl_root_quat[previous]),
+        )
+        return axis_angle_from_quat(relative) / self._env.step_dt
+
+    @property
+    def motion_anchor_pos_w_future(self) -> torch.Tensor:
+        pelvis = self.point_body_names.index("pelvis")
+        return self._targets(self._future_time_indices())[:, :, pelvis]
+
+    @property
+    def motion_anchor_quat_w_future(self) -> torch.Tensor:
+        return self.motion.smpl_root_quat[self._future_time_indices()]
+
+    @property
+    def command(self) -> torch.Tensor:
+        frames = self._future_time_indices()
+        positions = self._targets(frames)
+        previous = self._previous_frames(frames)
+        velocities = (positions - self._targets(previous)) / self._env.step_dt
+        local_positions = positions - positions[:, :, :1]
+        return torch.cat((local_positions, velocities), dim=-1).flatten(1)
+
+    def _reset_task(
+        self,
+        env_ids: torch.Tensor,
+        clip_ids: torch.Tensor,
+        time_steps: torch.Tensor,
+        origins: torch.Tensor,
+    ) -> None:
+        clip_end_frames = self.motion.clip_ends[clip_ids] - 1
+        self._object_goal_pos[env_ids] = self.motion.obj_pos[clip_end_frames]
+        self._object_goal_quat[env_ids] = self.motion.obj_quat[clip_end_frames]
+
+        object_pos = self.motion.seed_obj_pos[time_steps] + origins
+        object_quat = self.motion.seed_obj_quat[time_steps].clone()
+        object_lin_vel = self.motion.seed_obj_lin_vel[time_steps].clone()
+        object_ang_vel = self.motion.seed_obj_ang_vel[time_steps].clone()
+        at_clip_start = time_steps == self.motion.clip_offsets[clip_ids]
+        if self.cfg.object_init_pose_range and at_clip_start.any():
+            mask = at_clip_start
+            sample = sample_se3(
+                self.cfg.object_init_pose_range, int(mask.sum()), self.device
+            )
+            object_pos[mask] += sample[:, :3]
+            object_quat[mask] = quat_mul(
+                quat_from_euler_xyz(sample[:, 3], sample[:, 4], sample[:, 5]),
+                object_quat[mask],
+            )
+        self.object.write_root_state_to_sim(
+            torch.cat(
+                (object_pos, object_quat, object_lin_vel, object_ang_vel), dim=-1
+            ),
+            env_ids=env_ids,
+        )
+
+        if self.support is not None:
+            support_pose = torch.zeros(len(env_ids), 7, device=self.device)
+            support_pose[:, :3] = origins
+            support_pose[:, 2] = -10.0
+            support_pose[:, 3] = 1.0
+            set_ids = self._clip_motion_set_ids[clip_ids]
+            on_table = torch.zeros_like(set_ids, dtype=torch.bool)
+            for motion_set in self.cfg.table_motion_set_names:
+                on_table |= set_ids == self.cfg.motion_set_names.index(motion_set)
+            if on_table.any():
+                support_pose[on_table, :2] = (
+                    origins[on_table, :2]
+                    + self.motion.obj_pos[clip_end_frames[on_table], :2]
+                )
+                support_pose[on_table, 2] = self.cfg.table_center_height
+            self.support.write_mocap_pose_to_sim(support_pose, env_ids=env_ids)
+
+        action = self.motion.last_action[time_steps]
+        manager = self._env.action_manager
+        if action.shape[1] != manager.total_action_dim:
+            raise ValueError(
+                f"seed action width {action.shape[1]} != action manager width "
+                f"{manager.total_action_dim}"
+            )
+        manager._action[env_ids] = action
+        manager._prev_action[env_ids] = action
+        manager._prev_prev_action[env_ids] = action
+        if not hasattr(self, "_hold_after_reset"):
+            self._hold_after_reset = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        self._hold_after_reset[env_ids] = True
+
+    def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
+        hold = getattr(self, "_hold_after_reset", None)
+        held = hold.clone() if hold is not None else None
+        if held is not None and env_ids is not None:
+            selected = torch.zeros_like(held)
+            selected[env_ids] = True
+            held &= selected
+        if held is not None and held.any():
+            frames = self.time_steps[held].clone()
+            overrun = self._steps_past_end[held].clone()
+        super()._update_command(env_ids)
+        if held is not None and held.any():
+            self.time_steps[held] = frames
+            self._steps_past_end[held] = overrun
+            hold[held] = False
+            self.update_relative_body_poses()
+
+    def _update_metrics(self) -> None:
+        super()._update_metrics()
+        position_error = torch.linalg.vector_norm(
+            self.point_target_pos_w - self.robot_point_pos_w, dim=-1
+        )
+        velocity_error = torch.linalg.vector_norm(
+            self.point_target_vel_w - self.robot_point_vel_w, dim=-1
+        )
+        self.metrics["error_point_pos_mean"] = position_error.mean(-1)
+        self.metrics["error_point_pos_max"] = position_error.amax(-1)
+        self.metrics["error_point_vel_mean"] = velocity_error.mean(-1)
+
+    def _debug_vis_impl(self, visualizer) -> None:
+        super()._debug_vis_impl(visualizer)
+        targets = self.point_target_pos_w
+        for batch in visualizer.get_env_indices(self.num_envs):
+            for point, name in zip(
+                targets[batch].cpu().numpy(), self.point_body_names, strict=True
+            ):
+                visualizer.add_sphere(
+                    center=point,
+                    radius=0.025,
+                    color=(1.0, 0.45, 0.1, 0.75),
+                    label=f"point_target_{name}_{batch}",
+                )
+
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -563,3 +923,20 @@ class ObjectMotionCommandCfg(MultiClipMotionCommandCfg):
 
     def build(self, env: ManagerBasedRlEnv) -> ObjectMotionCommand:
         return ObjectMotionCommand(self, env)
+
+
+@dataclass(kw_only=True)
+class SmplSeedObjectMotionCommandCfg(ObjectMotionCommandCfg):
+    """Named reconstructed sets plus kinematic-retarget RSI."""
+
+    motion_set_names: tuple[str, ...] = (
+        "woodchair2-floor",
+        "tire-floor",
+    )
+    interaction_names: tuple[str, ...] | None = None
+    support_entity_name: str | None = None
+    table_motion_set_names: tuple[str, ...] = ()
+    table_center_height: float = 1.0
+
+    def build(self, env: ManagerBasedRlEnv) -> SmplSeedObjectMotionCommand:
+        return SmplSeedObjectMotionCommand(self, env)

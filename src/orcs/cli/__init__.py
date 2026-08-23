@@ -4,6 +4,8 @@
     orcs-view-terrain     inspect + curate a staged source, in a browser
     orcs-build-smpl       SONIC smpl pkls -> data/smpl_motions
     orcs-rollout-smpl     roll one smpl clip through the frozen base
+    orcs-pseudo-retarget  SMPL -> assisted kinematic retarget for RSI
+    orcs-view-seeds       inspect SMPL + G1 seed + assistance in a browser
 
 These live INSIDE the package, not in `scripts/`, because `scripts/` does not
 ship in a wheel — a consumer that pip-installs orcs would otherwise get the

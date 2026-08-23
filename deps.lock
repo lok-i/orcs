@@ -8,8 +8,15 @@
     },
     "retargeted_motions": {
         "url": "https://huggingface.co/datasets/l-k-r/retargeted_motions",
-        "sha": "5b766829f5e35d186ee54fb47694ced4c74a8aa5",
+        "sha": "e635ed670162c8b4cc91dd6247d4f3b47368ab3c",
         "path": "data/retargeted_motions",
+        "pip_install": false,
+        "lfs": true
+    },
+    "reconstructed_motions": {
+        "url": "https://huggingface.co/datasets/l-k-r/reconstructed_motions",
+        "sha": "600ebb3c016c4adca0b2ffe41be4122a4f59dce1",
+        "path": "data/reconstructed_motions",
         "pip_install": false,
         "lfs": true
     },

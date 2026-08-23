@@ -8,10 +8,12 @@ the native robot one.
   Orcs-Uolm-AdaptSonic        frozen SONIC base + LoRA adapter. THE task.
   Orcs-Uolm-TaRa             tabula rasa from-scratch MLP — the no-frozen-base
                              floor to measure the adapter against.
-  Orcs-Uolm-AdaptSonic-Smpl   same agent, human SMPL command space (SONIC smpl
-                             encoder). Rollout-only: rewards + RSI are nullified
-                             in the env cfg (PR pending), so `train` on it is
-                             meaningless — use scripts/rollout_smpl.py.
+  Orcs-Uolm-AdaptSonic-Smpl   reconstructed chair-flip + selected tire-roll,
+                             source SMPL/object rewards, kinematic-retarget RSI.
+  Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl
+  Orcs-Uolm-BigCubeFloor-AdaptSonic-Smpl
+                             isolated Cube scene specializations of the same
+                             factory and recipe.
 
 Importing orcs is SILENT and never raises. `orcs.core.paths` resolves data and
 assets against the nearest repo root that HAS them, so a host project vendoring
@@ -31,7 +33,7 @@ from functools import partial
 
 from orcs.core.registry import register_all
 from orcs.core.rl import SMPL_CKPT, adapt_sonic_agent_cfg, tara_agent_cfg
-from orcs.tasks.uolm.env_cfg import uolm_env_cfg
+from orcs.tasks.uolm.env_cfg import uolm_env_cfg, uolm_smpl_env_cfg
 
 # LoRA size for THIS task's adapter (2026-08-04). rank 16 -> 28, alpha 1 -> 28.
 #
@@ -100,8 +102,16 @@ _TASKS = (
      partial(uolm_env_cfg, agent="tara"),
      partial(tara_agent_cfg, "orcs_uolm_tara")),
     ("Orcs-Uolm-AdaptSonic-Smpl",
-     partial(uolm_env_cfg, command_space="smpl"),
+     partial(uolm_smpl_env_cfg),
      partial(adapt_sonic_agent_cfg, "orcs_uolm_smpl", base_checkpoint=SMPL_CKPT)),
+    ("Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl",
+     partial(uolm_smpl_env_cfg, motion_sets=("small-cube-table",)),
+     partial(adapt_sonic_agent_cfg, "orcs_uolm_smpl_small_cube_table",
+             base_checkpoint=SMPL_CKPT)),
+    ("Orcs-Uolm-BigCubeFloor-AdaptSonic-Smpl",
+     partial(uolm_smpl_env_cfg, motion_sets=("big-cube-floor",)),
+     partial(adapt_sonic_agent_cfg, "orcs_uolm_smpl_big_cube_floor",
+             base_checkpoint=SMPL_CKPT)),
 )
 
 SKIP_REASON: dict[str, str] = register_all(_TASKS)

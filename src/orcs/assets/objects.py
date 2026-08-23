@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable, Literal, Mapping, Sequence
 
 import mujoco
+import numpy as np
 from mjlab.entity.variants import VariantEntityCfg
 
 from orcs.core.paths import assets_source
@@ -77,6 +78,37 @@ def _make_spec_fn(xml: Path) -> Callable[[], mujoco.MjSpec]:
         return spec
 
     return spec_fn
+
+
+def object_spec(
+    name: str,
+    collision: Collision = "cvx_dcmp",
+    *,
+    mesh_scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
+) -> mujoco.MjSpec:
+    """Load one shared object asset with normalized reconstructed topology.
+
+    Reconstructed motion sets sometimes use a calibrated version of a shared
+    object mesh. Scaling the copied ``MjSpec`` keeps that calibration local to
+    the source pipeline and leaves native UOLM's asset untouched.
+    """
+    spec = mujoco.MjSpec.from_file(str(_object_xml(name, collision)))
+    root_bodies = list(spec.worldbody.bodies)
+    if len(root_bodies) != 1:
+        raise ValueError(f"object asset {name!r}: expected one root body")
+    body = root_bodies[0]
+    body.name = OBJECT_BODY_NAME
+    free_joints = list(body.joints)
+    if len(free_joints) != 1 or free_joints[0].type != mujoco.mjtJoint.mjJNT_FREE:
+        raise ValueError(f"object asset {name!r}: expected one root free joint")
+    free_joints[0].name = "object_joint"
+
+    scale = np.asarray(mesh_scale, dtype=np.float64)
+    if scale.shape != (3,) or not np.isfinite(scale).all() or (scale <= 0.0).any():
+        raise ValueError(f"invalid mesh scale for {name!r}: {mesh_scale}")
+    for mesh in spec.meshes:
+        mesh.scale = np.asarray(mesh.scale) * scale
+    return spec
 
 
 def _round_robin(num_variants: int) -> Callable[[int], Sequence[int]]:

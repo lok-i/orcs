@@ -54,6 +54,8 @@ orcs-view-terrain = "orcs.cli.view_terrain_motions:main"
 orcs-build-smpl = "orcs.cli.build_smpl_dataset:main"
 orcs-rollout-smpl = "orcs.cli.rollout_smpl:main"
 orcs-make-nominal = "orcs.cli.make_nominal_motion:main"
+orcs-pseudo-retarget = "orcs.cli.pseudo_retarget:main"
+orcs-view-seeds = "orcs.cli.view_seed_motion:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]
