@@ -5,6 +5,9 @@ description = "Oracle Robot Control Synthesis — privileged-observation policie
 readme = "readme.md"
 # 3.11, not 3.10: `tomllib` (rosters) is stdlib only from 3.11.
 requires-python = ">=3.11"
+license = "BSD-3-Clause"
+license-files = ["LICENSE", "LICENSES/*", "NOTICE", "THIRD_PARTY_NOTICES.md"]
+authors = [{ name = "Lokesh Krishna", email = "lkrajan@usc.edu" }]
 dependencies = [
     # ── active ─────────────────────────────────────────────────────────────────
     "mjlab>=1.1.0",
@@ -27,7 +30,7 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["setuptools>=42"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

@@ -1,0 +1,7 @@
+ORCS — Oracle Robot Control Synthesis
+Copyright 2026 Lokesh Krishna <lkrajan@usc.edu>
+
+ORCS's original code and documentation are licensed under BSD-3-Clause.
+Adapted code and externally obtained models, datasets, and body-model files are
+not relicensed by ORCS. Their attribution and terms are recorded in
+THIRD_PARTY_NOTICES.md and LICENSES/.

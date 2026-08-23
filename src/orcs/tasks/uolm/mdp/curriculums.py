@@ -1,8 +1,8 @@
 """Virtual-force curriculum for stabilised early-stage training.
 
-Decaying virtual-force curriculum (ResMimic arXiv:2510.05070, DexMachina
-arXiv:2505.24853), ported from fcrl to mjlab: every env step a PD controller
-writes a world-frame wrench (``xfrc_applied`` via
+This ORCS implementation is informed by the decaying virtual-force curricula in
+ResMimic (arXiv:2510.05070) and DexMachina (arXiv:2505.24853). Every env step,
+a PD controller writes a world-frame wrench (``xfrc_applied`` via
 ``entity.write_external_wrench_to_sim``) pushing the object toward its
 motion-command reference. A dimensionless gain ``α(t): 1 → terminal_scale``
 decays with ``env.policy_update_count`` (written by ``PolicyUpdateCounter``)

@@ -1,4 +1,4 @@
-# orcs
+# ORCS
 
 A package for synthesizing privileged control policies for:
 
@@ -88,12 +88,38 @@ pytest
 
 See [docs/ethos.md](docs/ethos.md) for package boundaries and the task contract.
 
-## acknowledgements
+## Research provenance
 
-*"Standing on the shoulders of giants":*
+ORCS builds on virtual-assistance curricula explored by
+[DexMachina](https://arxiv.org/abs/2505.24853) and
+[ResMimic](https://arxiv.org/abs/2510.05070). Its SMPL pipeline extends that
+general idea into a seed-data construction method: a frozen motion prior is
+temporarily assisted toward SMPL landmarks and object references, the resulting
+rollouts are persisted as seed-state datasets, and the `*-Smpl` tasks refine
+those seeds under full dynamics. This seed-generation and refinement pipeline is
+an ORCS contribution; the underlying virtual-assistance idea is credited to the
+works above.
 
-1. [SONIC](https://github.com/NVlabs/GR00T-WholeBodyControl)
-2. [GRAIL](https://github.com/NVlabs/GRAIL)
-3. [OmniRetarget](https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset)
-4. [mjlab](https://github.com/mujocolab/mjlab)
-5. [rsl-rl](https://github.com/leggedrobotics/rsl_rl)
+The dodgeball task adapts the published reward from
+[MimicKit/SMP](https://github.com/xbpeng/MimicKit). See
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for its Apache-2.0 terms.
+
+## Acknowledgements
+
+ORCS relies on ideas, data, models, or infrastructure from
+[SONIC](https://github.com/NVlabs/GR00T-WholeBodyControl),
+[GRAIL](https://github.com/NVlabs/GRAIL),
+[OmniRetarget](https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset),
+[DexMachina](https://github.com/MandiZhao/dexmachina),
+[ResMimic](https://resmimic.github.io/),
+[MimicKit](https://github.com/xbpeng/MimicKit),
+[mjlab](https://github.com/mujocolab/mjlab), and
+[RSL-RL](https://github.com/leggedrobotics/rsl_rl). Please cite the relevant
+papers and datasets when using those parts of the system.
+
+## License
+
+Copyright 2026 Lokesh Krishna (`lkrajan@usc.edu`). ORCS's original code and
+documentation are available under the [BSD 3-Clause License](LICENSE).
+Third-party code, models, datasets, and body-model files retain their upstream
+terms; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
