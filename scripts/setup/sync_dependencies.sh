@@ -6,6 +6,7 @@
 #   2. if `lfs`: git lfs pull
 #   3. if `pip_install`: install -e <path> into the active env
 #      (auto-picks `pip` for conda, `uv pip` for uv; override: DEPS_PIP_CMD)
+#   4. generate machine-local object XMLs through the installed assets package
 #
 # Idempotent: skips fetch when HEAD already matches the pinned SHA.
 # Assumes: git-lfs binary is on PATH; an active conda/venv if any entry has pip_install=true.
@@ -195,3 +196,7 @@ while IFS='|' read -r name url sha rel_path pip_install lfs pip_subpath unzip_cs
     [ -z "$name" ] && continue
     sync_one "$name" "$url" "$sha" "$rel_path" "$pip_install" "$lfs" "$pip_subpath" "$unzip_csv" "$pip_no_deps"
 done <<< "$entries"
+
+echo
+echo "=== generate: assets ==="
+python3 -m assets.cli generate --quiet

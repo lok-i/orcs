@@ -6,13 +6,12 @@ object i % K) and fixed for the whole run. The authoritative env->object table
 is `env.sim.world_to_variant["<entity>"]` — consumers (ObjectMotionCommand)
 read it from there, never recompute.
 
-Object assets come from the ``assets`` dep: each object dir ships generated
-MuJoCo bodies (`<name>_cvx_dcmp.xml` / `<name>_cvx_hull.xml`, see
-make_object_models.py) with a freejoint, per-geom convex-part masses, and a
-textured visual mesh. The root body is renamed to a common OBJECT_BODY_NAME so
-all variants share one kinematic topology (a VariantEntityCfg requirement) and
-so contact sensors can match by body, independent of hull-vs-decomposition geom
-counts.
+Object sources come from the ``assets`` dep; ``assets generate`` writes the
+machine-local MuJoCo bodies (`<name>_cvx_dcmp.xml` / `<name>_cvx_hull.xml`).
+The package resolver checks those generated files before tracked content. The
+root body is renamed to a common OBJECT_BODY_NAME so all variants share one
+kinematic topology (a VariantEntityCfg requirement) and contact sensors can
+match by body, independent of hull-vs-decomposition geom counts.
 """
 
 from __future__ import annotations
@@ -33,16 +32,39 @@ OBJECT_BODY_NAME = "object"
 Collision = Literal["cvx_dcmp", "cvx_hull"]
 
 
+def _asset_resolver() -> Callable[..., Path] | None:
+    """Return the clean resolver without making assets import-required.
+
+    A fresh ORCS checkout must still import before dependencies are synced, and
+    the legacy assets package has no resolver. Missing data then follows the
+    skipped-registration path instead of breaking ``import orcs``.
+    """
+    try:
+        import assets
+    except ModuleNotFoundError as error:
+        if error.name != "assets":
+            raise
+        return None
+    return getattr(assets, "resolve_asset", None)
+
+
 def _object_xml(name: str, collision: str) -> Path:
+    resolve = _asset_resolver()
     source = assets_source()
     for group in _OBJECT_GROUPS:
-        xml = source / group / name / f"{name}_{collision}.xml"
+        parts = (group, name, f"{name}_{collision}.xml")
+        if resolve is not None:
+            try:
+                return resolve(*parts)
+            except FileNotFoundError:
+                pass
+        xml = source.joinpath(*parts)
         if xml.exists():
             return xml
     raise FileNotFoundError(
-        f"No {name}_{collision}.xml for object '{name}' under "
-        f"{source}/{{{','.join(_OBJECT_GROUPS)}}}/{name}/ — generate it "
-        "with dependencies/assets/source/omni_objects/make_object_models.py"
+        f"No {name}_{collision}.xml for object '{name}' in the generated or "
+        f"tracked assets roots (groups: {','.join(_OBJECT_GROUPS)}). Run "
+        "`assets generate`."
     )
 
 

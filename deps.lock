@@ -1,7 +1,7 @@
 {
     "assets": {
         "url": "git@github.com:drcl-deploy/assets.git",
-        "sha": "bcf1fff3bdf90d4739d872e374e8757c4bc4422d",
+        "sha": "90e226008bda5edc9c07ca3eb69f9f79c4603de1",
         "path": "dependencies/assets",
         "pip_install": true,
         "lfs": true
@@ -15,7 +15,7 @@
     },
     "mocke": {
         "url": "git@github.com:lok-i/mocke.git",
-        "sha": "004d4c02bb1be65c67688f25f95197c865f83d6f",
+        "sha": "7d2d274a5f14bf92952d7cd9a34ac52b389ca729",
         "path": "dependencies/mocke",
         "pip_install": true,
         "pip_no_deps": true,

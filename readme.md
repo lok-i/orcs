@@ -22,8 +22,8 @@ pip install -e .
 #    reads deps.lock; idempotent; needs git-lfs on PATH
 bash scripts/setup/sync_dependencies.sh
 
-# 3. generate object collision/visual XMLs (machine-generated, not tracked)
-python dependencies/assets/source/omni_objects/make_object_models.py --all
+# 3. generate object collision/visual XMLs in the per-user asset cache
+assets generate
 
 # 4. (optional) editor + Claude config for this machine
 bash scripts/setup/let_there_be_light.sh
