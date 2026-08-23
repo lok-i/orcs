@@ -119,7 +119,5 @@ papers and datasets when using those parts of the system.
 
 ## License
 
-Copyright 2026 Lokesh Krishna (`lkrajan@usc.edu`). ORCS's original code and
-documentation are available under the [BSD 3-Clause License](LICENSE).
-Third-party code, models, datasets, and body-model files retain their upstream
-terms; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+ORCS's original code and documentation are available under the [BSD 3-Clause License](LICENSE). Third-party code, models, datasets, and body-model files retain their upstream
+terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
