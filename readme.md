@@ -9,9 +9,9 @@ A package for synthesizing privileged control policies for:
 ## supported tasks
 <table>
   <tr>
-    <td align="center" width="50%">
-      <a href="src/orcs/tasks/perloco"><img width="360" src="docs/media/perloco_grail.gif" alt="Orcs-PerLoco-Grail-AdaptSonic"></a><br>
-      <code>Orcs-PerLoco-Grail-AdaptSonic</code>
+    <td align="center">
+      <a href="src/orcs/tasks/perloco"><img width="360" src="docs/media/perloco_omre.gif" alt="Orcs-PerLoco-OmRe-AdaptSonic"></a><br>
+      <code>Orcs-PerLoco-OmRe-AdaptSonic</code>
     </td>
     <td align="center" width="50%">
       <a href="src/orcs/tasks/uolm"><img width="360" src="docs/media/smallbox_table_smpl.gif" alt="Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl"></a><br>
@@ -19,9 +19,9 @@ A package for synthesizing privileged control policies for:
     </td>
   </tr>
   <tr>
-    <td align="center">
-      <a href="src/orcs/tasks/perloco"><img width="360" src="docs/media/perloco_grail_smpl.gif" alt="Orcs-PerLoco-Grail-AdaptSonic-Smpl"></a><br>
-      <code>Orcs-PerLoco-Grail-AdaptSonic-Smpl</code>
+    <td align="center" width="50%">
+      <a href="src/orcs/tasks/perloco"><img width="360" src="docs/media/perloco_grail.gif" alt="Orcs-PerLoco-Grail-AdaptSonic"></a><br>
+      <code>Orcs-PerLoco-Grail-AdaptSonic</code>
     </td>
     <td align="center">
       <a href="src/orcs/tasks/dodge"><img width="360" src="docs/media/dodge.gif" alt="Orcs-Dodge-AdaptSonic"></a><br>
@@ -30,8 +30,8 @@ A package for synthesizing privileged control policies for:
   </tr>
   <tr>
     <td align="center">
-      <a href="src/orcs/tasks/perloco"><img width="360" src="docs/media/perloco_omre.gif" alt="Orcs-PerLoco-OmRe-AdaptSonic"></a><br>
-      <code>Orcs-PerLoco-OmRe-AdaptSonic</code>
+      <a href="src/orcs/tasks/perloco"><img width="360" src="docs/media/perloco_grail_smpl.gif" alt="Orcs-PerLoco-Grail-AdaptSonic-Smpl"></a><br>
+      <code>Orcs-PerLoco-Grail-AdaptSonic-Smpl</code>
     </td>
     <td align="center">
       <code>Orcs-Uolm-AdaptSonic</code><br>
@@ -95,7 +95,7 @@ train Orcs-PerLoco-Grail-AdaptSonic --env.scene.num-envs 4096
 
 ## paths
 
-ORCS resolves data and dependencies from the host repository when vendored.
+`orcs resolves data and dependencies from the host repository when vendored.
 Override them only when the default layout is unsuitable:
 
 | variable | default |
@@ -104,15 +104,6 @@ Override them only when the default layout is unsuitable:
 | `ORCS_DEPS_ROOT` | `<repo>/dependencies` |
 | `ORCS_ASSETS_SOURCE` | host assets checkout, then installed `assets` package |
 | `ORCS_SMPLX_DIR` | `<deps>/GRAIL/imports/GEM-SMPL/inputs/checkpoints/body_models` |
-
-## development
-
-```bash
-ruff check src scripts tests
-pytest
-```
-
-See [docs/ethos.md](docs/ethos.md) for package boundaries and the task contract.
 
 ## research provenance
 
@@ -126,7 +117,7 @@ The dodgeball task adapts the published reward from
 
 ## acknowledgements
 
-ORCS relies on ideas, data, models, or infrastructure from
+`orcs` relies on ideas, data, models, or infrastructure from
 [SONIC](https://github.com/NVlabs/GR00T-WholeBodyControl),
 [GRAIL](https://github.com/NVlabs/GRAIL),
 [OmniRetarget](https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset),
@@ -139,5 +130,5 @@ papers and datasets when using those parts of the system.
 
 ## license
 
-ORCS's original code and documentation are available under the [BSD 3-Clause License](LICENSE). Third-party code, models, datasets, and body-model files retain their upstream
+`orcs`'s original code and documentation are available under the [BSD 3-Clause License](LICENSE). Third-party code, models, datasets, and body-model files retain their upstream
 terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
