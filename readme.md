@@ -1,17 +1,89 @@
-# ORCS
+# <img src="docs/media/logo.png" alt="" height="20"> orcs
 
 A package for synthesizing privileged control policies for:
 
-1. teacher-student distillation;
-2. kinodynamic retargeting of human motions.
+1. LoRA PEFT and *tabula rasa* training 
+2. teacher policies for distillation 
+3. kinodynamic retargeting of human motions.
 
 ## supported tasks
-
-| task | tag | privileged input |
-|---|---|---|
-| omni-object loco-manipulation | `Orcs-Uolm-*` | object kinematic state |
-| perceptive locomotion | `Orcs-PerLoco-*` | terrain height scan |
-| dodgeball | `Orcs-Dodge-*` | object kinematic state |
+<table>
+  <tr>
+    <td colspan="3"><h3>omni-object loco-manipulation</h3></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <a href="src/orcs/tasks/uolm">
+        <img width="320" src="docs/media/smallbox_table_smpl.gif" alt="Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl">
+      </a>
+    </td>
+    <td align="center" width="33%">
+    </td>
+    <td align="center" width="33%">
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <code>Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl</code>
+    </td>
+    <td align="center" width="33%">
+      <code>Orcs-Uolm-AdaptSonic</code>
+    </td>
+    <td align="center" width="33%">
+      <code>Orcs-Uolm-AdaptSonic-Smpl</code>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="3"><h3>perceptive locomotion</h3></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <a href="src/orcs/tasks/perloco">
+        <img width="320" src="docs/media/perloco_grail.gif" alt="Orcs-PerLoco-Grail-AdaptSonic">
+      </a>
+    </td>
+    <td align="center" width="33%">
+      <a href="src/orcs/tasks/perloco">
+        <img width="320" src="docs/media/perloco_grail_smpl.gif" alt="Orcs-PerLoco-Grail-AdaptSonic-Smpl">
+      </a>
+    </td>
+    <td align="center" width="33%">
+      <a href="src/orcs/tasks/perloco">
+        <img width="320" src="docs/media/perloco_omre.gif" alt="Orcs-PerLoco-OmRe-AdaptSonic">
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <code>Orcs-PerLoco-Grail-AdaptSonic</code>
+    </td>
+    <td align="center" width="33%">
+      <code>Orcs-PerLoco-Grail-AdaptSonic-Smpl</code>
+    </td>
+    <td align="center" width="33%">
+      <code>Orcs-PerLoco-OmRe-AdaptSonic</code>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="3"><h3>dodgeball</h3></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <a href="src/orcs/tasks/dodge">
+        <img width="320" src="docs/media/dodge.gif" alt="Orcs-Dodge-AdaptSonic">
+      </a>
+    </td>
+    <td align="center" width="33%"></td>
+    <td align="center" width="33%"></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <code>Orcs-Dodge-AdaptSonic</code>
+    </td>
+    <td align="center" width="33%"></td>
+    <td align="center" width="33%"></td>
+  </tr>
+</table>
 
 ## install
 
@@ -44,12 +116,11 @@ Missing optional datasets suppress only their corresponding task rows. Inspect
 > Import `mjlab` first before importing ORCS task, asset, or MJLab-backed core
 > submodules directly.
 
-## data workflows
+## setup
 
 - [Perceptive locomotion](docs/perceptive_locomotion.md): fetch and stage the
   OmniRetarget or GRAIL terrain-motion datasets.
-- [SMPL retargeting](docs/smpl_retargeting.md): kinematically retarget the full
-  GRAIL or reconstructed UOLM corpus, then launch the matching `*-Smpl` task
+- [SMPL retargeting](docs/smpl_retargeting.md): kinematically retarget a target datset and then launch the matching `*-Smpl` task
   for dynamics refinement.
 
 > [!NOTE]
@@ -88,23 +159,17 @@ pytest
 
 See [docs/ethos.md](docs/ethos.md) for package boundaries and the task contract.
 
-## Research provenance
+## research provenance
 
-ORCS builds on virtual-assistance curricula explored by
+The virtual-force curricula was explored by
 [DexMachina](https://arxiv.org/abs/2505.24853) and
-[ResMimic](https://arxiv.org/abs/2510.05070). Its SMPL pipeline extends that
-general idea into a seed-data construction method: a frozen motion prior is
-temporarily assisted toward SMPL landmarks and object references, the resulting
-rollouts are persisted as seed-state datasets, and the `*-Smpl` tasks refine
-those seeds under full dynamics. This seed-generation and refinement pipeline is
-an ORCS contribution; the underlying virtual-assistance idea is credited to the
-works above.
+[ResMimic](https://arxiv.org/abs/2510.05070)
 
 The dodgeball task adapts the published reward from
 [MimicKit/SMP](https://github.com/xbpeng/MimicKit). See
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for its Apache-2.0 terms.
 
-## Acknowledgements
+## acknowledgements
 
 ORCS relies on ideas, data, models, or infrastructure from
 [SONIC](https://github.com/NVlabs/GR00T-WholeBodyControl),
@@ -117,7 +182,7 @@ ORCS relies on ideas, data, models, or infrastructure from
 [RSL-RL](https://github.com/leggedrobotics/rsl_rl). Please cite the relevant
 papers and datasets when using those parts of the system.
 
-## License
+## license
 
 ORCS's original code and documentation are available under the [BSD 3-Clause License](LICENSE). Third-party code, models, datasets, and body-model files retain their upstream
 terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

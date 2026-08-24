@@ -7,9 +7,11 @@ wandb/
 logs/
 *.onnx
 *.npz
+*.mp4
 # device-specific config (managed by let_there_be_light.sh)
 /data/
 /dependencies/
+/videos/
 .claude/settings.json
 .claude/settings.local.json
 .vscode/settings.json
