@@ -9,79 +9,34 @@ A package for synthesizing privileged control policies for:
 ## supported tasks
 <table>
   <tr>
-    <td colspan="3"><h3>omni-object loco-manipulation</h3></td>
-  </tr>
-  <tr>
-    <td align="center" width="33%">
-      <a href="src/orcs/tasks/uolm">
-        <img width="320" src="docs/media/smallbox_table_smpl.gif" alt="Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl">
-      </a>
-    </td>
-    <td align="center" width="33%">
-    </td>
-    <td align="center" width="33%">
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="33%">
-      <code>Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl</code>
-    </td>
-    <td align="center" width="33%">
-      <code>Orcs-Uolm-AdaptSonic</code>
-    </td>
-    <td align="center" width="33%">
-      <code>Orcs-Uolm-AdaptSonic-Smpl</code>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="3"><h3>perceptive locomotion</h3></td>
-  </tr>
-  <tr>
-    <td align="center" width="33%">
-      <a href="src/orcs/tasks/perloco">
-        <img width="320" src="docs/media/perloco_grail.gif" alt="Orcs-PerLoco-Grail-AdaptSonic">
-      </a>
-    </td>
-    <td align="center" width="33%">
-      <a href="src/orcs/tasks/perloco">
-        <img width="320" src="docs/media/perloco_grail_smpl.gif" alt="Orcs-PerLoco-Grail-AdaptSonic-Smpl">
-      </a>
-    </td>
-    <td align="center" width="33%">
-      <a href="src/orcs/tasks/perloco">
-        <img width="320" src="docs/media/perloco_omre.gif" alt="Orcs-PerLoco-OmRe-AdaptSonic">
-      </a>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="33%">
+    <td align="center" width="50%">
+      <a href="src/orcs/tasks/perloco"><img width="360" src="docs/media/perloco_grail.gif" alt="Orcs-PerLoco-Grail-AdaptSonic"></a><br>
       <code>Orcs-PerLoco-Grail-AdaptSonic</code>
     </td>
-    <td align="center" width="33%">
+    <td align="center" width="50%">
+      <a href="src/orcs/tasks/uolm"><img width="360" src="docs/media/smallbox_table_smpl.gif" alt="Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl"></a><br>
+      <code>Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl</code>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="src/orcs/tasks/perloco"><img width="360" src="docs/media/perloco_grail_smpl.gif" alt="Orcs-PerLoco-Grail-AdaptSonic-Smpl"></a><br>
       <code>Orcs-PerLoco-Grail-AdaptSonic-Smpl</code>
     </td>
-    <td align="center" width="33%">
-      <code>Orcs-PerLoco-OmRe-AdaptSonic</code>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="3"><h3>dodgeball</h3></td>
-  </tr>
-  <tr>
-    <td align="center" width="33%">
-      <a href="src/orcs/tasks/dodge">
-        <img width="320" src="docs/media/dodge.gif" alt="Orcs-Dodge-AdaptSonic">
-      </a>
-    </td>
-    <td align="center" width="33%"></td>
-    <td align="center" width="33%"></td>
-  </tr>
-  <tr>
-    <td align="center" width="33%">
+    <td align="center">
+      <a href="src/orcs/tasks/dodge"><img width="360" src="docs/media/dodge.gif" alt="Orcs-Dodge-AdaptSonic"></a><br>
       <code>Orcs-Dodge-AdaptSonic</code>
     </td>
-    <td align="center" width="33%"></td>
-    <td align="center" width="33%"></td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="src/orcs/tasks/perloco"><img width="360" src="docs/media/perloco_omre.gif" alt="Orcs-PerLoco-OmRe-AdaptSonic"></a><br>
+      <code>Orcs-PerLoco-OmRe-AdaptSonic</code>
+    </td>
+    <td align="center">
+      <code>Orcs-Uolm-AdaptSonic</code><br>
+      <code>Orcs-Uolm-AdaptSonic-Smpl</code>
+    </td>
   </tr>
 </table>
 
