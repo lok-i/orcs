@@ -34,8 +34,9 @@ A package for synthesizing privileged control policies for:
       <code>Orcs-PerLoco-Grail-AdaptSonic-Smpl</code>
     </td>
     <td align="center">
+      <a href="src/orcs/tasks/uolm"><img width="360" src="docs/media/uolm.gif" alt="Orcs-Uolm-AdaptSonic"></a><br>
       <code>Orcs-Uolm-AdaptSonic</code><br>
-      <code>Orcs-Uolm-AdaptSonic-Smpl</code>
+      <!-- <code>Orcs-Uolm-AdaptSonic-Smpl</code> -->
     </td>
   </tr>
 </table>
