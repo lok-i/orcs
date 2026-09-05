@@ -25,7 +25,14 @@ Nothing here names an object, a terrain, or a dataset.
 
 from __future__ import annotations
 
-from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
+import dataclasses
+
+from mjlab.rl import (
+    RslRlBaseRunnerCfg,
+    RslRlModelCfg,
+    RslRlOnPolicyRunnerCfg,
+    RslRlPpoAlgorithmCfg,
+)
 from mocke import PRETRAINED_DIR
 
 __all__ = [
@@ -35,6 +42,8 @@ __all__ = [
     "NUM_STEPS_PER_ENV", "MAX_ITERATIONS", "SAVE_INTERVAL",
     "runner", "sonic_adapter_actor", "mlp_actor", "sidecar_actor",
     "adapt_sonic_agent_cfg", "tara_agent_cfg", "sidecar_agent_cfg",
+    "DistillAlgorithmCfg", "DistillRunnerCfg",
+    "distill_agent_cfg", "priv_distill_agent_cfg",
 ]
 
 SONIC_CKPT = str(PRETRAINED_DIR / "sonic/last_ported.pt")
@@ -240,3 +249,148 @@ def sidecar_agent_cfg(
         base_checkpoint=base_checkpoint,
         sidecar_obs_group=sidecar_obs_group)
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# Distillation — the SECOND tier: a gradient that comes from a teacher, not
+# from returns. Everything above trains with PPO; nothing below declares one.
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class DistillAlgorithmCfg:
+    """Online behavior cloning (`rsl_rl.algorithms.Distillation`), BC only.
+
+    The student rolls out and the teacher labels the SAME states, so this is DAgger
+    by construction rather than offline BC — there is no fixed dataset, and the
+    covariate shift the student creates is exactly what gets labelled.
+
+    `gradient_length=1` is not the upstream default (15) and is the one number here
+    that must not be raised carelessly: the storage generator hands out one stored
+    timestep at a time, so N accumulates N live graphs before stepping. With 1, an
+    iteration is `num_steps_per_env` gradient steps over full-width batches (24 vs
+    PPO's 5 epochs x 4 minibatches = 20), which is the parity that makes a `-Bcd`
+    row readable against its PPO twin.
+
+    `loss_type` stays rsl_rl's `mse` — unweighted mean over action dims. `"kl"` is
+    the sigma-weighted alternative (measured span 2.84x across SONIC's joints), and
+    it is BOTH KL directions at once: student and teacher share one FROZEN sigma, so
+    forward and reverse collapse to the same quadratic in the means. It does not
+    move the optimum, only the gradient allocation — a variable to test, not a
+    default to assume. `ZDistill/gap_sigma` reports the residual in sigma units
+    regardless of which is chosen.
+    """
+
+    class_name: str = "rsl_rl.algorithms.Distillation"
+    num_learning_epochs: int = 1
+    gradient_length: int = 1
+    learning_rate: float = 1.0e-3
+    """Fixed. PPO's adaptive-KL schedule needs an old policy to measure against;
+    BC has none, so this is PPO's starting LR held constant."""
+    max_grad_norm: float = 1.0
+    loss_type: str = "mse"
+    kl_direction: str = "reverse"
+    """"forward" = KL(T||S) mode-covering, "reverse" = KL(S||T) mode-seeking. Inert
+    while student and teacher share one FROZEN sigma (measured element-wise identical
+    on SONIC): the log and trace terms cancel and both directions are the same
+    quadratic in the means. It bites only if a learnable std or a different
+    `std_scale` ever puts the two bands apart — exactly when a silently hard-coded
+    direction would have been wrong."""
+    optimizer: str = "adam"
+
+
+@dataclasses.dataclass
+class DistillRunnerCfg(RslRlBaseRunnerCfg):
+    """Student/teacher runner cfg — mjlab's BASE runner cfg, not the on-policy one.
+
+    `RslRlOnPolicyRunnerCfg` adds `actor`/`critic`; a distillation run has neither
+    (`Distillation.construct_algorithm` reads `student`/`teacher`), and carrying two
+    dead fields into every dumped `agent.yaml` is how a reader learns to stop
+    trusting the config. mjlab splits the base out for exactly this, and its train
+    script types `TrainConfig.agent` as the base.
+
+    Declares no amp / compile / nan-guard knob. rsl_rl reads all three with a
+    `cfg.get(...)` default, so absent means `amp_dtype=None` and
+    `torch_compile_mode=None` (both inert, and autocasting a proprio MLP buys
+    nothing — `Distillation.set_amp` touches the student only) while
+    `check_for_nan` stays at its `True` default. A consumer that wants them
+    declared mixes its own knobs in; vibe does, because a vision student is where
+    bf16 is worth 1.3x.
+    """
+
+    student: dict = dataclasses.field(default_factory=dict)
+    teacher: dict = dataclasses.field(default_factory=dict)
+    algorithm: DistillAlgorithmCfg = dataclasses.field(default_factory=DistillAlgorithmCfg)
+
+
+def distill_agent_cfg(
+    experiment_name: str,
+    *,
+    student: dict,
+    teacher: dict,
+    obs_groups: dict | None = None,
+    **algorithm_kw,
+) -> DistillRunnerCfg:
+    """Frozen teacher -> student, behavior cloning only.
+
+    `student` and `teacher` are actor dicts, and the pairing IS the experiment: pass
+    the PPO row's actor verbatim as the student, so the only difference between a
+    `-Bcd` row and its PPO twin is where the gradient comes from.
+
+    No teacher path is declared here. The teacher is whatever checkpoint gets loaded
+    over it — `train --agent.resume True --wandb-run-path <run>` routes an RL
+    checkpoint's `actor_state_dict` into the teacher and nothing else
+    (`Distillation.load`), and `DistillRunner` refuses to train without one.
+
+    Both models read `policy` as their proprio stream; their adapter and any
+    extractor groups are read BY NAME off the observation dict, so `obs_groups`
+    never mentions them.
+    """
+    return DistillRunnerCfg(
+        experiment_name=experiment_name,
+        num_steps_per_env=NUM_STEPS_PER_ENV,
+        max_iterations=MAX_ITERATIONS,
+        save_interval=SAVE_INTERVAL,
+        obs_groups=obs_groups or {"student": ("policy",), "teacher": ("policy",)},
+        student=student,
+        teacher=teacher,
+        algorithm=DistillAlgorithmCfg(**algorithm_kw),
+    )
+
+
+def priv_distill_agent_cfg(
+    experiment_name: str,
+    *,
+    rank: int = 16,
+    alpha: float = 1.0,
+    base_checkpoint: str = SONIC_CKPT,
+    adapter_obs_group: str = "augmentation",
+    std_scale: float | dict[str, float] = 1.0,
+    **algorithm_kw,
+) -> DistillRunnerCfg:
+    """The IDENTIFIABILITY control: a PRIVILEGED student cloned from its own teacher.
+
+    Student and teacher are the same architecture reading the same obs group, so the
+    student can represent the teacher EXACTLY — its LoRA has a target it can reach to
+    machine precision. That makes the BC loss a test of the machinery and nothing
+    else:
+
+        loss -> ~0   the distillation path (storage layout, teacher load, optimizer,
+                     gradient flow) is sound, and a vision student's plateau is then
+                     about what a camera can and cannot resolve.
+        loss flat    the plumbing is broken, and no amount of extractor tuning on the
+                     exteroceptive row will find it.
+
+    ⚠ The actor kwargs must MATCH THE TEACHER'S. They default to
+    `sonic_adapter_actor`'s (rank 16, alpha 1.0), which is what perloco trains with;
+    uolm passes rank 28 / alpha 28 / `std_scale` 1.3. Mismatch them and the student
+    cannot represent the teacher, which is the one thing this row exists to rule out.
+    """
+    actor = dict(rank=rank, alpha=alpha, base_checkpoint=base_checkpoint,
+                 adapter_obs_group=adapter_obs_group, std_scale=std_scale)
+    return distill_agent_cfg(
+        experiment_name,
+        student=sonic_adapter_actor(**actor),
+        teacher=sonic_adapter_actor(**actor),
+        **algorithm_kw,
+    )

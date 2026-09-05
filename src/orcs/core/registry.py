@@ -22,19 +22,27 @@ MISSING_DATA = (FileNotFoundError, NotADirectoryError, OSError)
 propagates — a typo in a cfg must not masquerade as a missing dataset."""
 
 TaskRow = tuple[str, Callable[..., object], Callable[[], object]]
-"""(task_id, env_cfg factory taking `play=`, rl_cfg factory taking nothing)."""
+"""(task_id, env_cfg factory taking `play=`, rl_cfg factory taking nothing).
+
+A fourth element is optional: the `runner_cls` mjlab should build for this row.
+PPO rows omit it and get mjlab's default; a `-Bcd` row names `DistillRunner`,
+whose teacher guard is the only thing standing between a distillation run with
+no teacher and a plausible-looking loss curve.
+"""
 
 
 def register_all(rows: Iterable[TaskRow]) -> dict[str, str]:
     """Register each row; return {task_id: reason} for the ones that could not."""
     skipped: dict[str, str] = {}
-    for task_id, env_cfg, rl_cfg in rows:
+    for task_id, env_cfg, rl_cfg, *rest in rows:
+        runner_cls = rest[0] if rest else None
         try:
             register_mjlab_task(
                 task_id=task_id,
                 env_cfg=env_cfg(),
                 play_env_cfg=env_cfg(play=True),
                 rl_cfg=rl_cfg(),
+                **({"runner_cls": runner_cls} if runner_cls is not None else {}),
             )
         except MISSING_DATA as e:
             skipped[task_id] = f"{type(e).__name__}: {e}"

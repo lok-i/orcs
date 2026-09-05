@@ -36,7 +36,13 @@ the signal; `SKIP_REASON` is the explanation:
 from functools import partial
 
 from orcs.core.registry import register_all
-from orcs.core.rl import SMPL_CKPT, adapt_sonic_agent_cfg, tara_agent_cfg
+from orcs.core.rl import (
+    SMPL_CKPT,
+    adapt_sonic_agent_cfg,
+    priv_distill_agent_cfg,
+    tara_agent_cfg,
+)
+from orcs.core.runner import DistillRunner
 from orcs.tasks.perloco.env_cfg import grail_env_cfg, omni_env_cfg
 
 # The agents come from `orcs.core.rl` — a task picks one and names its
@@ -57,6 +63,16 @@ _TASKS = (
     ("Orcs-PerLoco-Grail-AdaptSonic-Smpl",
      partial(grail_env_cfg, agent="sonic", command_space="smpl"),
      partial(_smpl_sonic, "orcs_perloco_grail_smpl")),
+    # The IDENTIFIABILITY control, Grail only: a PRIVILEGED student cloned from
+    # `Orcs-PerLoco-Grail-AdaptSonic` on this env unmodified. Nothing to swap and no
+    # second obs group — student and teacher both read `augmentation`, height scan
+    # included — so the BC loss tests the distillation machinery alone. OmRe gets one
+    # when it has a teacher worth cloning. Actor numbers are `adapt_sonic_agent_cfg`'s
+    # defaults, which is what this task's PPO rows train with.
+    ("Orcs-PerLoco-Grail-AdaptSonic-Bcd",
+     partial(grail_env_cfg, agent="sonic"),
+     partial(priv_distill_agent_cfg, "orcs_perloco_grail_bcd"),
+     DistillRunner),
     ("Orcs-PerLoco-Grail-TaRa",
      partial(grail_env_cfg, agent="tara"),
      partial(tara_agent_cfg, "orcs_perloco_grail_tara")),

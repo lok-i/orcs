@@ -30,7 +30,13 @@ A missing task is the signal; `SKIP_REASON` is the explanation:
 from functools import partial
 
 from orcs.core.registry import register_all
-from orcs.core.rl import SMPL_CKPT, adapt_sonic_agent_cfg, tara_agent_cfg
+from orcs.core.rl import (
+    SMPL_CKPT,
+    adapt_sonic_agent_cfg,
+    priv_distill_agent_cfg,
+    tara_agent_cfg,
+)
+from orcs.core.runner import DistillRunner
 from orcs.tasks.uolm.env_cfg import uolm_env_cfg
 
 # LoRA size for THIS task's adapter (2026-08-04). rank 16 -> 28, alpha 1 -> 28.
@@ -102,6 +108,17 @@ _TASKS = (
     ("Orcs-Uolm-AdaptSonic-Smpl",
      partial(uolm_env_cfg, command_space="smpl"),
      partial(adapt_sonic_agent_cfg, "orcs_uolm_smpl", base_checkpoint=SMPL_CKPT)),
+    # The IDENTIFIABILITY control for every distilled uolm row: a PRIVILEGED
+    # student cloned from `Orcs-Uolm-AdaptSonic`, on this env unmodified. Student
+    # and teacher differ in nothing but their weights, so the student CAN match the
+    # teacher exactly and the BC loss reads as a test of the distillation machinery
+    # rather than of an exteroception. The actor numbers are THE task's — a
+    # mismatch would break the one property the row exists to provide.
+    ("Orcs-Uolm-AdaptSonic-Bcd",
+     partial(uolm_env_cfg),
+     partial(priv_distill_agent_cfg, "orcs_uolm_bcd",
+             rank=_ADAPTER_RANK, alpha=_ADAPTER_RANK, std_scale=_STD_SCALE),
+     DistillRunner),
 )
 
 SKIP_REASON: dict[str, str] = register_all(_TASKS)
