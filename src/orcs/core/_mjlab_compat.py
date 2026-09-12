@@ -166,7 +166,7 @@ def _muffle_mesh_support_warning() -> None:
 
 
 def _patch_play_init_agent() -> None:
-    """Add ``--agent initial`` to mjlab's play script (no core edits, no fork).
+    """Add ORCS ``initial`` and ``release`` agents to mjlab's play script.
 
     "initial" = instantiate the task's ACTUAL agent (actor cfg, base_checkpoint
     and all) but load NO training checkpoint — the freshly constructed policy
@@ -180,7 +180,7 @@ def _patch_play_init_agent() -> None:
     picks up the widened Literal; video/ckpt-hotswap are trained-only and
     stay untouched.
     """
-    from dataclasses import asdict, dataclass
+    from dataclasses import asdict, dataclass, replace
 
     import torch
 
@@ -193,9 +193,25 @@ def _patch_play_init_agent() -> None:
 
     @dataclass(frozen=True)
     class PlayConfig(_OrigPlayConfig):  # type: ignore[misc, valid-type]
-        agent: Literal["zero", "random", "trained", "initial"] = "trained"
+        agent: Literal["zero", "random", "trained", "initial", "release"] = "trained"
 
     def run_play(task_id: str, cfg):
+        if cfg.agent == "release":
+            conflicts = [
+                name
+                for name in ("checkpoint_file", "wandb_run_path", "wandb_checkpoint_name")
+                if getattr(cfg, name, None) is not None
+            ]
+            if conflicts:
+                joined = ", ".join(f"--{name.replace('_', '-')}" for name in conflicts)
+                raise ValueError(f"--agent release cannot be combined with {joined}")
+
+            from orcs.release import ensure_released_model
+
+            checkpoint = ensure_released_model(task_id)
+            cfg = replace(cfg, agent="trained", checkpoint_file=str(checkpoint))
+            return _orig_run_play(task_id, cfg)
+
         if cfg.agent != "initial":
             return _orig_run_play(task_id, cfg)
 

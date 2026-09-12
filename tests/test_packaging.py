@@ -48,6 +48,10 @@ def test_rosters_ship(wheel):
         assert f"orcs/tasks/perloco/rosters/{r.name}" in names
 
 
+def test_release_manifest_ships(wheel):
+    assert "orcs/release.json" in set(wheel.namelist())
+
+
 def test_cli_ships(wheel):
     """`scripts/` is not packaged, so the data pipeline has to live in the
     package or a pip-installed orcs can consume data it cannot produce."""

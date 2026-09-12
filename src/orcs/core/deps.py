@@ -22,8 +22,8 @@ import subprocess
 from pathlib import Path
 
 VALIDATED: dict[str, str] = {
-    "mocke": "7d2d274a5f14bf92952d7cd9a34ac52b389ca729",
-    "rsl_rl": "4f8b9b3b657f27397a3337dabafb7ef7398387b4",
+    "mocke": "d7e2bbe22fbb93231cc12a738eb2585771081ca6",
+    "rsl_rl": "7a28369ae0295a232ff3dad9913e811ee87cf4d0",
 }
 """SHAs orcs was last validated against. Bump only after `play Orcs-Uolm-AdaptSonic
 --agent initial` still rolls the frozen base bit-exact."""

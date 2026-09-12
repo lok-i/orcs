@@ -22,7 +22,7 @@
     },
     "mocke": {
         "url": "git@github.com:lok-i/mocke.git",
-        "sha": "7d2d274a5f14bf92952d7cd9a34ac52b389ca729",
+        "sha": "d7e2bbe22fbb93231cc12a738eb2585771081ca6",
         "path": "dependencies/mocke",
         "pip_install": true,
         "pip_no_deps": true,
@@ -30,7 +30,7 @@
     },
     "rsl_rl": {
         "url": "git@github.com:lok-i/rsl_rl.git",
-        "sha": "4f8b9b3b657f27397a3337dabafb7ef7398387b4",
+        "sha": "7a28369ae0295a232ff3dad9913e811ee87cf4d0",
         "path": "dependencies/rsl_rl",
         "pip_install": true,
         "lfs": false

@@ -45,6 +45,7 @@ where = ["src"]
 # point at the source tree and hide this, so the omission only shows up as a
 # `pip install git+...` where every PerLoco task silently skips registration.
 [tool.setuptools.package-data]
+"orcs" = ["release.json"]
 "orcs.tasks.perloco" = ["rosters/*.toml"]
 
 # mjlab auto-discovers tasks by importing this module at startup.
@@ -65,6 +66,7 @@ orcs-rollout-smpl = "orcs.cli.rollout_smpl:main"
 orcs-make-nominal = "orcs.cli.make_nominal_motion:main"
 orcs-pseudo-retarget = "orcs.cli.pseudo_retarget:main"
 orcs-view-seeds = "orcs.cli.view_seed_motion:main"
+orcs-download-released-models = "orcs.cli.download_released_models:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]

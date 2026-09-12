@@ -1,0 +1,51 @@
+{
+  "schema": "orcs.release.v1",
+  "repo_id": "lkrajan/orcs",
+  "revision": "v0.1.0",
+  "compatibility": {
+    "mocke": "d7e2bbe22fbb93231cc12a738eb2585771081ca6",
+    "rsl_rl": "7a28369ae0295a232ff3dad9913e811ee87cf4d0"
+  },
+  "models": {
+    "Orcs-Dodge-AdaptSonic": {
+      "checkpoint": {
+        "path": "Orcs-Dodge-AdaptSonic/checkpoint.pt",
+        "source_name": "model_7500.pt",
+        "iteration": 7500,
+        "size_bytes": 65248970,
+        "sha256": "7f7e1418617102602567a20c45ec7675123f6ddf962b9586c76625915e85b0bd"
+      },
+      "source_run": "vbp/dodgeball/rw1nl2rz"
+    },
+    "Orcs-PerLoco-Grail-AdaptSonic": {
+      "checkpoint": {
+        "path": "Orcs-PerLoco-Grail-AdaptSonic/checkpoint.pt",
+        "source_name": "model_14999.pt",
+        "iteration": 14999,
+        "size_bytes": 66424905,
+        "sha256": "d6e0560696f0807ddb320a81151ad674fe29991f61583ea9ba1cd5722886c546"
+      },
+      "source_run": "vbp/perceptive-locomotion/j3t9u148"
+    },
+    "Orcs-PerLoco-OmRe-AdaptSonic": {
+      "checkpoint": {
+        "path": "Orcs-PerLoco-OmRe-AdaptSonic/checkpoint.pt",
+        "source_name": "model_10500.pt",
+        "iteration": 10500,
+        "size_bytes": 66424905,
+        "sha256": "06961a311e7ec5b44eb5f41085873d2ffce8c5c20413b7a8a6ae76edae50c605"
+      },
+      "source_run": "vbp/perceptive-locomotion/9blcrqja"
+    },
+    "Orcs-Uolm-AdaptSonic": {
+      "checkpoint": {
+        "path": "Orcs-Uolm-AdaptSonic/checkpoint.pt",
+        "source_name": "model_19999.pt",
+        "iteration": 19999,
+        "size_bytes": 67843785,
+        "sha256": "74c9bb3f1e58130eda87c9995b6f0c14b0077e28e5e01cf610725dba57714a50"
+      },
+      "source_run": "vbp/omni-object/gcyrhxjr"
+    }
+  }
+}
