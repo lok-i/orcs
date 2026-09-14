@@ -1,7 +1,7 @@
 [project]
 name = "orcs"
 version = "0.1.0"
-description = "Oracle Robot Control Synthesis — privileged-observation policies for humanoid control"
+description = "Optimize, Retarget, Control Suite — post-training humanoid controllers with privileged observations"
 readme = "readme.md"
 # 3.11, not 3.10: `tomllib` (rosters) is stdlib only from 3.11.
 requires-python = ">=3.11"

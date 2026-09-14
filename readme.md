@@ -111,10 +111,14 @@ python -c "import mjlab, orcs; from mjlab.tasks.registry import list_tasks; prin
 play Orcs-Dodge-AdaptSonic --agent release --viewer native
 play Orcs-PerLoco-Grail-AdaptSonic --agent release --viewer native
 
-# initial — construct the policy without loading a training checkpoint
+# initial — construct the initial policy (base w/ zero-initialized adapters)
 play Orcs-Uolm-AdaptSonic --agent initial --viewer native
 
-# trained — load an explicit local training checkpoint
+# trained — load trained checkpoint
+# wandb
+play Orcs-PerLoco-OmRe-AdaptSonic --wandb-run-path= <wandb-run-path> \
+--viewer native
+# local
 play Orcs-PerLoco-OmRe-AdaptSonic --agent trained \
   --checkpoint-file /path/to/checkpoint.pt --viewer native
 
