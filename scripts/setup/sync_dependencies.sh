@@ -38,6 +38,10 @@ detect_pip_cmd() {
 PIP_CMD=$(detect_pip_cmd)
 echo "[ENV] python installer: $PIP_CMD  (override via DEPS_PIP_CMD)"
 
+# Parallel LFS transfers. The datasets are ~14k objects averaging ~270 KB, so
+# wall-clock is dominated by per-object round-trips, not bandwidth.
+LFS_CONCURRENCY="${LFS_CONCURRENCY:-16}"
+
 # Ensure git-lfs is set up for the main repo (covers fresh environments
 # where git lfs install was never run globally)
 if command -v git-lfs &>/dev/null || git lfs version &>/dev/null 2>&1; then
@@ -122,8 +126,14 @@ sync_one() {
         echo "[ FETCH  ] depth=1 $sha"
         git -C "$path" fetch --progress --depth 1 origin "$sha"
         if [ "$lfs" = "1" ]; then
-            # checkout will inline-smudge LFS blobs (silent); spinner shows it's alive
-            spin "checkout" git -C "$path" checkout -q "$sha"
+            # Do NOT smudge during checkout: `git-lfs filter-process` materializes
+            # blobs strictly one at a time and ignores lfs.concurrenttransfers, so
+            # a 14k-object dataset costs 14k sequential round-trips. Write pointers
+            # instead (instant), and let the `git lfs pull` below move the bytes
+            # concurrently. Same files either way.
+            git -C "$path" config lfs.concurrenttransfers "$LFS_CONCURRENCY"
+            spin "checkout" env GIT_LFS_SKIP_SMUDGE=1 \
+                git -C "$path" checkout -q "$sha"
         else
             git -C "$path" checkout -q "$sha"
         fi
@@ -200,3 +210,20 @@ done <<< "$entries"
 echo
 echo "=== generate: assets ==="
 python3 -m assets.cli generate --quiet
+
+# Nominal stand clip — Orcs-Dodge-AdaptSonic's reference motion. Generated, not
+# fetched, so it belongs here rather than in deps.lock. Non-fatal: it steps
+# mujoco-warp, which a GPU-less login node cannot do, and every other task is
+# unaffected.
+echo
+echo "=== generate: nominal motion ==="
+NOMINAL="${ORCS_DATA_ROOT:-$REPO_ROOT/data}/nominal_motions/nominal/stand/sample1/motion.npz"
+if [ -f "$NOMINAL" ]; then
+    echo "[ SKIP   ] already present: ${NOMINAL#"$REPO_ROOT/"}"
+elif python3 -m orcs.cli.make_nominal_motion; then
+    echo "[ OK     ] nominal clip generated"
+else
+    echo "[WARN] nominal-motion generation failed (it needs a GPU for mujoco-warp)."
+    echo "       Orcs-Dodge-AdaptSonic stays unregistered until you run, on a GPU:"
+    echo "         orcs-make-nominal"
+fi
