@@ -54,10 +54,10 @@ too — `sync_dependencies.sh` detects the active env and picks `pip` or `uv pip
 uv venv --python 3.11 .venv
 source .venv/bin/activate
 
-# Standard install.
+# Standard install — Dodge + UOLM, releases included.
 uv pip install -e .
 
-# PerLoco/SMPL data tooling — also required by `orcs-pseudo-retarget --scene uolm`.
+# Staging tooling, not tasks — for perceptive_locomotion.sh + orcs-pseudo-retarget.
 # uv pip install -e ".[perloco]"
 
 # Full contributor setup (tests, lint, and PerLoco/SMPL tooling).
@@ -109,6 +109,8 @@ python -c "import mjlab, orcs; from mjlab.tasks.registry import list_tasks; prin
 ```bash
 # release — download once, then load the verified public checkpoint
 play Orcs-Dodge-AdaptSonic --agent release --viewer native
+play Orcs-Uolm-AdaptSonic --agent release --viewer native
+# PerLoco needs perceptive_locomotion.sh — else unregistered, see orcs.SKIP_REASON.
 play Orcs-PerLoco-Grail-AdaptSonic --agent release --viewer native
 
 # initial — construct the initial policy (base w/ zero-initialized adapters)
