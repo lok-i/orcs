@@ -1,11 +1,12 @@
 # <img src="docs/media/logo.png" alt="" height="20"> orcs
 
-a pkg for training privileged humanoid controllers. supports
+*Optimize, Retarget, Control Suite*
 
-1. LoRA PEFT  (currently supports [SONIC](https://nvlabs.github.io/GEAR-SONIC/))
-2. kinodynamic retargeting of `smpl` motions.
-3. *tabula rasa* training (untested)
+a pkg for training privileged humanoid controllers. supports:
 
+* LoRA PEFT  (currently supports [SONIC](https://nvlabs.github.io/GEAR-SONIC/))
+* kinodynamic retargeting of `smpl` motions.
+* *tabula rasa* training (untested)
 
 ## tasks
 
