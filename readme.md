@@ -57,7 +57,7 @@ source .venv/bin/activate
 # Standard install — Dodge + UOLM, releases included.
 uv pip install -e .
 
-# Staging tooling, not tasks — for perceptive_locomotion.sh + orcs-pseudo-retarget.
+# Needed for the optional steps below.
 # uv pip install -e ".[perloco]"
 
 # Full contributor setup (tests, lint, and PerLoco/SMPL tooling).
