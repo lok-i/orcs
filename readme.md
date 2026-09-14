@@ -1,10 +1,11 @@
 # <img src="docs/media/logo.png" alt="" height="20"> orcs
 
-a pkg for training privileged-observation humanoid whole-body controllers. supports
+a pkg for training privileged humanoid controllers. supports
 
 1. LoRA PEFT  (currently supports [SONIC](https://nvlabs.github.io/GEAR-SONIC/))
-2. *tabula rasa* training (untested)
-3. kinodynamic retargeting of human motions.
+2. kinodynamic retargeting of `smpl` motions.
+3. *tabula rasa* training (untested)
+
 
 ## tasks
 
@@ -132,3 +133,20 @@ models, datasets, and body-model files retain their upstream terms; see
 
 ORCS builds on SONIC, GRAIL, OmniRetarget, DexMachina, ResMimic, MimicKit,
 mjlab, and RSL-RL. Please cite the relevant projects and datasets.
+
+## citation
+
+`orcs` was developed as part of [ViBe](https://arxiv.org/abs/2609.09918). If you
+use this repository in your research, please consider citing:
+
+```bibtex
+@misc{krishna2026vibe,
+  title={ViBe: Visual Behavior Adaptation for Perceptive Humanoid Whole-Body Control},
+  author={Lokesh Krishna and Sarvesh Venkatesan and An Zhang and Quan Nguyen},
+  year={2026},
+  eprint={2609.09918},
+  archivePrefix={arXiv},
+  primaryClass={cs.RO},
+  url={https://arxiv.org/abs/2609.09918},
+}
+```
