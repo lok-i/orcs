@@ -6,14 +6,16 @@ remain shared with the other ORCS tasks.
 
 ## prerequisites
 
-Complete the root [installation](../readme.md#install) with the `perloco` extra
+Complete the root [installation](../readme.md#setup) with the `perloco` extra
 inside an active Python 3.11 environment. You also need Git LFS and enough disk
 space for the selected source data.
 
 GRAIL SMPL staging requires the licensed **SMPL-X v1.1 NPZ** release. Register
 at [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de), download
 `SMPL-X v1.1 (NPZ+PKL)`, and keep `SMPLX_NEUTRAL.npz` ready. The setup script
-will print the exact destination and pause until the file exists.
+will print the exact destination and pause until the file exists. Stage the
+male and female `.npz` alongside it: reconstructed UOLM staging wants SMPL-H
+(`ORCS_SMPLH_DIR`, `smplh/SMPLH_*.pkl`) and falls back to `SMPLX_MALE.npz`.
 
 ## fetch and stage GRAIL
 
