@@ -17,6 +17,12 @@ dependencies = [
     "mujoco-warp==3.8.1",
     "warp-lang==1.13.0",
     "joblib",           # reads SONIC smpl .pkl clips (orcs.tasks.uolm.smpl_data)
+    # Capped, not just floored: rsl_rl's WandbLogWriter passes the legacy
+    # `Settings(start_method=...)`, which 0.29 turned from a deprecation warning
+    # into a hard pydantic `extra_forbidden`. mjlab asks only for >=0.22.3, so a
+    # fresh env resolves to a broken wandb and `train` dies before iteration 0 —
+    # on the default logger, which is wandb. 0.28.0 is the last good release.
+    "wandb>=0.22.3,<0.29",
     # NB: numpy/torch are guaranteed by mjlab; mocke + rsl_rl are git deps owned
     # by deps.lock, never listed here.
 
