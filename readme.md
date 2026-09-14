@@ -45,7 +45,10 @@ a pkg for training privileged humanoid controllers. supports:
 
 ## setup
 
-Requires Python 3.11, Git LFS, and GitHub SSH access. From the repository root:
+Requires Python 3.11, Git LFS, and GitHub SSH access, plus
+[uv](https://docs.astral.sh/uv/getting-started/installation/). A conda env works
+too — `sync_dependencies.sh` detects the active env and picks `pip` or `uv pip`
+(override with `DEPS_PIP_CMD`). From the repository root:
 
 ```bash
 uv venv --python 3.11 .venv
@@ -54,21 +57,25 @@ source .venv/bin/activate
 # Standard install.
 uv pip install -e .
 
-# PerLoco/SMPL data tooling.
+# PerLoco/SMPL data tooling — also required by `orcs-pseudo-retarget --scene uolm`.
 # uv pip install -e ".[perloco]"
 
 # Full contributor setup (tests, lint, and PerLoco/SMPL tooling).
 # uv pip install -e ".[dev,perloco]"
 
-# Fetch pinned dependencies/data and generate object assets.
+# Fetch pinned dependencies/data, generate object assets and the nominal clip.
 bash scripts/setup/sync_dependencies.sh
 
 # Optional — fetch and stage OmniRetarget + GRAIL for PerLoco.
 bash scripts/setup/perceptive_locomotion.sh
 
 # Optional — generate SMPL seed states for dynamic retargeting.
+# `--all` means every sample of the scene's DEFAULT_MOTION_SETS, not every motion
+# set; the two extra UOLM sets are staged by name.
 orcs-pseudo-retarget --scene perloco-grail --all
 orcs-pseudo-retarget --scene uolm --all
+orcs-pseudo-retarget --scene uolm --motion-set small-cube-table --all
+orcs-pseudo-retarget --scene uolm --motion-set big-cube-floor --all
 
 # Optional: download and verify all public release checkpoints.
 bash scripts/setup/download_released_models.sh
@@ -76,8 +83,17 @@ bash scripts/setup/download_released_models.sh
 
 Public checkpoints: [huggingface.co/lkrajan/orcs](https://huggingface.co/lkrajan/orcs).
 
+> [!IMPORTANT]
+> `sync_dependencies.sh` must be the **last** install in the env. It pins
+> `mocke`/`rsl_rl`/`assets` to editable forks; a later `pip install` — adding an
+> extra after the fact, say — resolves them off PyPI and uninstalls the forks,
+> which drops `SonicWithAdapterModel` and breaks every AdaptSonic task. Add an
+> extra, then re-run the script. `import orcs` warns when this has happened.
+
 > [!NOTE]
 > The PerLoco setup prompts for the separately licensed SMPL-X model when needed.
+> Stage all three neutral/male/female `.npz` files — reconstructed UOLM staging
+> falls back to `SMPLX_MALE.npz` when SMPL-H is absent.
 > See [perceptive locomotion](docs/perceptive_locomotion.md) and
 > [SMPL retargeting](docs/smpl_retargeting.md) for options and dataset details.
 > Missing optional data skips only the affected tasks; inspect `orcs.SKIP_REASON`.
@@ -95,10 +111,14 @@ python -c "import mjlab, orcs; from mjlab.tasks.registry import list_tasks; prin
 play Orcs-Dodge-AdaptSonic --agent release --viewer native
 play Orcs-PerLoco-Grail-AdaptSonic --agent release --viewer native
 
-# initial — construct the policy without loading a training checkpoint
+# initial — construct the initial policy (base w/ zero-initialized adapters)
 play Orcs-Uolm-AdaptSonic --agent initial --viewer native
 
-# trained — load an explicit local training checkpoint
+# trained — load trained checkpoint
+# wandb
+play Orcs-PerLoco-OmRe-AdaptSonic --wandb-run-path= <wandb-run-path> \
+--viewer native
+# local
 play Orcs-PerLoco-OmRe-AdaptSonic --agent trained \
   --checkpoint-file /path/to/checkpoint.pt --viewer native
 

@@ -29,8 +29,16 @@ VALIDATED: dict[str, str] = {
 --agent initial` still rolls the frozen base bit-exact."""
 
 
+NOT_GIT = "not-a-git-checkout"
+"""`_head` result for a dep that imports from a published wheel instead of its
+pinned editable fork — a later `pip install` resolved it off PyPI and uninstalled
+the fork. The replacement is silent and total (e.g. `rsl_rl` loses
+`SonicWithAdapterModel`), so it is drift, not an absence."""
+
+
 def _head(pkg: str) -> str | None:
-    """Installed package's git HEAD, or None if it is not a git checkout."""
+    """Installed package's git HEAD, `NOT_GIT` if it imports from somewhere that
+    is not a git checkout, or None if it is absent / undecidable."""
     try:
         spec = importlib.util.find_spec(pkg)
     except (ImportError, ValueError):
@@ -40,12 +48,15 @@ def _head(pkg: str) -> str | None:
     root = Path(spec.origin).parent if spec.origin else Path(
         list(spec.submodule_search_locations)[0])
     try:
-        return subprocess.run(
+        proc = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=5,
-        ).stdout.strip() or None
+        )
     except (OSError, subprocess.SubprocessError):
-        return None
+        return None  # no git binary or it hung: cannot tell, so stay quiet
+    if proc.returncode != 0:
+        return NOT_GIT
+    return proc.stdout.strip() or NOT_GIT
 
 
 def check(strict: bool = False) -> dict[str, tuple[str, str]]:
@@ -66,7 +77,12 @@ def check(strict: bool = False) -> dict[str, tuple[str, str]]:
         print("[orcs.core.deps] shared deps differ from orcs's validated set "
               "(consumer lock wins — heads-up, not an error):")
         for pkg, (want, live) in drift.items():
-            print(f"  {pkg:8s} validated {want[:7]}  live {live[:7]}")
+            print(f"  {pkg:8s} validated {want[:7]}  "
+                  f"live {live if live == NOT_GIT else live[:7]}")
+        if any(live == NOT_GIT for _, live in drift.values()):
+            print("  ^ a pinned editable fork was replaced by a published wheel. "
+                  "Re-run scripts/setup/sync_dependencies.sh — it must be the "
+                  "last install in the env.")
         if "mocke" in drift:
             print("  ^ mocke carries the frozen-WBC obs/action contract the ported "
                   "SONIC ckpts are bit-coupled to. Re-verify with "
