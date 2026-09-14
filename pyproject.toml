@@ -78,6 +78,14 @@ perloco = [
     "viser",      # orcs-view-terrain
 ]
 
+[tool.pytest.ini_options]
+# `dependencies/` holds editable checkouts of mocke/rsl_rl/assets, each with its
+# own suite. A bare `pytest` from the root would collect those too: they need
+# extras orcs does not install (onnxruntime), and `assets/tests/test_paths.py`
+# collides with `tests/test_paths.py` on module basename.
+testpaths = ["tests"]
+norecursedirs = ["dependencies", "data", ".venv"]
+
 [tool.ruff]
 src = ["src"]
 indent-width = 4
