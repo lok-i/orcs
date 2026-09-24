@@ -13,7 +13,8 @@ space for the selected source data.
 GRAIL SMPL staging requires the licensed **SMPL-X v1.1 NPZ** release. Register
 at [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de), download
 `SMPL-X v1.1 (NPZ+PKL)`, and keep `SMPLX_NEUTRAL.npz` ready. The setup script
-will print the exact destination and pause until the file exists. Stage the
+will print the exact destination and pause until the file exists — or, with your
+login in `SMPLX_USER` / `SMPLX_PASS`, download it for you. Stage the
 male and female `.npz` alongside it: reconstructed UOLM staging wants SMPL-H
 (`ORCS_SMPLH_DIR`, `smplh/SMPLH_*.pkl`) and falls back to `SMPLX_MALE.npz`.
 
@@ -28,8 +29,9 @@ bash scripts/setup/perceptive_locomotion.sh --sources grail
 The command is idempotent and resumable. It:
 
 1. downloads only the GRAIL curb families named by the packaged roster;
-2. clones the GRAIL reference code without its large submodules;
-3. waits for `SMPLX_NEUTRAL.npz` at the printed path;
+2. clones the GRAIL reference code without its large submodules (SMPL only);
+3. downloads `SMPLX_NEUTRAL.npz` if `SMPLX_USER`/`SMPLX_PASS` are set, else waits
+   for it at the printed path (SMPL only);
 4. stages terrain, robot motion, and SMPL motion under
    `$ORCS_DATA_ROOT/terrain_motions/grail`.
 
@@ -43,7 +45,8 @@ To fetch both supported PerLoco datasets instead:
 bash scripts/setup/perceptive_locomotion.sh
 ```
 
-Use `--no-smpl` only when you do not need the `-Smpl` task. Run
+Use `--no-smpl` only when you do not need the `-Smpl` task: it also skips GRAIL's
+`recon/` data and the 5.7 GB reference-code clone. Run
 `bash scripts/setup/perceptive_locomotion.sh --help` for fetch-only,
 stage-only, and non-interactive options.
 

@@ -80,6 +80,7 @@ dev = ["pytest>=8.0", "ruff>=0.4"]
 # consumes already-staged data does not need them.
 perloco = [
     "usd-core",   # GRAIL tile geometry (`from pxr import Usd`)
+    "joblib",     # GRAIL robot/ + recon/ pickles — every GRAIL stage, not just --smpl
     "smplx",      # GRAIL --smpl body-model forward pass
     "viser",      # orcs-view-terrain
 ]
