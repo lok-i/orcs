@@ -1,4 +1,10 @@
-"""Download and verify the public ORCS model release."""
+"""Download and verify a public model release — ORCS's, or a consumer's.
+
+Package-parameterized so a consumer (vibe) ships only its own ``release.json``:
+the manifest is ``<package>/release.json`` (schema ``<package>.release.v1``), the
+cache ``~/.cache/<package>/releases/<revision>``, overridable by
+``<PACKAGE>_RELEASE_ROOT``.
+"""
 
 from __future__ import annotations
 
@@ -17,48 +23,52 @@ _MANIFEST_RESOURCE = "release.json"
 _CHUNK_SIZE = 1024 * 1024
 
 
-def release_manifest() -> dict[str, Any]:
-    """Read and minimally validate the manifest bundled with ORCS."""
+def release_manifest(package: str = "orcs") -> dict[str, Any]:
+    """Read and minimally validate the manifest bundled with ``package``."""
     manifest = json.loads(
-        files("orcs").joinpath(_MANIFEST_RESOURCE).read_text(encoding="utf-8")
+        files(package).joinpath(_MANIFEST_RESOURCE).read_text(encoding="utf-8")
     )
-    if manifest.get("schema") != "orcs.release.v1":
-        raise RuntimeError("Unsupported ORCS release manifest schema")
+    if manifest.get("schema") != f"{package}.release.v1":
+        raise RuntimeError(f"Unsupported {package} release manifest schema")
     if not isinstance(manifest.get("models"), dict):
-        raise RuntimeError("ORCS release manifest has no model map")
+        raise RuntimeError(f"{package} release manifest has no model map")
     return manifest
 
 
-def released_model_ids() -> tuple[str, ...]:
+def released_model_ids(package: str = "orcs") -> tuple[str, ...]:
     """Return task IDs that have a published model."""
-    return tuple(release_manifest()["models"])
+    return tuple(release_manifest(package)["models"])
 
 
-def release_cache_dir(manifest: dict[str, Any] | None = None) -> Path:
+def release_cache_dir(
+    manifest: dict[str, Any] | None = None, package: str = "orcs"
+) -> Path:
     """Return the versioned local cache directory for the current release."""
-    manifest = manifest or release_manifest()
-    root_override = os.environ.get("ORCS_RELEASE_ROOT")
+    manifest = manifest or release_manifest(package)
+    root_override = os.environ.get(f"{package.upper()}_RELEASE_ROOT")
     if root_override:
         root = Path(root_override).expanduser()
     else:
         cache_home = os.environ.get("XDG_CACHE_HOME")
         root = Path(cache_home).expanduser() if cache_home else Path.home() / ".cache"
-        root = root / "orcs" / "releases"
+        root = root / package / "releases"
     return root / str(manifest["revision"])
 
 
-def _checkpoint_spec(task_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
+def _checkpoint_spec(
+    task_id: str, manifest: dict[str, Any], package: str
+) -> dict[str, Any]:
     try:
         spec = manifest["models"][task_id]["checkpoint"]
     except KeyError as exc:
         available = ", ".join(manifest["models"])
         raise ValueError(
-            f"No released ORCS model for {task_id!r}. Available: {available}"
+            f"No released {package} model for {task_id!r}. Available: {available}"
         ) from exc
 
     relative = PurePosixPath(spec["path"])
     if relative.is_absolute() or ".." in relative.parts:
-        raise RuntimeError(f"Unsafe path in ORCS release manifest: {relative}")
+        raise RuntimeError(f"Unsafe path in {package} release manifest: {relative}")
     return spec
 
 
@@ -85,19 +95,21 @@ def _download_url(manifest: dict[str, Any], spec: dict[str, Any]) -> str:
     return f"https://huggingface.co/{repo_id}/resolve/{revision}/{remote_path}"
 
 
-def ensure_released_model(task_id: str, *, force: bool = False) -> Path:
+def ensure_released_model(
+    task_id: str, *, force: bool = False, package: str = "orcs"
+) -> Path:
     """Return a verified local checkpoint, downloading it when necessary."""
-    manifest = release_manifest()
-    spec = _checkpoint_spec(task_id, manifest)
-    destination = release_cache_dir(manifest) / PurePosixPath(spec["path"])
+    manifest = release_manifest(package)
+    spec = _checkpoint_spec(task_id, manifest, package)
+    destination = release_cache_dir(manifest, package) / PurePosixPath(spec["path"])
 
     if not force and _is_expected_file(destination, spec):
-        print(f"[orcs] released model already cached: {destination}")
+        print(f"[{package}] released model already cached: {destination}")
         return destination
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     url = _download_url(manifest, spec)
-    print(f"[orcs] downloading released model: {task_id}")
+    print(f"[{package}] downloading released model: {task_id}")
     print(f"       {url}")
 
     descriptor, temporary_name = tempfile.mkstemp(
@@ -121,5 +133,5 @@ def ensure_released_model(task_id: str, *, force: bool = False) -> Path:
     finally:
         temporary.unlink(missing_ok=True)
 
-    print(f"[orcs] saved verified model: {destination}")
+    print(f"[{package}] saved verified model: {destination}")
     return destination

@@ -58,7 +58,7 @@ def test_download_is_verified_atomic_and_cached(tmp_path, monkeypatch):
     calls = []
 
     monkeypatch.setenv("ORCS_RELEASE_ROOT", str(tmp_path))
-    monkeypatch.setattr(release, "release_manifest", lambda: manifest)
+    monkeypatch.setattr(release, "release_manifest", lambda *_: manifest)
 
     def open_url(url, timeout):
         calls.append((url, timeout))
@@ -77,7 +77,7 @@ def test_download_is_verified_atomic_and_cached(tmp_path, monkeypatch):
 def test_bad_download_does_not_replace_existing_file(tmp_path, monkeypatch):
     manifest = _manifest(b"expected")
     monkeypatch.setenv("ORCS_RELEASE_ROOT", str(tmp_path))
-    monkeypatch.setattr(release, "release_manifest", lambda: manifest)
+    monkeypatch.setattr(release, "release_manifest", lambda *_: manifest)
     destination = tmp_path / "test" / "Orcs-Test" / "checkpoint.pt"
     destination.parent.mkdir(parents=True)
     destination.write_bytes(b"old")
