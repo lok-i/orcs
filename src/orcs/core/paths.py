@@ -9,6 +9,7 @@ per-user installed-package fallback.
   ORCS_DEPS_ROOT    synced dependencies       (default: <owner>/dependencies)
   ORCS_ASSETS_SOURCE  robot/object asset tree (default: <deps>/assets/source,
                       then installed ``assets`` pkg)
+  ORCS_SMPLX_DIR    licensed SMPL-X models    (default: <deps>/body_models)
 
 There are three supported ownership modes:
 
@@ -38,6 +39,9 @@ _MARKERS = ("pyproject.toml", "deps.lock")
 
 _ASSETS_SENTINEL = "g1/meshes"
 """Child that must exist for an assets-source candidate to be accepted."""
+
+_SMPLX_SUBDIR = "smplx"
+_LEGACY_SMPLX_DIR = "GRAIL/imports/GEM-SMPL/inputs/checkpoints/body_models"
 
 
 def _env(var: str) -> Path | None:
@@ -98,7 +102,7 @@ def _resolve(var: str, child: str) -> Path:
     moment it is nested and can never hijack a host's dataset by merely
     existing. Before this, resolution keyed on the ABSENCE of
     ``<host>/dependencies/orcs/data``, so anything that created that directory
-    (e.g. running orcs's own ``sync_dependencies.sh`` inside a consumer's tree)
+    (e.g. running orcs's own ``sync_deps.sh`` inside a consumer's tree)
     silently relocated every dataset with no error — paths never assert, so it
     surfaced only as a task that stopped registering.
 
@@ -117,6 +121,26 @@ def _resolve(var: str, child: str) -> Path:
 
 DATA_ROOT: Path = _resolve("ORCS_DATA_ROOT", "data")
 DEPS_ROOT: Path = _resolve("ORCS_DEPS_ROOT", "dependencies")
+
+
+def smplx_dir() -> Path:
+    """Root containing ``smplx/SMPLX_*.npz`` body-model files.
+
+    New installs keep the separately licensed models in ORCS-owned storage;
+    the GRAIL code repository is not a dependency. A populated legacy GRAIL
+    location remains readable so this cleanup does not invalidate an existing
+    machine. A clean setup resolves to ``body_models``.
+    """
+    override = _env("ORCS_SMPLX_DIR")
+    if override is not None:
+        return override
+    current = DEPS_ROOT / "body_models"
+    if any((current / _SMPLX_SUBDIR).glob("SMPLX_*.npz")):
+        return current
+    legacy = DEPS_ROOT / _LEGACY_SMPLX_DIR
+    if any((legacy / _SMPLX_SUBDIR).glob("SMPLX_*.npz")):
+        return legacy
+    return current
 
 
 def _assets_candidates() -> list[Path]:
@@ -165,6 +189,6 @@ def assets_source() -> Path:
     listed = "\n  ".join(str(p) for p in tried)
     raise FileNotFoundError(
         f"assets source tree not found (no candidate holds '{_ASSETS_SENTINEL}'):"
-        f"\n  {listed}\nSync it with scripts/setup/sync_dependencies.sh, or set "
+        f"\n  {listed}\nSync it with scripts/setup/sync_deps.sh, or set "
         "ORCS_ASSETS_SOURCE."
     )

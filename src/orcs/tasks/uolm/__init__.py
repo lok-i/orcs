@@ -19,7 +19,7 @@ Bare `import orcs` is lightweight. `orcs.core.paths` resolves data and assets
 against the nearest repo root that HAS them, so a host project vendoring ORCS
 under `dependencies/` is found automatically — no env vars or checkout-depth
 assumptions. When the data genuinely is absent (a fresh checkout before
-`sync_dependencies.sh`, which also runs `assets generate`), registration is
+`sync_deps.sh`, which also runs `assets generate`), registration is
 skipped rather than raising: an incomplete checkout must not break MJLab
 discovery for every consumer downstream. Each row registers on its own, so one
 unstaged dataset costs one task, not three.

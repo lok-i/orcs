@@ -81,7 +81,7 @@ def check(strict: bool = False) -> dict[str, tuple[str, str]]:
                   f"live {live if live == NOT_GIT else live[:7]}")
         if any(live == NOT_GIT for _, live in drift.values()):
             print("  ^ a pinned editable fork was replaced by a published wheel. "
-                  "Re-run scripts/setup/sync_dependencies.sh — it must be the "
+                  "Re-run scripts/setup/sync_deps.sh — it must be the "
                   "last install in the env.")
         if "mocke" in drift:
             print("  ^ mocke carries the frozen-WBC obs/action contract the ported "

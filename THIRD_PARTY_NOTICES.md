@@ -34,7 +34,7 @@ bundled in the ORCS Python distribution:
 | Dependency or data | Use | Upstream terms |
 |---|---|---|
 | [SONIC](https://github.com/NVlabs/GR00T-WholeBodyControl) via Mocke | Frozen motion prior and compatible contracts | Apache-2.0 code; NVIDIA Open Model License weights |
-| [GRAIL](https://github.com/NVlabs/GRAIL) | Terrain-motion source data and staging tools | NVIDIA's upstream repository and data terms |
+| [GRAIL](https://github.com/NVlabs/GRAIL) | Terrain-motion source dataset | NVIDIA's upstream repository and data terms |
 | [OmniRetarget Dataset](https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset) | Retargeted terrain and object motions | MIT as declared by its dataset card |
 | [SMPL-X](https://smpl-x.is.tue.mpg.de/) | Manually supplied body-model files | SMPL-X model license |
 | [mjlab](https://github.com/mujocolab/mjlab), [RSL-RL](https://github.com/leggedrobotics/rsl_rl), and the installed assets package | Simulation, learning, and model assets | Their respective distributions and licenses |

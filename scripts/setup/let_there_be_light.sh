@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # let_there_be_light.sh — configure both .claude and .vscode for this env.
 #
-# Run it INSIDE the active project venv (conda/uv), from the repo root, e.g.:
-#     conda activate mjlab && ./scripts/let_there_be_light.sh
+# Run it inside the uv project venv, from the repo root, e.g.:
+#     source .venv/bin/activate && ./scripts/let_there_be_light.sh
 #
 # Idempotent — safe to re-run after env / dependency changes.
 #
@@ -42,10 +42,6 @@ AGNOSTIC_RULES='[
   "Read(//etc/passwd)",
   "Read(//proc/cpuinfo)",
   "Read(//proc/meminfo)",
-  "Bash(conda run *)",
-  "Bash(conda env *)",
-  "Bash(conda list *)",
-  "Bash(conda info *)",
   "Bash(uv run *)",
   "Bash(uv venv *)",
   "Bash(pip show *)",
@@ -104,10 +100,10 @@ site_dirs = {Path(p).resolve() for p in (
     sysconfig.get_paths().get("purelib"), sysconfig.get_paths().get("platlib")) if p}
 
 def in_venv():
-    if os.environ.get("VIRTUAL_ENV") or os.environ.get("CONDA_PREFIX"):
+    if os.environ.get("VIRTUAL_ENV"):
         return True
     return sys.prefix != getattr(sys, "base_prefix", sys.prefix)
-env = os.environ.get("CONDA_DEFAULT_ENV") or os.environ.get("VIRTUAL_ENV", "?")
+env = os.environ.get("VIRTUAL_ENV", sys.prefix)
 print("⚠  not inside a venv — resolving against base interpreter"
       if not in_venv() else f"· resolving deps in env: {env}")
 

@@ -57,19 +57,19 @@ them that way. Same rule for non-`.py` runtime files (`rosters/*.toml`): declare
    lock is what a STANDALONE orcs checkout uses. Both currently agree.
    `core/deps.py` records what orcs was validated against and prints drift at import —
    believe it, especially for `mocke`. Dev on orcs alone belongs in its own venv; running
-   `sync_dependencies.sh` inside a consumer's venv silently re-points the shared deps.
+   `sync_deps.sh` inside a consumer's venv silently re-points the shared deps.
 
 ## Dependency web (non-obvious)
 
 orcs is thin; the substance lives in four pinned deps (`deps.lock`, materialized by
-`scripts/setup/sync_dependencies.sh`; `/data` and `/dependencies` are gitignored):
+`scripts/setup/sync_{deps,data}.sh`; `/data` and `/dependencies` are gitignored):
 
 | dep | role | notes |
 |---|---|---|
 | `mjlab` (PyPI/editable) | sim + manager-based env framework | `ManagerBasedRlEnvCfg`, `register_mjlab_task`, `play`/`train` |
 | `mocke` (git, `pip -e`) | **frozen-WBC contract** + ported SONIC ckpts | `mocke.sonic.profile`, `mocke.mdp.joint_maps` (IL↔MJ), `PRETRAINED_DIR`; ckpts ship **tracked** — no port step |
 | `rsl_rl` (lok-i fork, `pip --no-deps -e`) | the models | `SonicWithAdapterModel` (LoRA over frozen SONIC), `SonicBaseModel` |
-| `assets` (git, `pip -e`) | robot + object MuJoCo assets | `sync_dependencies.sh` runs `assets generate`; generated XMLs live in the per-user asset cache |
+| `assets` (git, `pip -e`) | robot + object MuJoCo assets | `sync_deps.sh` runs `assets generate`; generated XMLs live in the per-user asset cache |
 
 ## UOLM mechanisms
 

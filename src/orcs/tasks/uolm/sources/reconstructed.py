@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from orcs.core.paths import DATA_ROOT, DEPS_ROOT
+from orcs.core.paths import DATA_ROOT, DEPS_ROOT, smplx_dir
 
 __all__ = [
     "DEFAULT_MOTION_SETS",
@@ -334,7 +334,7 @@ def _body_model(gender: str):
     # gender, and beta/pose parameterization needed by the 24-point command.
     # It is a deliberate FK-only compatibility fallback when the licensed
     # SMPL-H files are not installed; no mesh from it is persisted.
-    fallback = DEPS_ROOT / "GRAIL/imports/GEM-SMPL/inputs/checkpoints/body_models"
+    fallback = smplx_dir()
     wanted = fallback / "smplx" / f"SMPLX_{gender.upper()}.npz"
     if not wanted.exists():
         raise FileNotFoundError(

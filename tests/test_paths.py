@@ -52,6 +52,32 @@ def _load_roots(module: Path, **overrides: str) -> dict[str, str]:
     return json.loads(result.stdout)
 
 
+def _load_smplx_dir(module: Path, **overrides: str) -> str:
+    env = os.environ.copy()
+    for name in (
+        "ORCS_ROOT",
+        "ORCS_DATA_ROOT",
+        "ORCS_DEPS_ROOT",
+        "ORCS_SMPLX_DIR",
+        "XDG_DATA_HOME",
+    ):
+        env.pop(name, None)
+    env.update(overrides)
+    code = (
+        "import runpy; "
+        f"m = runpy.run_path({str(module)!r}); "
+        "print(m['smplx_dir']())"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return result.stdout.strip()
+
+
 def test_standalone_checkout_owns_its_runtime_data(tmp_path: Path) -> None:
     checkout = tmp_path / "orcs"
     _mark_repo(checkout)
@@ -108,3 +134,34 @@ def test_orcs_root_overrides_missing_checkout(tmp_path: Path) -> None:
         "DATA_ROOT": str(runtime / "data"),
         "DEPS_ROOT": str(runtime / "dependencies"),
     }
+
+
+def test_body_models_default_outside_grail_checkout(tmp_path: Path) -> None:
+    checkout = tmp_path / "orcs"
+    _mark_repo(checkout)
+    module = _copy_module(checkout / "src/orcs/core/paths.py")
+
+    assert _load_smplx_dir(module) == str(checkout / "dependencies/body_models")
+
+
+def test_body_models_honor_explicit_override(tmp_path: Path) -> None:
+    checkout = tmp_path / "orcs"
+    _mark_repo(checkout)
+    module = _copy_module(checkout / "src/orcs/core/paths.py")
+    models = tmp_path / "licensed-models"
+
+    assert _load_smplx_dir(module, ORCS_SMPLX_DIR=str(models)) == str(models)
+
+
+def test_populated_legacy_body_models_remain_readable(tmp_path: Path) -> None:
+    checkout = tmp_path / "orcs"
+    _mark_repo(checkout)
+    module = _copy_module(checkout / "src/orcs/core/paths.py")
+    legacy = (
+        checkout
+        / "dependencies/GRAIL/imports/GEM-SMPL/inputs/checkpoints/body_models"
+    )
+    (legacy / "smplx").mkdir(parents=True)
+    (legacy / "smplx/SMPLX_NEUTRAL.npz").touch()
+
+    assert _load_smplx_dir(module) == str(legacy)

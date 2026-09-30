@@ -45,29 +45,22 @@ a pkg for training privileged humanoid controllers. supports:
 
 ## setup
 
-Requires Python 3.11, Git LFS, and GitHub SSH access, plus
-[uv](https://docs.astral.sh/uv/getting-started/installation/). A conda env works
-too — `sync_dependencies.sh` detects the active env and picks `pip` or `uv pip`
-(override with `DEPS_PIP_CMD`). From the repository root:
+Requires Git LFS, GitHub SSH access, and
+[uv](https://docs.astral.sh/uv/getting-started/installation/). ORCS is uv-only:
+an active real venv wins, otherwise `sync_deps.sh` creates `./.venv` at the
+Python version in `.python-version`. From the repository root, the default is
+the complete standalone ORCS setup:
 
 ```bash
-uv venv --python 3.11 .venv
-source .venv/bin/activate
+# Code: ORCS + dev/PerLoco/SMPL tools, then the pinned editable dependencies.
+bash scripts/setup/sync_deps.sh
 
-# Standard install — Dodge + UOLM, releases included.
-uv pip install -e .
+# Data: locked motions + nominal stand + OmniRetarget/GRAIL staging.
+bash scripts/setup/sync_data.sh
 
-# Needed for the optional steps below.
-# uv pip install -e ".[perloco]"
-
-# Full contributor setup (tests, lint, and PerLoco/SMPL tooling).
-# uv pip install -e ".[dev,perloco]"
-
-# Fetch pinned dependencies/data, generate object assets and the nominal clip.
-bash scripts/setup/sync_dependencies.sh
-
-# Optional — fetch and stage OmniRetarget + GRAIL for PerLoco.
-bash scripts/setup/perceptive_locomotion.sh
+# Lean consumer setup: every non-SMPL task, without smplx/reconstructed data.
+# bash scripts/setup/sync_deps.sh --no-smpl
+# bash scripts/setup/sync_data.sh --no-smpl
 
 # Optional — generate SMPL seed states for dynamic retargeting.
 # `--all` means every sample of the scene's DEFAULT_MOTION_SETS, not every motion
@@ -84,14 +77,14 @@ bash scripts/setup/download_released_models.sh
 Public checkpoints: [huggingface.co/lkrajan/orcs](https://huggingface.co/lkrajan/orcs).
 
 > [!IMPORTANT]
-> `sync_dependencies.sh` must be the **last** install in the env. It pins
+> `sync_deps.sh` must be the **last** install in the env. It pins
 > `mocke`/`rsl_rl`/`assets` to editable forks; a later `pip install` — adding an
 > extra after the fact, say — resolves them off PyPI and uninstalls the forks,
 > which drops `SonicWithAdapterModel` and breaks every AdaptSonic task. Add an
 > extra, then re-run the script. `import orcs` warns when this has happened.
 
 > [!NOTE]
-> The PerLoco setup prompts for the separately licensed SMPL-X model when needed.
+> Full data setup prompts for the separately licensed SMPL-X model when needed.
 > Stage all three neutral/male/female `.npz` files — reconstructed UOLM staging
 > falls back to `SMPLX_MALE.npz` when SMPL-H is absent.
 > See [perceptive locomotion](docs/perceptive_locomotion.md) and
@@ -145,7 +138,7 @@ train Orcs-PerLoco-Grail-AdaptSonic --env.scene.num-envs 4096
 | `ORCS_DATA_ROOT` | `<repo>/data` |
 | `ORCS_DEPS_ROOT` | `<repo>/dependencies` |
 | `ORCS_ASSETS_SOURCE` | host assets checkout, then installed `assets` package |
-| `ORCS_SMPLX_DIR` | `<deps>/GRAIL/imports/GEM-SMPL/inputs/checkpoints/body_models` |
+| `ORCS_SMPLX_DIR` | `<deps>/body_models` |
 | `ORCS_RELEASE_ROOT` | `~/.cache/orcs/releases` or `$XDG_CACHE_HOME/orcs/releases` |
 
 ## license and credits

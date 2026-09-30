@@ -98,7 +98,7 @@ with one resumable command. The roster contains only
 reconstructed Chair and Tire clips are excluded:
 
 ```bash
-bash scripts/setup/sync_dependencies.sh
+bash scripts/setup/sync_data.sh inhouse
 orcs-pseudo-retarget --scene uolm --all
 ```
 
