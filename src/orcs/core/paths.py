@@ -143,6 +143,13 @@ def smplx_dir() -> Path:
     return current
 
 
+def retargeted_lfs_include() -> list[str]:
+    """LFS globs needed by ORCS's native non-SMPL motion roster."""
+    from orcs.core.data.retargeted import lfs_include
+
+    return lfs_include(DATA_ROOT / "retargeted_motions")
+
+
 def _assets_candidates() -> list[Path]:
     """Ordered guesses for the ``assets`` source tree, best first.
 
@@ -192,3 +199,18 @@ def assets_source() -> Path:
         f"\n  {listed}\nSync it with scripts/setup/sync_deps.sh, or set "
         "ORCS_ASSETS_SOURCE."
     )
+
+
+def _main() -> None:
+    """Print setup-machine-readable values without importing task packages."""
+    import sys
+
+    if "--lfs-include" in sys.argv[1:]:
+        for glob in retargeted_lfs_include():
+            print(f"include {glob}")
+        return
+    raise SystemExit("usage: python src/orcs/core/paths.py --lfs-include")
+
+
+if __name__ == "__main__":
+    _main()

@@ -44,6 +44,8 @@ from orcs.assets import (
     reconstructed_object_variants_entity_cfg,
     table_entity_cfg,
 )
+from orcs.core.data.retargeted import DEFAULT_OBJECT_NAMES as _DEFAULT_OBJECT_NAMES
+from orcs.core.data.retargeted import EXCLUDE_MOTIONS as _EXCLUDE_MOTIONS
 from orcs.core.data.seeds import SeedMotion
 from orcs.core.obs import apply_obs_noise
 from orcs.core.paths import DATA_ROOT
@@ -79,32 +81,6 @@ _G1_DATASETS_ROOT = str(DATA_ROOT / "retargeted_motions/data/unitree_g1")
 # registration degrades gracefully (see _resolve_smpl_motions).
 _SMPL_DATASETS_ROOT = str(DATA_ROOT / "smpl_motions")
 _RECONSTRUCTED_SMPL_ROOT = str(cache_root())
-
-# fcrl's default roster (assets + motions verified locally). Order matters:
-# it is the variant order, i.e. the object-id space.
-_DEFAULT_OBJECT_NAMES = (
-    "suitcase",
-    "trashcan",
-    "largetable",
-    "plasticbox",
-    "tire",
-    "woodchair2",
-)
-_EXCLUDE_MOTIONS = ("sub5_suitcase_015", 
-                    "woodchair2_sit", 
-
-                    # tire: `custom/tire_roll/sample1` over sugar's three. The
-                    # sugar takes move the tire further (net 1.46 m vs 1.29) but
-                    # that is the trap — the demo walks fast enough that the
-                    # policy settles on "roll it away, then stand", which is the
-                    # sub-optimum we see. custom's take is slower and shorter
-                    # with clean stepping, so the walk stays learnable.
-                    "tire_flip",
-                    "sugar/tire_roll",
-
-                    "custom/woodchair2_flip/sample1",
-                    "custom/woodchair2_flip/sample3",
-                    )
 
 # Collision budget: cvx_dcmp everywhere. Whole-object hulls looked like the
 # cheap option but are a narrowphase trap (measured 2026-07-15, 4096 envs):

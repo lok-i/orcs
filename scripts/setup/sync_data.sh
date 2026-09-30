@@ -6,7 +6,7 @@
 #     omre      OmniRetarget terrain motions
 #     grail     GRAIL terrain motions
 #     all       all of the above
-#   --no-smpl   skip reconstructed motions, GRAIL recon, body models, -Smpl data
+#   --no-smpl   sparse native motion roster; skip reconstructed/GRAIL SMPL data
 #   --check     verify selected lock rows only; no network or generation
 
 set -euo pipefail
@@ -44,7 +44,8 @@ fi
 use_venv
 
 if has inhouse; then
-    sync_rows "$rows"
+    lean_sparse=$((1 - WITH_SMPL))
+    sync_rows "$rows" "$lean_sparse"
 
     echo
     echo "=== generate: nominal motion ==="

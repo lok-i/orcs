@@ -52,7 +52,20 @@ def test_no_smpl_lock_selection_omits_reconstructed_motions() -> None:
     )
 
     assert "retargeted_motions|" in result.stdout
+    assert result.stdout.strip().endswith("|1")
     assert "reconstructed_motions|" not in result.stdout
+
+
+def test_no_smpl_enables_sparse_sync_but_full_mode_can_disable_it() -> None:
+    data = (SETUP / "sync_data.sh").read_text()
+    common = (SETUP / "_common.sh").read_text()
+
+    assert "lean_sparse=$((1 - WITH_SMPL))" in data
+    assert 'sync_rows "$rows" "$lean_sparse"' in data
+    assert "sparse-checkout set --no-cone" in common
+    assert "sparse-checkout disable" in common
+    assert "lfs pull" in common
+    assert '-I "$include"' in common
 
 
 def test_setup_is_uv_only() -> None:

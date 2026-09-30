@@ -16,7 +16,10 @@ lfs_git() {
 }
 
 lfs_missing() {
-    lfs_git -C "$1" lfs ls-files 2>/dev/null | sed -n 's/^[0-9a-f]* - //p' || true
+    local repo="$1" include="${2:-}"
+    local args=(-C "$repo" lfs ls-files)
+    [ -z "$include" ] || args+=(-I "$include")
+    lfs_git "${args[@]}" 2>/dev/null | sed -n 's/^[0-9a-f]* - //p' || true
 }
 
 lfs_retry() {
@@ -117,13 +120,39 @@ for name, info in lock.items():
         "1" if info.get("pip_install") else "0",
         "1" if info.get("lfs") else "0",
         "1" if info.get("pip_no_deps") else "0",
+        "1" if info.get("sparse") else "0",
     ]))
 PYEOF
 }
 
+lean_include() {
+    local repo="$1" globs err
+    err=$(mktemp)
+    globs=$(python "$REPO_ROOT/src/orcs/core/paths.py" --lfs-include 2>"$err" \
+        | sed -n 's/^include //p') || true
+    if [ -z "$globs" ]; then
+        echo "[ERROR] ORCS motion roster resolved no LFS includes:" >&2
+        tail -20 "$err" >&2
+        rm -f "$err"
+        return 1
+    fi
+    rm -f "$err"
+
+    # Keep all metadata so a future roster edit can resolve against this same
+    # pointer-capable checkout.
+    local patterns=('*.json')
+    while IFS= read -r glob; do
+        patterns+=("/$glob")
+    done <<< "$globs"
+    env GIT_LFS_SKIP_SMUDGE=1 git -C "$repo" sparse-checkout set --no-cone \
+        "${patterns[@]}" >&2
+    paste -sd, <<< "$globs"
+}
+
 sync_one() {
     local name="$1" url="$2" sha="$3" rel_path="$4"
-    local pip_install="$5" lfs="$6" pip_no_deps="$7"
+    local pip_install="$5" lfs="$6" pip_no_deps="$7" sparse="$8"
+    local lean_sparse="$9"
     local path="$REPO_ROOT/$rel_path"
 
     echo
@@ -155,13 +184,24 @@ sync_one() {
     fi
 
     if [ "$lfs" = 1 ]; then
-        local missing
-        missing=$(lfs_missing "$path")
+        local include="" missing
+        if [ "$sparse" = 1 ] && [ "$lean_sparse" = 1 ]; then
+            include=$(lean_include "$path")
+            echo "[ SPARSE ] $(tr ',' '\n' <<< "$include" | wc -l) glob(s) from ORCS's task roster"
+        elif [ "$sparse" = 1 ] \
+            && [ "$(git -C "$path" config --bool core.sparseCheckout || true)" = true ]; then
+            echo "[ FULL   ] disabling sparse checkout"
+            env GIT_LFS_SKIP_SMUDGE=1 git -C "$path" sparse-checkout disable
+        fi
+
+        missing=$(lfs_missing "$path" "$include")
         if [ -z "$missing" ]; then
             echo "[ LFS OK ] every object present — skipping pull"
         else
             echo "[ LFS    ] $(wc -l <<< "$missing") file(s) on pointers"
-            spin "LFS pull" lfs_retry -C "$path" lfs pull
+            local pull=(-C "$path" lfs pull)
+            [ -z "$include" ] || pull+=(-I "$include")
+            spin "LFS pull" lfs_retry "${pull[@]}"
         fi
     fi
 
@@ -175,11 +215,13 @@ sync_one() {
 }
 
 sync_rows() {
-    local name url sha rel_path pip_install lfs pip_no_deps
-    while IFS='|' read -r name url sha rel_path pip_install lfs pip_no_deps; do
+    local rows="$1" lean_sparse="${2:-0}"
+    local name url sha rel_path pip_install lfs pip_no_deps sparse
+    while IFS='|' read -r name url sha rel_path pip_install lfs pip_no_deps sparse; do
         [ -z "$name" ] && continue
-        sync_one "$name" "$url" "$sha" "$rel_path" "$pip_install" "$lfs" "$pip_no_deps"
-    done <<< "$1"
+        sync_one "$name" "$url" "$sha" "$rel_path" "$pip_install" "$lfs" \
+            "$pip_no_deps" "$sparse" "$lean_sparse"
+    done <<< "$rows"
 }
 
 verify_rows() {
