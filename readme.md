@@ -53,7 +53,7 @@ idempotent sync commands:
 
 ```bash
 # Environment: explicit and checkout-local, so it cannot collide with Vibe's.
-uv venv --python "$(cat .python-version)" --prompt orcs .venv
+uv venv --prompt orcs
 source .venv/bin/activate
 
 # Code: ORCS + dev/PerLoco/SMPL tools, then the pinned editable dependencies.
@@ -62,9 +62,11 @@ bash scripts/setup/sync_deps.sh
 # Data: locked motions + nominal stand + OmniRetarget/GRAIL staging.
 bash scripts/setup/sync_data.sh
 
-# Lean consumer setup: every non-SMPL task, without smplx/reconstructed data.
+# Lean consumer setup: every native non-SMPL task, with only roster-selected
+# retargeted motions and without smplx/reconstructed data.
 # bash scripts/setup/sync_deps.sh --no-smpl
 # bash scripts/setup/sync_data.sh --no-smpl
+# Run sync_data.sh without --no-smpl later to expand this into the full dataset.
 
 # Optional — generate SMPL seed states for dynamic retargeting.
 # `--all` means every sample of the scene's DEFAULT_MOTION_SETS, not every motion
@@ -82,7 +84,7 @@ Public checkpoints: [huggingface.co/lkrajan/orcs](https://huggingface.co/lkrajan
 
 > [!IMPORTANT]
 > `sync_deps.sh` must be the **last** install in the env. It pins
-> `mocke`/`rsl_rl`/`assets` to editable forks; a later `pip install` — adding an
+> `mocke`/`rsl_rl`/`assets` to editable forks; a later `uv pip install` — adding an
 > extra after the fact, say — resolves them off PyPI and uninstalls the forks,
 > which drops `SonicWithAdapterModel` and breaks every AdaptSonic task. Add an
 > extra, then re-run the script. `import orcs` warns when this has happened.
