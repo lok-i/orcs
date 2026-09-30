@@ -58,6 +58,11 @@ def test_no_smpl_lock_selection_omits_reconstructed_motions() -> None:
 def test_setup_is_uv_only() -> None:
     common = (SETUP / "_common.sh").read_text()
     assert "PIP_CMD=(uv pip)" in common
+    assert 'local venv="$REPO_ROOT/.venv"' in common
+    assert '${VIRTUAL_ENV:-$REPO_ROOT/.venv}' not in common
+    assert 'uv venv --python' in common
+    assert 'source .venv/bin/activate' in common
+    assert 'uv venv --python "$(cat "$REPO_ROOT/.python-version")"' not in common
     assert "DEPS_PIP_CMD" not in common
     assert "CONDA_PREFIX" not in common
     assert "pip_subpath" not in common

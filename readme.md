@@ -47,11 +47,15 @@ a pkg for training privileged humanoid controllers. supports:
 
 Requires Git LFS, GitHub SSH access, and
 [uv](https://docs.astral.sh/uv/getting-started/installation/). ORCS is uv-only:
-an active real venv wins, otherwise `sync_deps.sh` creates `./.venv` at the
-Python version in `.python-version`. From the repository root, the default is
-the complete standalone ORCS setup:
+environment creation is deliberately separate from dependency sync. From the
+repository root, create and activate ORCS's own environment, then run the two
+idempotent sync commands:
 
 ```bash
+# Environment: explicit and checkout-local, so it cannot collide with Vibe's.
+uv venv --python "$(cat .python-version)" --prompt orcs .venv
+source .venv/bin/activate
+
 # Code: ORCS + dev/PerLoco/SMPL tools, then the pinned editable dependencies.
 bash scripts/setup/sync_deps.sh
 

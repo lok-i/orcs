@@ -60,23 +60,33 @@ spin() {
     return $rc
 }
 
-# uv-only. An active real venv wins; otherwise use the repository's .venv.
-use_venv() {  # use_venv [create]
+# uv-only. Environment creation is an explicit prerequisite, not a side effect
+# of dependency sync. Requiring ORCS's own active .venv prevents an accidental
+# run from repointing a consumer environment such as Vibe's.
+use_venv() {
     command -v uv &>/dev/null || {
         echo "[ERROR] uv not found. Install it from https://docs.astral.sh/uv/"
         exit 1
     }
-    if [ -n "${VIRTUAL_ENV:-}" ] && [ ! -f "$VIRTUAL_ENV/pyvenv.cfg" ]; then
-        echo "[ WARN   ] ignoring VIRTUAL_ENV=$VIRTUAL_ENV — no pyvenv.cfg"
-        unset VIRTUAL_ENV
-    fi
-    local venv="${VIRTUAL_ENV:-$REPO_ROOT/.venv}"
+    local venv="$REPO_ROOT/.venv"
     if [ ! -f "$venv/pyvenv.cfg" ]; then
-        if [ "${1:-}" != create ]; then
-            echo "[ERROR] no venv at $venv — run scripts/setup/sync_deps.sh first"
-            exit 1
-        fi
-        uv venv --python "$(cat "$REPO_ROOT/.python-version")" --prompt orcs "$venv"
+        echo "[ERROR] no ORCS venv at $venv. Create and activate it first:"
+        echo "        uv venv --python \"\$(cat .python-version)\" --prompt orcs .venv"
+        echo "        source .venv/bin/activate"
+        exit 1
+    fi
+    if [ -z "${VIRTUAL_ENV:-}" ] || [ ! -f "$VIRTUAL_ENV/pyvenv.cfg" ]; then
+        echo "[ERROR] ORCS's venv is not active. Run: source .venv/bin/activate"
+        exit 1
+    fi
+    local active
+    active=$(cd "$VIRTUAL_ENV" && pwd -P)
+    venv=$(cd "$venv" && pwd -P)
+    if [ "$active" != "$venv" ]; then
+        echo "[ERROR] wrong venv active: $active"
+        echo "        ORCS setup requires: $venv"
+        echo "        deactivate the current venv, then run: source .venv/bin/activate"
+        exit 1
     fi
     export VIRTUAL_ENV="$venv" PATH="$venv/bin:$PATH"
     PIP_CMD=(uv pip)

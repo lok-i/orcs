@@ -5,7 +5,7 @@
 #   sync_deps.sh --no-smpl    omit the SMPL Python tooling
 #   sync_deps.sh --check      verify code checkout SHAs only; no network/pip
 #
-# An active real venv wins. Otherwise uv creates and uses ./.venv.
+# Create + activate ./.venv first; sync never mutates a consumer environment.
 # Data belongs to sync_data.sh.
 
 set -euo pipefail
@@ -24,7 +24,7 @@ done
 
 rows=$(lock_rows dependencies/)
 if [ "$CHECK_ONLY" = 0 ]; then
-    use_venv create
+    use_venv
 
     extras="dev,perloco"
     [ "$WITH_SMPL" = 0 ] || extras="$extras,smpl"
