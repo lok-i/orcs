@@ -25,12 +25,12 @@ PYPROJECT = tomllib.loads((REPO / "pyproject.toml").read_text())
 @pytest.fixture(scope="module")
 def wheel(tmp_path_factory) -> zipfile.ZipFile:
     out = tmp_path_factory.mktemp("wheel")
-    # --no-cache-dir is load-bearing: pip happily returns a CACHED wheel built
-    # before the packaging bug was introduced, so the test passes on a broken
+    # --no-cache is load-bearing: uv could otherwise reuse a wheel built before
+    # the packaging bug was introduced, so the test passes on a broken
     # tree. (Verified by breaking it on purpose.)
     subprocess.run(
-        [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-cache-dir",
-         "--no-build-isolation", "-w", str(out), str(REPO)],
+        ["uv", "build", "--wheel", "--no-cache", "--no-build-isolation",
+         "--out-dir", str(out), str(REPO)],
         check=True, capture_output=True,
     )
     built = list(out.glob("orcs-*.whl"))
