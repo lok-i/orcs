@@ -2,11 +2,11 @@
 
 *Optimize, Retarget, Control Suite*
 
-a pkg for training privileged humanoid controllers. supports:
+training and retargeting tools for privileged humanoid control:
 
-* LoRA PEFT  (currently supports [SONIC](https://nvlabs.github.io/GEAR-SONIC/))
-* kinodynamic retargeting of `smpl` motions.
-* *tabula rasa* training (untested)
+- LoRA adaptation of [SONIC](https://nvlabs.github.io/GEAR-SONIC/)
+- kinodynamic retargeting of SMPL motions
+- adapter and experimental *tabula rasa* training
 
 ## tasks
 
@@ -43,92 +43,62 @@ a pkg for training privileged humanoid controllers. supports:
   </tr>
 </table>
 
-## setup
+## install
 
-Requires Git LFS, GitHub SSH access, and
-[uv](https://docs.astral.sh/uv/getting-started/installation/). ORCS is uv-only:
-environment creation is deliberately separate from dependency sync. From the
-repository root, create and activate ORCS's own environment, then run the two
-idempotent sync commands:
+Requires [uv](https://docs.astral.sh/uv/getting-started/installation/), Git LFS,
+and GitHub SSH access.
 
 ```bash
-# Environment: explicit and checkout-local, so it cannot collide with Vibe's.
+git clone https://github.com/lok-i/orcs && cd orcs
 uv venv --prompt orcs
 source .venv/bin/activate
-
-# Code: ORCS + dev/PerLoco/SMPL tools, then the pinned editable dependencies.
-bash scripts/setup/sync_deps.sh
-
-# Data: locked motions + nominal stand + OmniRetarget/GRAIL staging.
-bash scripts/setup/sync_data.sh
-
-# Lean consumer setup: every native non-SMPL task, with only roster-selected
-# retargeted motions and without smplx/reconstructed data.
-# bash scripts/setup/sync_deps.sh --no-smpl
-# bash scripts/setup/sync_data.sh --no-smpl
-# Run sync_data.sh without --no-smpl later to expand this into the full dataset.
-
-# Optional — generate SMPL seed states for dynamic retargeting.
-# `--all` means every sample of the scene's DEFAULT_MOTION_SETS, not every motion
-# set; the two extra UOLM sets are staged by name.
-orcs-pseudo-retarget --scene perloco-grail --all
-orcs-pseudo-retarget --scene uolm --all
-orcs-pseudo-retarget --scene uolm --motion-set small-cube-table --all
-orcs-pseudo-retarget --scene uolm --motion-set big-cube-floor --all
-
-# Optional: download and verify all public release checkpoints.
-bash scripts/setup/download_released_models.sh
 ```
 
-Public checkpoints: [huggingface.co/lkrajan/orcs](https://huggingface.co/lkrajan/orcs).
-
-> [!IMPORTANT]
-> `sync_deps.sh` must be the **last** install in the env. It pins
-> `mocke`/`rsl_rl`/`assets` to editable forks; a later `uv pip install` — adding an
-> extra after the fact, say — resolves them off PyPI and uninstalls the forks,
-> which drops `SonicWithAdapterModel` and breaks every AdaptSonic task. Add an
-> extra, then re-run the script. `import orcs` warns when this has happened.
-
-> [!NOTE]
-> Full data setup prompts for the separately licensed SMPL-X model when needed.
-> Stage all three neutral/male/female `.npz` files — reconstructed UOLM staging
-> falls back to `SMPLX_MALE.npz` when SMPL-H is absent.
-> See [perceptive locomotion](docs/perceptive_locomotion.md) and
-> [SMPL retargeting](docs/smpl_retargeting.md) for options and dataset details.
-> Missing optional data skips only the affected tasks; inspect `orcs.SKIP_REASON`.
-
-Verify task registration:
+full:
 
 ```bash
-python -c "import mjlab, orcs; from mjlab.tasks.registry import list_tasks; print('\n'.join(list_tasks()))"
+bash scripts/setup/sync_deps.sh
+bash scripts/setup/sync_data.sh
 ```
+
+lean:
+
+```bash
+bash scripts/setup/sync_deps.sh --no-smpl
+bash scripts/setup/sync_data.sh --no-smpl
+```
+
+- `sync_data.sh`: default `all`; modes `inhouse`, `omre`, `grail`
+- `--no-smpl`: non-SMPL tasks + roster-selected retargeted motions
+- full setup: prompts for the three licensed SMPL-X model files
+- dependency changes: rerun `sync_deps.sh` with the same mode
+- missing optional data: affected tasks skip; inspect `orcs.SKIP_REASON`
+- details: [PerLoco](docs/perceptive_locomotion.md) ·
+  [SMPL retargeting](docs/smpl_retargeting.md)
 
 ## play
 
 ```bash
-# release — download once, then load the verified public checkpoint
+# release
 play Orcs-Dodge-AdaptSonic --agent release --viewer native
-play Orcs-Uolm-AdaptSonic --agent release --viewer native
-# PerLoco needs perceptive_locomotion.sh — else unregistered, see orcs.SKIP_REASON.
-play Orcs-PerLoco-Grail-AdaptSonic --agent release --viewer native
 
-# initial — construct the initial policy (base w/ zero-initialized adapters)
+# initial
 play Orcs-Uolm-AdaptSonic --agent initial --viewer native
 
-# trained — load trained checkpoint
-# wandb
-play Orcs-PerLoco-OmRe-AdaptSonic --wandb-run-path= <wandb-run-path> \
---viewer native
-# local
+# trained
 play Orcs-PerLoco-OmRe-AdaptSonic --agent trained \
   --checkpoint-file /path/to/checkpoint.pt --viewer native
 
-# zero — hold zero actions while inspecting the task
+# zero
 play Orcs-PerLoco-Grail-AdaptSonic-Smpl --agent zero --viewer native
 
-# random — sample actions while inspecting the task
+# random
 play Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl --agent random --viewer native
 ```
+
+- releases: [`lkrajan/orcs`](https://huggingface.co/lkrajan/orcs); fetched on use
+- all releases: `bash scripts/setup/download_released_models.sh`
+- trained checkpoints: `--checkpoint-file` or `--wandb-run-path`
 
 ## train
 
@@ -136,6 +106,16 @@ play Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl --agent random --viewer native
 train Orcs-Uolm-AdaptSonic --env.scene.num-envs 4096
 train Orcs-PerLoco-Grail-AdaptSonic --env.scene.num-envs 4096
 ```
+
+## retarget
+
+```bash
+orcs-pseudo-retarget --scene perloco-grail --all
+orcs-pseudo-retarget --scene uolm --all
+```
+
+- `--all`: every sample in the scene's default motion sets
+- more sets and options: [SMPL retargeting](docs/smpl_retargeting.md)
 
 ## paths
 
