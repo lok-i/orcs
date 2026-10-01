@@ -14,7 +14,6 @@ def test_setup_scripts_parse() -> None:
         "_common.sh",
         "sync_deps.sh",
         "sync_data.sh",
-        "sync_dependencies.sh",
         "perceptive_locomotion.sh",
     ):
         subprocess.run(["bash", "-n", str(SETUP / name)], check=True)
@@ -80,12 +79,6 @@ def test_setup_is_uv_only() -> None:
     assert "CONDA_PREFIX" not in common
     assert "pip_subpath" not in common
     assert "unzip_csv" not in common
-
-
-def test_legacy_combined_sync_delegates_to_split_scripts() -> None:
-    body = (SETUP / "sync_dependencies.sh").read_text()
-    assert 'sync_deps.sh" "$@"' in body
-    assert 'sync_data.sh" inhouse "$@"' in body
 
 
 def test_perloco_setup_keeps_only_body_models_not_grail_code() -> None:
