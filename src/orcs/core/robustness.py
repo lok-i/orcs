@@ -160,7 +160,7 @@ def strip_domain(
     obs_groups: tuple[str, ...] = NOISY_GROUPS,
     keep: tuple[str, ...] = (),
 ) -> None:
-    """Undo the domain for a play/eval build — the exact inverse of the applies.
+    """Remove robot RSI perturbations, domain events and observation noise.
 
     Prefix match on `DOMAIN_PREFIXES`, so a knob added to either half is
     subtracted here without editing a list. `keep` exempts events that share the
@@ -171,6 +171,12 @@ def strip_domain(
     for key in [k for k in cfg.events
                 if k.startswith(DOMAIN_PREFIXES) and k not in keep]:
         cfg.events.pop(key)
+    # RSI perturbations live on the command, not in the event manager.
+    mc = cfg.commands.get("motion")
+    if isinstance(mc, MultiClipMotionCommandCfg):
+        mc.pose_range = {}
+        mc.velocity_range = {}
+        mc.joint_position_range = (0.0, 0.0)
     for name in obs_groups:
         group = cfg.observations.get(name)
         if group is not None:
