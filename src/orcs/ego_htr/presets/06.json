@@ -1,0 +1,50 @@
+{
+  "azimuth": 70.0,
+  "collision": {
+    "mode": "whole"
+  },
+  "config": {
+    "hsi_hoi": {
+      "source_sequence_key": "egohtr_06"
+    },
+    "motion": {
+      "seq_key": "egohtr_06"
+    },
+    "robot": {
+      "joint_limits": {
+        "left_knee_joint": [
+          0.1,
+          "inf"
+        ],
+        "right_knee_joint": [
+          0.1,
+          "inf"
+        ]
+      }
+    },
+    "solver": {
+      "iters": 3,
+      "object_contact_map_cost": 100.0,
+      "pose_init_iters": 25,
+      "robot_object_hard_slack_cost": 5000.0,
+      "robot_object_margin": 0.0,
+      "robot_self_penetration_hard_constraint": false,
+      "robot_self_penetration_hard_slack_cost": 1000.0,
+      "robot_self_penetration_margin": -0.001,
+      "smooth_cost": 1.0,
+      "step_limit_mode": "l2",
+      "temporal_smooth_cost": 0.5
+    }
+  },
+  "elevation": -30,
+  "gender": "male",
+  "label": "06",
+  "review_assembly": false,
+  "source": {
+    "end_frame": 1650,
+    "fps": 30,
+    "sequence": "cliff-jump_s4_bzb_01",
+    "start_frame": 1380
+  },
+  "title": "Drop, landing and return ascent"
+}

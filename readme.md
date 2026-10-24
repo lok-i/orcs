@@ -117,6 +117,19 @@ orcs-pseudo-retarget --scene uolm --all
 - `--all`: every sample in the scene's default motion sets
 - more sets and options: [SMPL retargeting](docs/smpl_retargeting.md)
 
+## egoHTR review
+
+```bash
+.venv/bin/python -m orcs.cli.ego_htr view --port 8085
+```
+
+Start an agent chat:
+
+> Read `src/orcs/ego_htr/SKILL.md`. Review my EgoHTR frame comments and continue the retargeting workflow.
+
+- Leave frame notes in Viser; review each revision with **Reload files → Latest**.
+- Setup, controls and scope: [EgoHTR preparation](docs/ego_htr.md).
+
 ## paths
 
 | variable | default |

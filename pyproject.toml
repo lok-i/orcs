@@ -53,6 +53,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "orcs" = ["release.json"]
 "orcs.tasks.perloco" = ["rosters/*.toml"]
+"orcs.ego_htr" = ["SKILL.md", "agent_tools.md", "presets/*.json", "patches/*.patch"]
 
 # mjlab auto-discovers tasks by importing this module at startup.
 # Format: <key> = "<python-module-to-import>"  (key is arbitrary, module is what gets imported)
@@ -73,6 +74,7 @@ orcs-make-nominal = "orcs.cli.make_nominal_motion:main"
 orcs-pseudo-retarget = "orcs.cli.pseudo_retarget:main"
 orcs-view-seeds = "orcs.cli.view_seed_motion:main"
 orcs-download-released-models = "orcs.cli.download_released_models:main"
+orcs-egohtr = "orcs.cli.ego_htr:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]
@@ -83,6 +85,8 @@ perloco = [
     "viser",      # orcs-view-terrain
 ]
 smpl = ["smplx"]  # GRAIL/UOLM body-model forward passes
+# Viewer and optional reports only. UMR/CoACD/SMPL-X remain in a separate env.
+egohtr = ["viser", "mjviser", "trimesh", "pillow", "requests", "huggingface-hub"]
 
 [tool.pytest.ini_options]
 # `dependencies/` holds editable checkouts of mocke/rsl_rl/assets, each with its

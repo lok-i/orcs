@@ -1,0 +1,8 @@
+{
+  "egohtr_review_root_continuity_cost": 3000.0,
+  "egohtr_review_root_velocity_cost": 5000.0,
+  "egohtr_review_max_root_translation_velocity": 1.0,
+  "egohtr_review_max_root_rotation_velocity": 2.0,
+  "egohtr_review_orcs_collision_cost": 10000000.0,
+  "egohtr_review_separation_cost": 1000000.0
+}

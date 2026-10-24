@@ -1,0 +1,70 @@
+{
+  "azimuth": 45.0,
+  "collision": {
+    "mode": "tiled"
+  },
+  "config": {
+    "hsi_hoi": {
+      "source_sequence_key": "egohtr_03"
+    },
+    "motion": {
+      "seq_key": "egohtr_03"
+    },
+    "robot": {
+      "joint_limits": {
+        "left_knee_joint": [
+          0.35,
+          "inf"
+        ],
+        "right_knee_joint": [
+          0.35,
+          "inf"
+        ]
+      }
+    },
+    "solver": {
+      "egohtr_review_elbow_posture_cost": 3000.0,
+      "egohtr_review_elbow_posture_target": 0.6,
+      "egohtr_review_foot_cost": 800000.0,
+      "egohtr_review_hand_preservation_cost": 20000.0,
+      "egohtr_review_knee_flexion_cost": 6000.0,
+      "egohtr_review_knee_flexion_target": 0.669,
+      "egohtr_review_max_joint_velocity": 10.0,
+      "egohtr_review_min_foot_separation": 0.1,
+      "egohtr_review_min_knee_separation": 0.04,
+      "egohtr_review_orcs_margin": 0.02,
+      "iters": 20,
+      "object_contact_map_cost": 10.0,
+      "pose_init_iters": 80,
+      "robot_object_hard_slack_cost": 10000000.0,
+      "robot_object_margin": 0.003,
+      "robot_self_penetration_hard_constraint": true,
+      "robot_self_penetration_hard_slack_cost": 1000000.0,
+      "robot_self_penetration_margin": 0.005,
+      "smooth_cost": 200.0,
+      "step_limit_mode": "box",
+      "temporal_smooth_cost": 1200.0
+    }
+  },
+  "elevation": -30,
+  "gender": "male",
+  "label": "03",
+  "review_assembly": true,
+  "source": {
+    "end_frame": 1500,
+    "fps": 30,
+    "sequence": "rocky-path_s7_bzb_01",
+    "start_frame": 1200
+  },
+  "target_options": {
+    "stance_overrides": [
+      {
+        "end": 163,
+        "side": "left",
+        "stance": true,
+        "start": 122
+      }
+    ]
+  },
+  "title": "Sustained steep ascent"
+}

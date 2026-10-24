@@ -1,0 +1,350 @@
+diff --git a/scripts/retarget_smpl_to_humanoid_surface_vector.py b/scripts/retarget_smpl_to_humanoid_surface_vector.py
+index eb53a37..1371aad 100644
+--- a/scripts/retarget_smpl_to_humanoid_surface_vector.py
++++ b/scripts/retarget_smpl_to_humanoid_surface_vector.py
+@@ -1031,7 +1031,10 @@ def scale_mjcf_mesh_assets(root: ET.Element, mesh_scale: float) -> None:
+ 
+ 
+ def sample_surface_points(vertices: np.ndarray, faces: np.ndarray, count: int, seed: int) -> np.ndarray:
+-    return sample_first_hit_surface_points(vertices, faces, count, seed)
++    # ORCS large-scan experiment: keep first-hit filtering and farthest-point
++    # selection, but bound the candidate pool (upstream uses 96 * count).
++    return sample_first_hit_surface_points(vertices, faces, count, seed,
++        oversample_ratio=2, candidate_multiplier=2)
+ 
+ 
+ def object_points_from_mjcf(xml_path: Path, sample_count: int, seed: int, mesh_scale: float) -> np.ndarray:
+@@ -1632,6 +1635,7 @@ def solve_frame_body_segment_qp(
+     ground_penetration_collision_cache=None,
+     robot_object_penetration_cache=None,
+     ground_contact_anchor_state=None,
++    review_frame=None,
+ ):
+     qpos = qpos_init.copy()
+     costs = []
+@@ -1767,6 +1771,108 @@ def solve_frame_body_segment_qp(
+         residuals = []
+         slot_cache = common.TemplateSlotKinematicsCache(model, data, robot_template)
+ 
++        # Optional terrain-supported foot guides for the annotated EgoHTR
++        # walking clips. These enter the same root/joint solve as collision and
++        # surface tracking; no displayed body transforms are changed afterwards.
++        if review_frame is not None:
++            # Optional one-sided posture preference: relax an almost locked
++            # knee toward the G1 nominal bend while allowing deeper climbing
++            # flexion. Feet and pelvis remain in the joint optimization.
++            knee_cost = review_frame.get("knee_flexion_cost", 0.)
++            if knee_cost > 0.:
++                for side in ("left", "right"):
++                    joint = model.joint(f"{side}_knee_joint")
++                    error = qpos[joint.qposadr[0]] - review_frame["knee_flexion_target"]
++                    if error < 0.:
++                        jac = np.zeros((1, model.nv))
++                        jac[0, joint.dofadr[0]] = np.sqrt(knee_cost)
++                        rows.append(jac)
++                        residuals.append(np.array([np.sqrt(knee_cost) * error]))
++            # G1 elbow q=0 is already bent: increasing toward pi/2 extends
++            # the arm. Use its nominal coordinate, not the knee's lower-bound
++            # convention. This remains a preference so reaches can adapt.
++            elbow_cost = review_frame.get("elbow_posture_cost", 0.)
++            if elbow_cost > 0.:
++                for side in ("left", "right"):
++                    joint = model.joint(f"{side}_elbow_joint")
++                    jac = np.zeros((1, model.nv))
++                    jac[0, joint.dofadr[0]] = np.sqrt(elbow_cost)
++                    error = qpos[joint.qposadr[0]] - review_frame["elbow_posture_target"]
++                    rows.append(jac)
++                    residuals.append(np.array([np.sqrt(elbow_cost) * error]))
++            for name, target, cost in zip(
++                review_frame.get("joint_posture_names", ()),
++                review_frame.get("joint_posture_targets", ()),
++                review_frame.get("joint_posture_costs", ()),
++            ):
++                if cost <= 0.:
++                    continue
++                joint = model.joint(str(name))
++                if joint.type != mujoco.mjtJoint.mjJNT_HINGE:
++                    raise ValueError(f"Review posture target requires a hinge joint: {name}")
++                weight = np.sqrt(cost)
++                jac = np.zeros((1, model.nv))
++                jac[0, joint.dofadr[0]] = weight
++                error = qpos[joint.qposadr[0]] - target
++                rows.append(jac)
++                residuals.append(np.array([weight * error]))
++            if review_frame.get("hand_points") is not None:
++                weight = np.sqrt(review_frame["hand_preservation_cost"])
++                for side_idx, side in enumerate(("left", "right")):
++                    body_id = model.body(f"{side}_wrist_yaw_link").id
++                    point = data.xpos[body_id] + data.xmat[body_id].reshape(3, 3) @ review_frame["hand_local_point"]
++                    rows.append(weight * common.body_point_jacobian(model, data, body_id, point))
++                    residuals.append(weight * (point-review_frame["hand_points"][side_idx]))
++            for side_idx, side in enumerate(("left", "right")):
++                body_id = model.body(f"{side}_ankle_roll_link").id
++                rotation = data.xmat[body_id].reshape(3, 3)
++                points = data.xpos[body_id] + review_frame["local_points"] @ rotation.T
++                cost = np.sqrt(review_frame["cost"] * review_frame["weights"][side_idx])
++                for point, target in zip(points, review_frame["points"][side_idx]):
++                    rows.append(cost * common.body_point_jacobian(model, data, body_id, point))
++                    residuals.append(cost * (point - target))
++            pelvis_id = model.body("pelvis").id
++            rotation = data.xmat[pelvis_id].reshape(3, 3)
++            jac_rot = np.zeros((3, model.nv))
++            mujoco.mj_jacBody(model, data, None, jac_rot, pelvis_id)
++            for current_axis, target_axis in ((rotation[:, 1], review_frame["left_axis"]),
++                                               (rotation[:, 2], np.array([0., 0., 1.]))):
++                weight = np.sqrt(
++                    review_frame["heading_cost"]
++                    * review_frame.get("heading_cost_scale", 1.)
++                )
++                rows.append(weight * np.cross(jac_rot.T, current_axis).T)
++                residuals.append(weight * (current_axis - target_axis))
++            support = review_frame["points"][review_frame["weights"] > .8].mean(axis=1)
++            if len(support):
++                com = data.subtree_com[pelvis_id].copy()
++                target = support[0, :2].copy()
++                if len(support) == 2:
++                    delta = support[1, :2] - target
++                    fraction = np.clip(np.dot(com[:2]-target, delta) / max(np.dot(delta, delta), 1e-9), 0., 1.)
++                    target += fraction * delta
++                error = com[:2] - target
++                distance = np.linalg.norm(error)
++                # A soft support corridor, not a claim of dynamic stability.
++                if distance > .06:
++                    target += .06 * error / distance
++                    jac_com = np.zeros((3, model.nv))
++                    mujoco.mj_jacSubtreeCom(model, data, jac_com, pelvis_id)
++                    weight = np.sqrt(review_frame["balance_cost"])
++                    rows.append(weight * jac_com[:2])
++                    residuals.append(weight * (com[:2]-target))
++            if qpos_prev is not None:
++                root_delta = np.zeros(model.nv)
++                mujoco.mj_differentiatePos(model, root_delta, 1., qpos_prev, qpos)
++                root_jac = np.eye(model.nv)[:6]
++                rows.append(np.sqrt(review_frame["root_continuity_cost"]) * root_jac)
++                residuals.append(np.sqrt(review_frame["root_continuity_cost"]) * root_delta[:6])
++                if qpos_prev2 is not None:
++                    previous_delta = np.zeros(model.nv)
++                    mujoco.mj_differentiatePos(model, previous_delta, 1., qpos_prev2, qpos_prev)
++                    rows.append(np.sqrt(review_frame["root_velocity_cost"]) * root_jac)
++                    residuals.append(np.sqrt(review_frame["root_velocity_cost"]) * (root_delta[:6]-previous_delta[:6]))
++
+         point_costs = np.asarray(surface_point_slot_costs, dtype=np.float64).reshape(-1)
+         robot_points = slot_cache.points(selected_slot_ids)
+         for local_row, slot_id in enumerate(selected_slot_ids):
+@@ -1993,6 +2099,20 @@ def solve_frame_body_segment_qp(
+             limited_dof_ids=local_dof_ids,
+             dof_max_dq_box=getattr(args, "dof_max_dq_box_by_dof", None),
+         )
++        if review_frame is not None and qpos_prev is not None:
++            # Bound the complete frame-to-frame change, not each inner QP
++            # iteration (which otherwise permits large instantaneous jumps).
++            max_change = review_frame["max_joint_velocity"] / 30.0
++            remaining = qpos_prev[joint_qpos_addrs] - qpos[joint_qpos_addrs]
++            step_lower[joint_dof_addrs] = np.maximum(step_lower[joint_dof_addrs], remaining-max_change)
++            step_upper[joint_dof_addrs] = np.minimum(step_upper[joint_dof_addrs], remaining+max_change)
++            root_delta = np.zeros(model.nv)
++            mujoco.mj_differentiatePos(model, root_delta, 1., qpos_prev, qpos)
++            for dofs, max_speed in ((root_translation_dof_ids, review_frame["max_root_translation_velocity"]),
++                                    (root_rotation_dof_ids, review_frame["max_root_rotation_velocity"])):
++                limit = max_speed / 30.0
++                step_lower[dofs] = np.maximum(step_lower[dofs], -root_delta[dofs]-limit)
++                step_upper[dofs] = np.minimum(step_upper[dofs], -root_delta[dofs]+limit)
+         if use_root_step_box:
+             common.apply_qvel_box_limit(
+                 step_lower,
+@@ -2027,6 +2147,41 @@ def solve_frame_body_segment_qp(
+         ineq_rows = []
+         ineq_bounds = []
+         ineq_soft_costs = []
++        if review_frame is not None:
++            aux_model, aux_data, aux_cache = review_frame["orcs_collision"]
++            common.set_qpos(aux_model, aux_data, qpos)
++            aux_jacobians, aux_distances = common.compute_robot_self_penetration_rows(
++                aux_model, aux_data, aux_cache, .10)
++            for jac, distance in zip(aux_jacobians, aux_distances):
++                ineq_rows.append(-jac)
++                ineq_bounds.append(float(distance)-review_frame["orcs_margin"])
++                ineq_soft_costs.append(review_frame["orcs_collision_cost"])
++            pelvis_id = model.body("pelvis").id
++            pelvis_left = data.xmat[pelvis_id].reshape(3, 3)[:, 1]
++            horizontal = pelvis_left * np.array([1., 1., 0.])
++            norm = max(np.linalg.norm(horizontal), 1e-8)
++            axis_body = horizontal / norm
++            jac_rot = np.zeros((3, model.nv))
++            mujoco.mj_jacBody(model, data, None, jac_rot, pelvis_id)
++            jac_axis = ((np.eye(3)-np.outer(axis_body, axis_body)) / norm @
++                        np.diag([1., 1., 0.]) @ np.cross(jac_rot.T, pelvis_left).T)
++            for body_name, minimum in (("ankle_roll_link", review_frame["foot_separation"]),
++                                       ("knee_link", review_frame["knee_separation"])):
++                left_id = model.body(f"left_{body_name}").id
++                right_id = model.body(f"right_{body_name}").id
++                left_point, right_point = data.xpos[left_id], data.xpos[right_id]
++                axis = review_frame["left_axis"]
++                jac = axis @ (common.body_point_jacobian(model, data, left_id, left_point)
++                              - common.body_point_jacobian(model, data, right_id, right_point))
++                ineq_rows.append(-jac)
++                ineq_bounds.append(float(axis @ (left_point - right_point)) - minimum)
++                ineq_soft_costs.append(review_frame["separation_cost"])
++                body_jac = axis_body @ (common.body_point_jacobian(model, data, left_id, left_point)
++                                       - common.body_point_jacobian(model, data, right_id, right_point))
++                body_jac += (left_point-right_point) @ jac_axis
++                ineq_rows.append(-body_jac)
++                ineq_bounds.append(float(axis_body @ (left_point-right_point))-minimum)
++                ineq_soft_costs.append(review_frame["separation_cost"])
+         ground_mode = str(args.ground_penetration_hard_constraint_mode)
+         if bool(args.ground_penetration_hard_constraint) and ground_mode in {"surface_slots", "surface_slots_all"}:
+             if ground_mode == "surface_slots_all":
+@@ -2109,6 +2264,7 @@ def solve_frame_body_segment_qp(
+             ineq_b=ineq_b,
+             ineq_soft_costs=ineq_soft_costs_array,
+             l2_step_limits=l2_step_limits,
++            normalize_objective=review_frame is not None,
+         )
+         mujoco.mj_integratePos(model, qpos, dq, 1.0)
+         qpos = common.clamp_joint_ranges(model, qpos, joint_limits_by_qpos=joint_limits_by_qpos)
+@@ -2530,6 +2686,28 @@ def main():
+     robot_xml = prepare_robot_xml(args)
+     model = mujoco.MjModel.from_xml_path(str(robot_xml))
+     data_mj = mujoco.MjData(model)
++    review_cfg = section(args.config_data, "solver")
++    review_data = None
++    review_orcs_collision = None
++    if review_cfg.get("egohtr_review_targets"):
++        with np.load(review_cfg["egohtr_review_targets"]) as loaded:
++            review_data = {key: loaded[key].copy() for key in loaded.files}
++        if max(frame_ids) >= len(review_data["points"]):
++            raise ValueError("EgoHTR review targets do not cover selected source frames")
++        aux_model = mujoco.MjModel.from_xml_path(review_cfg["egohtr_review_orcs_xml"])
++        if (aux_model.nq != model.nq or aux_model.nv != model.nv or
++                [model.joint(j).name for j in range(1, model.njnt)] !=
++                [aux_model.joint(j).name for j in range(1, aux_model.njnt)] or
++                not np.array_equal(model.jnt_type, aux_model.jnt_type) or
++                not np.array_equal(model.jnt_qposadr, aux_model.jnt_qposadr) or
++                not np.array_equal(model.jnt_dofadr, aux_model.jnt_dofadr)):
++            raise ValueError("ORCS collision model must have identical generalized-coordinate ordering")
++        aux_ids = np.flatnonzero((aux_model.geom_bodyid != 0) &
++                                ((aux_model.geom_contype != 0) | (aux_model.geom_conaffinity != 0)))
++        review_orcs_collision = (aux_model, mujoco.MjData(aux_model), {
++            "geom_ids": aux_ids, "labels": common.geom_collision_labels(aux_model),
++            "excluded_body_pairs": set(),
++        })
+     robot_self_penetration_cache = common.build_robot_self_penetration_cache(model, args)
+     ground_penetration_collision_cache = common.build_ground_penetration_collision_cache(model, args)
+     robot_object_penetration_cache = build_robot_object_penetration_cache(
+@@ -2744,6 +2922,37 @@ def main():
+                 ground_penetration_collision_cache=ground_penetration_collision_cache,
+                 robot_object_penetration_cache=robot_object_penetration_cache,
+                 ground_contact_anchor_state=ground_contact_anchor_state,
++                review_frame=None if review_data is None else {
++                    "local_points": review_data["local_points"],
++                    "points": review_data["points"][frame_ids[out_idx]],
++                    "weights": review_data["weights"][frame_ids[out_idx]],
++                    "left_axis": review_data["left_axis"][frame_ids[out_idx]],
++                    "cost": float(review_cfg.get("egohtr_review_foot_cost", 50000.0)),
++                    "foot_separation": float(review_cfg.get("egohtr_review_min_foot_separation", .10)),
++                    "knee_separation": float(review_cfg.get("egohtr_review_min_knee_separation", .04)),
++                    "max_joint_velocity": float(review_cfg.get("egohtr_review_max_joint_velocity", 10.0)),
++                    "root_continuity_cost": float(review_cfg.get("egohtr_review_root_continuity_cost", 3000.0)),
++                    "root_velocity_cost": float(review_cfg.get("egohtr_review_root_velocity_cost", 5000.0)),
++                    "max_root_translation_velocity": float(review_cfg.get("egohtr_review_max_root_translation_velocity", 1.0)),
++                    "max_root_rotation_velocity": float(review_cfg.get("egohtr_review_max_root_rotation_velocity", 2.0)),
++                    "orcs_collision_cost": float(review_cfg.get("egohtr_review_orcs_collision_cost", 10000000.0)),
++                    "separation_cost": float(review_cfg.get("egohtr_review_separation_cost", 1000000.0)),
++                    "orcs_collision": review_orcs_collision,
++                    "orcs_margin": float(review_cfg.get("egohtr_review_orcs_margin", .01)),
++                    "heading_cost": float(review_cfg.get("egohtr_review_heading_cost", 1000.0)),
++                    "balance_cost": float(review_cfg.get("egohtr_review_balance_cost", 20000.0)),
++                    "knee_flexion_target": float(review_cfg.get("egohtr_review_knee_flexion_target", .669)),
++                    "knee_flexion_cost": float(review_cfg.get("egohtr_review_knee_flexion_cost", 0.)),
++                    "elbow_posture_target": float(review_cfg.get("egohtr_review_elbow_posture_target", .6)),
++                    "elbow_posture_cost": float(review_cfg.get("egohtr_review_elbow_posture_cost", 0.)),
++                    "joint_posture_names": review_data.get("joint_posture_names", ()),
++                    "joint_posture_targets": review_data.get("joint_posture_targets", np.empty((len(review_data["points"]), 0)))[frame_ids[out_idx]],
++                    "joint_posture_costs": review_data.get("joint_posture_costs", np.empty((len(review_data["points"]), 0)))[frame_ids[out_idx]],
++                    "heading_cost_scale": review_data.get("heading_cost_scale", np.ones(len(review_data["points"])))[frame_ids[out_idx]],
++                    "hand_points": review_data["hand_points"][frame_ids[out_idx]] if "hand_points" in review_data else None,
++                    "hand_local_point": review_data.get("hand_local_point"),
++                    "hand_preservation_cost": float(review_cfg.get("egohtr_review_hand_preservation_cost", 100000.)),
++                },
+             )
+             q_seq[out_idx] = q_opt.astype(np.float32)
+             seq_costs[out_idx] = float(cost)
+diff --git a/scripts/smpl_surface_retarget_common.py b/scripts/smpl_surface_retarget_common.py
+index 40e546c..9c76050 100644
+--- a/scripts/smpl_surface_retarget_common.py
++++ b/scripts/smpl_surface_retarget_common.py
+@@ -114,6 +114,7 @@ def load_smplx_npz_motion(path: Path):
+         "human_scale_mode": str(_np_scalar(data, "human_scale_mode", "off")),
+         "source_format": "smplx_npz",
+         "source_file": str(path),
++        "egohtr_surface_dir": str(_np_scalar(data, "source_data_dir", "")),
+     }
+ 
+ 
+@@ -611,6 +612,17 @@ def source_motion_vertices_joints(
+     smplx_batch_size_max=10000,
+     smplx_batch_size_safety_factor=0.8,
+ ):
++    # ORCS EgoHTR adapter: its optimized matrices are not strictly orthogonal.
++    # Use SMPLXLayer geometry computed from the original matrices, avoiding an
++    # axis-angle projection that moves source feet by centimeters. No solver
++    # objectives, contacts, or robot kinematics are changed by this adapter.
++    surface_dir = Path(sequence.get("egohtr_surface_dir", ""))
++    if (surface_dir / "egohtr_vertices.npy").is_file():
++        print(f"[EgoHTR] exact matrix-derived source geometry: {surface_dir}")
++        vertices = np.asarray(np.load(surface_dir / "egohtr_vertices.npy", mmap_mode="r")[frame_ids], dtype=np.float32)
++        joints = np.asarray(np.load(surface_dir / "egohtr_joints.npy", mmap_mode="r")[frame_ids], dtype=np.float32)
++        faces = np.load(surface_dir / "egohtr_faces.npy")
++        return vertices, joints, faces
+     if is_nr_sequence(sequence):
+         return nr_source.motion_vertices_joints(sequence, frame_ids)
+     if is_soma_sequence(sequence):
+@@ -1054,6 +1066,13 @@ def build_robot_self_penetration_cache(model, args):
+     return {
+         "geom_ids": np.asarray(robot_geoms, dtype=np.int32),
+         "labels": labels,
++        # Optional, model-specific assembly exclusions. Some G1 convex mesh
++        # colliders overlap at the shin/ankle even in the neutral pose.
++        "excluded_body_pairs": {
++            frozenset(pair) for pair in getattr(args, "config_data", {}).get("solver", {}).get(
++                "robot_self_collision_exclude_body_pairs", []
++            )
++        },
+     }
+ 
+ 
+@@ -1144,6 +1163,12 @@ def compute_robot_self_penetration_rows(model, data, cache, collision_threshold)
+             if geom1 < 0 or geom2 < 0:
+                 continue
+             if geom1 in robot_geom_set and geom2 in robot_geom_set:
++                body_pair = frozenset(
++                    mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, int(model.geom_bodyid[g]))
++                    for g in (geom1, geom2)
++                )
++                if body_pair in cache.get("excluded_body_pairs", set()):
++                    continue
+                 candidates.add((min(geom1, geom2), max(geom1, geom2)))
+     finally:
+         model.geom_margin[:] = saved_margin
+@@ -1566,6 +1591,7 @@ def solve_clarabel_qp_step(
+     global_step_size=None,
+     global_step_dof_ids=None,
+     l2_step_limits=None,
++    normalize_objective=False,
+ ):
+     J = np.asarray(J, dtype=np.float64)
+     residual = np.asarray(residual, dtype=np.float64).reshape(-1)
+@@ -1660,6 +1686,13 @@ def solve_clarabel_qp_step(
+     # The box step limits are encoded as dq <= upper and -dq <= -lower.
+     # If requested, soft inequalities use one nonnegative slack per row:
+     # ineq_A * dq - slack <= ineq_b, slack >= 0.
++    if normalize_objective:
++        # A positive common scale preserves the optimizer and improves the
++        # numerical balance with finite velocity bounds and strong clearance
++        # penalties in the reviewed EgoHTR configurations.
++        objective_scale = max(1.0, float(np.max(np.diag(P))))
++        P = P / objective_scale
++        q = q / objective_scale
+     P_sparse = sparse.triu(sparse.csc_matrix(P), format="csc")
+     eye_dq = sparse.eye(nvar, dtype=np.float64, format="csc")
+     upper_mask = np.isfinite(upper)

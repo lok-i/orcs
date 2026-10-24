@@ -1,0 +1,65 @@
+{
+  "azimuth": 45.0,
+  "collision": {
+    "mode": "tiled"
+  },
+  "config": {
+    "hsi_hoi": {
+      "source_sequence_key": "egohtr_04"
+    },
+    "motion": {
+      "seq_key": "egohtr_04"
+    },
+    "robot": {
+      "joint_limits": {
+        "left_knee_joint": [
+          0.1,
+          "inf"
+        ],
+        "right_knee_joint": [
+          0.1,
+          "inf"
+        ]
+      }
+    },
+    "solver": {
+      "egohtr_review_foot_cost": 50000.0,
+      "egohtr_review_max_joint_velocity": 10.0,
+      "egohtr_review_min_foot_separation": 0.1,
+      "egohtr_review_min_knee_separation": 0.04,
+      "egohtr_review_orcs_margin": 0.01,
+      "iters": 20,
+      "object_contact_map_cost": 10.0,
+      "pose_init_iters": 80,
+      "robot_object_hard_slack_cost": 1000000.0,
+      "robot_object_margin": 0.003,
+      "robot_self_penetration_hard_constraint": true,
+      "robot_self_penetration_hard_slack_cost": 1000000.0,
+      "robot_self_penetration_margin": 0.005,
+      "smooth_cost": 10.0,
+      "step_limit_mode": "box",
+      "temporal_smooth_cost": 15.0
+    }
+  },
+  "elevation": -30,
+  "gender": "male",
+  "label": "04",
+  "review_assembly": true,
+  "source": {
+    "end_frame": 990,
+    "fps": 30,
+    "sequence": "rocky-path_s7_bzb_01",
+    "start_frame": 660
+  },
+  "target_options": {
+    "weight_boosts": [
+      {
+        "end": 232,
+        "gain": 3,
+        "side": "left",
+        "start": 215
+      }
+    ]
+  },
+  "title": "Descending broken terrain"
+}

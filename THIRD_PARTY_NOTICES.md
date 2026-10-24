@@ -15,6 +15,12 @@ material. Third-party material retains its upstream terms.
 
 ## Research provenance
 
+The EgoHTR integration patch in `src/orcs/ego_htr/patches/umr_egohtr.patch`
+modifies [UMR](https://github.com/hanyang9/UMR) at commit
+`d1cdaedaf67a827198da71c5fa831f48b2e51f91`. UMR's MIT notice is preserved in
+[`LICENSES/UMR-MIT.txt`](LICENSES/UMR-MIT.txt). The UMR checkout, robot assets and
+learned correspondence weights remain external to the Python package.
+
 ORCS's virtual-assistance implementation and SMPL seed-state pipeline were
 written for this repository. They build on ideas described by the following
 works; no source code from them is bundled here:
@@ -37,6 +43,9 @@ bundled in the ORCS Python distribution:
 | [GRAIL](https://github.com/NVlabs/GRAIL) | Terrain-motion source dataset | NVIDIA's upstream repository and data terms |
 | [OmniRetarget Dataset](https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset) | Retargeted terrain and object motions | MIT as declared by its dataset card |
 | [SMPL-X](https://smpl-x.is.tue.mpg.de/) | Manually supplied body-model files | SMPL-X model license |
+| [EgoHTR](https://huggingface.co/datasets/leggedrobotics/egohtr) | Selected human motions and terrain scans | Dataset's upstream access and distribution terms |
+| [UMR](https://github.com/hanyang9/UMR) | Optional scene-aware G1 retargeting | MIT; integration patch notice above |
+| [CoACD](https://github.com/SarahWeiii/CoACD) | Optional terrain collision decomposition | Its upstream distribution and license |
 | [mjlab](https://github.com/mujocolab/mjlab), [RSL-RL](https://github.com/leggedrobotics/rsl_rl), and the installed assets package | Simulation, learning, and model assets | Their respective distributions and licenses |
 
 Users are responsible for obtaining restricted datasets and body models and

@@ -52,6 +52,38 @@ def test_release_manifest_ships(wheel):
     assert "orcs/release.json" in set(wheel.namelist())
 
 
+def test_ego_htr_skill_recipes_and_patch_ship(wheel, tmp_path):
+    expected = [
+        "SKILL.md",
+        "agent_tools.md",
+        "patches/umr_egohtr.patch",
+        "presets/base.json",
+        "presets/assembly_exclusions.json",
+        "presets/review_defaults.json",
+        *[f"presets/{clip}.json" for clip in ("03", "04", "05", "06")],
+    ]
+    for name in expected:
+        assert f"orcs/ego_htr/{name}" in wheel.namelist()
+    site = tmp_path / "package"
+    wheel.extractall(site)
+    env = dict(os.environ, PYTHONPATH=str(site))
+    code = (
+        "from importlib.resources import files; from orcs.ego_htr.source import recipe_for; "
+        "from orcs.ego_htr.umr import patch_path; "
+        "assert recipe_for(preset='03')['source']['start_frame'] == 1200; "
+        "assert patch_path().is_file(); "
+        "assert files('orcs.ego_htr').joinpath('SKILL.md').read_text().startswith('---')"
+    )
+    subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_cli_ships(wheel):
     """`scripts/` is not packaged, so the data pipeline has to live in the
     package or a pip-installed orcs can consume data it cannot produce."""
