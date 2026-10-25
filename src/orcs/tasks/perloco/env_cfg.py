@@ -7,28 +7,35 @@ into a maze.
 
   omni_env_cfg()    OmniRetarget robot-terrain — climb, z_scale = difficulty
   grail_env_cfg()   GRAIL curb — no difficulty axis, one row
+  egohtr_env_cfg()  Reviewed outdoor crops — file-backed convex terrain
 
 What they SHARE is the point: robot, action, sensors, obs, rewards,
 terminations, agent. A policy trained on one loads into the other unchanged,
 because the height scan is 187 rays either way.
 
 Memory: mjlab replicates the model `nworld = num_envs`, so robots never share a
-world and terrain contact is always 1 robot x terrain. Every world does carry
-the whole grid, but statics are culled in broadphase — cost is model size once,
-not contacts per step. Boxes are what keep that true.
+world and terrain contact is always 1 robot x terrain. Every world carries the
+selected grid. Mesh assets are shared, but per-world geometry state, collision
+workspaces and ray sensing still need measured memory/throughput budgets.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from dataclasses import fields
 from functools import lru_cache
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
 from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.envs.mdp import dr
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
@@ -44,6 +51,7 @@ from orcs.core.obs import apply_obs_noise
 from orcs.core.paths import DATA_ROOT
 from orcs.core.robustness import apply_robot_robustness, strip_domain
 from orcs.tasks.perloco import mdp
+from orcs.tasks.perloco.egohtr_sim import EgoHtrMujocoCfg
 from orcs.tasks.perloco.mdp.commands import (
     SmplSeedTerrainMotionCommandCfg,
     TerrainMotionCommandCfg,
@@ -70,6 +78,7 @@ __all__ = [
     "OMNI_RENDER_Z_SCALE",
     "grail_env_cfg",
     "grail_smpl_env_cfg",
+    "egohtr_env_cfg",
     "omni_env_cfg",
     "staged_root",
 ]
@@ -112,10 +121,11 @@ def staged_root(source: str):
 
 @lru_cache(maxsize=None)
 def _resolve(
-    source: str, roster_path: str | None, need_smpl: bool = False
+    source: str, roster_path: str | None, need_smpl: bool = False,
+    dataset_root: str | None = None,
 ) -> tuple[Roster, str, int]:
     """(roster, first clip, longest clip in frames), cached per roster."""
-    root = staged_root(source)
+    root = Path(dataset_root) if dataset_root else staged_root(source)
     roster = load_roster(source, root, roster_path)
     files = [f for k in roster.tile_keys
              for f in sorted((root / k).glob("sample*/motion.npz"))
@@ -214,13 +224,14 @@ def _core(
     anchor_ori_thresh: float,
     command_space: str = "robot",
     render_z_scale: float | None = None,
+    dataset_root: str | None = None,
 ) -> ManagerBasedRlEnvCfg:
-    """Everything both sources agree on."""
+    """The robot, MDP and training domain shared by the terrain sources."""
     assert agent in ("sonic", "tara"), f"unknown agent {agent!r}"
     assert command_space in ("robot", "smpl"), f"unknown space {command_space!r}"
     assert not (agent == "tara" and command_space == "smpl"), (
         "the smpl command space IS the SONIC smpl encoder — no tabula-rasa variant")
-    root = staged_root(source)
+    root = Path(dataset_root) if dataset_root else staged_root(source)
 
     cfg = ManagerBasedRlEnvCfg(
         scene=SceneCfg(
@@ -257,8 +268,8 @@ def _core(
             origin_type=ViewerConfig.OriginType.WORLD,
             distance=6.0, elevation=-20.0, azimuth=135.0,
         ),
-        # Terrain is boxes, so contacts are box-box: few, cheap, and bounded by
-        # the robot's geom count rather than the grid's.
+        # Default budget for authored box terrains; mesh sources override it
+        # after assembling the common MDP.
         sim=SimulationCfg(
             nconmax=100, njmax=300,
             mujoco=MujocoCfg(timestep=0.005, iterations=10, ls_iterations=20),
@@ -295,7 +306,7 @@ def _core(
     cfg.terminations.update({
         # Anchor tubes are ON here (uolm drops them): with no object dragging
         # the root off the reference, a robot far from its anchor is simply
-        # failing to track. Width is PER SOURCE — see the two factories.
+        # failing to track. Width is PER SOURCE — see the source factories.
         "bad_anchor_pos": TerminationTermCfg(
             func=mdp.bad_anchor_pos, params={**_P, "threshold": anchor_pos_thresh}),
         "bad_anchor_ori": TerminationTermCfg(
@@ -343,6 +354,86 @@ def _core(
     # domain, so anything wired below this line leaks into play/eval.
     if play:
         _play_overrides(cfg)
+    return cfg
+
+
+def egohtr_env_cfg(
+    *,
+    agent: str = "sonic",
+    play: bool = False,
+    roster: str | None = None,
+    dataset_root: str | None = None,
+    scan_frame: str = "pelvis",
+    num_steps_per_env: int = 24,
+    robot_cfg: Callable[[], EntityCfg] | None = None,
+    anchor_pos_thresh: float = 0.4,
+    anchor_ori_thresh: float = 0.8,
+) -> ManagerBasedRlEnvCfg:
+    """One or many reviewed EgoHTR crops, using the ordinary PerLoco MDP.
+
+    The packaged roster starts with 03. `ORCS_EGOHTR_ROSTER` selects an exported
+    list; `ORCS_EGOHTR_ROOT` points at an alternative immutable staging directory.
+    Explicit factory arguments win over both environment variables.
+    """
+    root = str(Path(dataset_root or os.environ.get("ORCS_EGOHTR_ROOT")
+                    or staged_root("egohtr")).expanduser().resolve())
+    roster = roster or os.environ.get("ORCS_EGOHTR_ROSTER")
+    if roster:
+        roster = str(Path(roster).expanduser().resolve())
+    r, motion_file, max_len = _resolve("egohtr", roster, dataset_root=root)
+    sizes, provenance = [], {}
+    for tile_key in r.tile_keys:
+        directory = Path(root) / tile_key
+        tile = json.loads((directory / "tile.json").read_text())
+        if not tile.get("meshes") or "size" not in tile:
+            raise ValueError(f"EgoHTR requires a staged convex crop: {directory}")
+        sizes.append(tile["size"])
+        manifest = directory.parent / "export.json"
+        if manifest.exists():
+            provenance[tile_key] = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        for path in sorted(directory.glob("sample*/motion.npz")):
+            if r.clips.get(tile_key) and path.parent.name not in r.clips[tile_key]:
+                continue
+            with np.load(path, allow_pickle=False) as data:
+                if float(data["fps"].item()) != 50.0:
+                    raise ValueError(f"EgoHTR requires 50 Hz staging: {path}")
+    cfg = _core(
+        "egohtr", r, motion_file, max_len,
+        agent=agent, play=play, scan_frame=scan_frame,
+        tile_size=tuple(np.max(sizes, axis=0)),
+        num_steps_per_env=num_steps_per_env, robot_cfg=robot_cfg,
+        kill_bodies=PERLOCO_KILL_BODIES, kill_exclude=(),
+        anchor_pos_thresh=anchor_pos_thresh, anchor_ori_thresh=anchor_ori_thresh,
+        dataset_root=root,
+    )
+    cfg.commands["motion"].dataset_hashes = provenance
+    # Mesh contacts need a separate budget from authored box terrains.
+    cfg.sim.nconmax = 256
+    cfg.sim.njmax = 768
+    cfg.sim.mujoco = EgoHtrMujocoCfg(**{
+        field.name: getattr(cfg.sim.mujoco, field.name)
+        for field in fields(cfg.sim.mujoco)
+    })
+    cfg.sim.mujoco.ccd_iterations = 50
+    if play:
+        # Uniform sole friction, validated against the accepted 03 checkpoint.
+        # Training keeps its shared robustness domain; hand/terrain coefficients
+        # are unaffected. Apply after _core strips training randomization.
+        cfg.events["play_foot_friction"] = EventTermCfg(
+            func=dr.geom_friction,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot", geom_names=r"(left|right)_foot[1-7]_collision",
+                ),
+                "operation": "abs",
+                "ranges": (1.0, 1.0),
+                "axes": [0],
+            },
+        )
+    cfg.viewer.origin_type = ViewerConfig.OriginType.ASSET_ROOT
+    cfg.viewer.entity_name = "robot"
+    cfg.viewer.distance = 4.5
     return cfg
 
 

@@ -76,8 +76,9 @@ def _build_model(root: Path, family: str, level: float) -> mujoco.MjModel:
     """
     spec = Entity(get_g1_flat_hand_cfg()).spec
     spec.worldbody.add_body(name="terrain")
+    tile = json.loads((root / family / f"level_{level:.2f}" / "tile.json").read_text())
     TileTerrainCfg(
-        root=root, family=family, levels=(level,), size=TILE_SIZE,
+        root=root, family=family, levels=(level,), size=tuple(tile.get("size", TILE_SIZE)),
     ).function(0.0, spec, np.random.default_rng(0))
     return spec.compile()
 
@@ -98,13 +99,12 @@ def main() -> None:
     # Tile-local offset of the tile's own origin — what `env_origins` supplies
     # at runtime. Applying it HERE is what makes the viewer's robot-vs-terrain
     # placement the same arithmetic RSI does.
-    origin = np.array([0.5 * TILE_SIZE[0], 0.5 * TILE_SIZE[1], 0.0])
     print(f"[view] {len(keys)} tiles, {len(families)} families — {root}")
 
     server = viser.ViserServer(port=args.port)
     dropped: set[str] = set()
     state: dict = {"scene": None, "model": None, "data": None,
-                   "clip": None, "playing": True}
+                   "clip": None, "playing": True, "origin": np.zeros(3)}
 
     with server.gui.add_folder("Tile"):
         gui_family = server.gui.add_dropdown("family", tuple(families))
@@ -136,6 +136,9 @@ def main() -> None:
         """Recompile the model — a different tile IS a different model."""
         t = tiles[key]
         model = _build_model(root, t["family"], t["level"])
+        tile = json.loads((root / key / "tile.json").read_text())
+        size = tile.get("size", TILE_SIZE)
+        state["origin"] = np.array([size[0] / 2, size[1] / 2, 0.0])
         server.scene.reset()
         state["model"] = model
         state["data"] = mujoco.MjData(model)
@@ -162,11 +165,13 @@ def main() -> None:
         gui_frame.value = 0
 
         tile_json = json.loads((clip.parent.parent / "tile.json").read_text())
-        top = max(b["pos"][2] + b["half"][2] for b in tile_json["boxes"])
+        top = max((b["pos"][2] + b["half"][2] for b in tile_json["boxes"]), default=None)
+        top_text = f" · top `{top:.2f} m`" if top is not None else ""
         foot = float(state["clip"]["root_pos"][:, 2].min())
         gui_info.content = (
             f"**{key}** · {gui_sample.value} — {n} frames @ 50 Hz\n\n"
-            f"{len(tile_json['boxes'])} box(es) · top `{top:.2f} m` · "
+            f"{len(tile_json['boxes'])} boxes / {len(tile_json.get('meshes', []))} hulls"
+            f"{top_text} · "
             f"lowest pelvis `{foot:+.3f} m`")
         _status()
 
@@ -174,7 +179,7 @@ def main() -> None:
         clip, model, data = state["clip"], state["model"], state["data"]
         if clip is None:
             return
-        data.qpos[0:3] = clip["root_pos"][frame] + origin
+        data.qpos[0:3] = clip["root_pos"][frame] + state["origin"]
         data.qpos[3:7] = clip["root_quat"][frame]
         data.qpos[7:] = clip["joint_pos"][frame]
         mujoco.mj_forward(model, data)

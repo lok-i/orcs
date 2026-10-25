@@ -35,7 +35,9 @@ Read that module before touching the output.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -50,7 +52,12 @@ from mjlab.utils.lab_api.math import (
 from orcs.cli._motion_npz import Fk, il_body_names
 from orcs.core.paths import DATA_ROOT
 from orcs.tasks.perloco.sources import SOURCES
-from orcs.tasks.perloco.terrain_spec import ClipSpec, SmplSpec, TileSpec
+from orcs.tasks.perloco.terrain_spec import (
+    ClipSpec,
+    SmplSpec,
+    TerrainMotionSource,
+    TileSpec,
+)
 
 # ---------------------------------------------------------------------------
 # resampling + velocities (mjlab csv_to_npz conventions)
@@ -143,6 +150,20 @@ def _write_tile(out_root: Path, tile: TileSpec) -> None:
         payload["hfield"] = {"file": "hfield.npy",
                              "size": list(tile.hfield.size),
                              "base": tile.hfield.base}
+    if tile.meshes:
+        payload["meshes"] = []
+        (d / "meshes").mkdir(exist_ok=True)
+        for mesh in tile.meshes:
+            sha = hashlib.sha256(mesh.file.read_bytes()).hexdigest()
+            relative = f"meshes/{sha}{mesh.file.suffix}"
+            target = d / relative
+            if not target.exists():
+                shutil.copyfile(mesh.file, target)
+            payload["meshes"].append(dict(file=relative, scale=list(mesh.scale), sha256=sha))
+    if tile.floor_z != 0.0:
+        payload["floor_z"] = tile.floor_z
+    if tile.size is not None:
+        payload["size"] = list(tile.size)
     (d / "tile.json").write_text(json.dumps(payload, indent=1) + "\n")
 
 
@@ -167,12 +188,61 @@ def _write_clip(sample_dir: Path, clip: ClipSpec, state: dict, vel: dict,
         "family": clip.family,
         "level": clip.level,
         "frames": int(state["joint_pos"].shape[0]),
+        "fps": fps,
         **clip.meta,
     }, indent=1) + "\n")
     return int(state["joint_pos"].shape[0])
 
 
 # ---------------------------------------------------------------------------
+
+def stage_source(
+    src: TerrainMotionSource, out_root: Path, *, fps: float = 50.0,
+    batch: int = 256, device: str = "cuda:0",
+) -> dict:
+    """Shared conversion path for dataset CLIs and reviewed EgoHTR exports."""
+    if fps <= 0 or batch < 1:
+        raise ValueError("fps and batch must be positive")
+    out_root = Path(out_root)
+    tiles = list(src.tiles())
+    if not tiles:
+        raise FileNotFoundError("Source selected no terrain tiles")
+    for tile in tiles:
+        _write_tile(out_root, tile)
+    print(f"[stage] {len(tiles)} tiles -> {out_root}")
+
+    fk = Fk(batch, fps, device)
+    per_tile: dict[str, int] = {}
+    total = 0
+    for clip in src.clips():
+        try:
+            perm = [list(clip.joint_names).index(n) for n in fk.il_names]
+        except ValueError as e:
+            raise ValueError(
+                f"{clip.name}: source joints do not cover the IsaacLab set "
+                f"({e}). Source order: {clip.joint_names}") from None
+
+        state, phase = _resample(clip, fps, device)
+        state["joint_pos"] = state["joint_pos"][:, perm]
+        vel = _velocities(state, 1.0 / fps)
+        bodies = fk(state, vel)
+        smpl = _resample_smpl(clip.smpl, phase, device) if clip.smpl else None
+
+        n = per_tile.get(clip.tile_key, 0)
+        per_tile[clip.tile_key] = n + 1
+        frames = _write_clip(out_root / clip.tile_key / f"sample{n}", clip,
+                             state, vel, bodies, fps, fk.il_names, smpl)
+        total += frames
+        print(f"[stage] {clip.tile_key}/sample{n}  {clip.name}  {frames} frames")
+
+    missing = [t.key for t in tiles if t.key not in per_tile]
+    if missing:
+        raise ValueError(f"Staged tiles have no clips: {missing}")
+    result = dict(tiles=len(tiles), clips=sum(per_tile.values()), frames=total,
+                  fps=fps, root=str(out_root))
+    print(f"[stage] {result['clips']} clips, {total} frames @ {fps:g} Hz -> {out_root}")
+    return result
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -203,43 +273,7 @@ def main() -> None:
     if device != args.device:
         print("[stage] CUDA unavailable, falling back to CPU")
 
-    tiles = list(src.tiles())
-    for tile in tiles:
-        _write_tile(out_root, tile)
-    print(f"[stage] {len(tiles)} tiles -> {out_root}")
-
-    fk = Fk(args.batch, args.fps, device)
-    # Source joint order -> IL, BY NAME. A dataset that renames or reorders a
-    # joint fails here instead of silently transposing the robot.
-    per_tile: dict[str, int] = {}
-    dt = 1.0 / args.fps
-    total = 0
-    for clip in src.clips():
-        try:
-            perm = [list(clip.joint_names).index(n) for n in fk.il_names]
-        except ValueError as e:
-            raise ValueError(
-                f"{clip.name}: source joints do not cover the IsaacLab set "
-                f"({e}). Source order: {clip.joint_names}") from None
-
-        state, phase = _resample(clip, args.fps, device)
-        state["joint_pos"] = state["joint_pos"][:, perm]
-        vel = _velocities(state, dt)
-        bodies = fk(state, vel)
-        smpl = _resample_smpl(clip.smpl, phase, device) if clip.smpl else None
-
-        n = per_tile.get(clip.tile_key, 0)
-        per_tile[clip.tile_key] = n + 1
-        frames = _write_clip(out_root / clip.tile_key / f"sample{n}", clip,
-                             state, vel, bodies, args.fps, fk.il_names, smpl)
-        total += frames
-        print(f"[stage] {clip.tile_key}/sample{n}  {clip.name}  {frames} frames")
-
-    print(f"[stage] {sum(per_tile.values())} clips over {len(per_tile)} tiles, "
-          f"{total} frames @ {args.fps:g} Hz -> {out_root}")
-    missing = [t.key for t in tiles if t.key not in per_tile]
-    if missing:
-        print(f"[stage] WARNING {len(missing)} tiles have no clip: {missing[:5]}")
+    stage_source(src, out_root, fps=args.fps, batch=args.batch, device=device)
 
 
 if __name__ == "__main__":

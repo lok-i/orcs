@@ -1,0 +1,4 @@
+# Initial learning target. Export any list with `orcs-egohtr stage --clips ...`
+# and select its generated roster via ORCS_EGOHTR_ROSTER for train AND play.
+families = ["rocky-path_s7_bzb_01__40-50s"]
+levels = [0.0]

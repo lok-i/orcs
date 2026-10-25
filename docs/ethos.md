@@ -152,7 +152,7 @@ omissions do not produce import-time warnings.
 | task | what | sources | command spaces | status |
 |---|---|---|---|---|
 | `uolm` | Uni-Object Loco-Manipulation | retargeted G1, reconstructed human-object motion | `robot`, `smpl` | ✅ native and seed-backed SMPL recipes train |
-| `perloco` | terrain from a height scan | OmniRetarget, GRAIL | `robot`, `smpl` (GRAIL) | ✅ native and seed-backed SMPL recipes train |
+| `perloco` | terrain from a height scan | OmniRetarget, GRAIL, EgoHTR | `robot`, `smpl` (GRAIL) | ✅ native and seed-backed SMPL recipes train |
 | `dodge` | whole-body ball evasion | generated nominal stand | `robot` | ✅ adapter task registers and trains |
 | student distillation | oracle → deployable | — | — | ⬜ the next build |
 

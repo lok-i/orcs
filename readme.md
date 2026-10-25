@@ -130,6 +130,17 @@ Start an agent chat:
 - Leave frame notes in Viser; review each revision with **Reload files → Latest**.
 - Setup, controls and scope: [EgoHTR preparation](docs/ego_htr.md).
 
+Trainable PerLoco task from accepted 03:
+
+```bash
+.venv/bin/python -m orcs.cli.ego_htr stage --clips 03
+.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --viewer viser
+```
+
+- EgoHTR defaults: CCD capacity 128 for train/play; play foot friction 1.0.
+- Full 03 training: [10k updates in `lkrajan/orcs`](docs/ego_htr.md#03-full-training).
+- Multi-clip selection: [EgoHTR tasks](docs/ego_htr.md#multiple-crops).
+
 ## paths
 
 | variable | default |

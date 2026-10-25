@@ -79,6 +79,20 @@ train Orcs-PerLoco-OmRe-AdaptSonic --env.scene.num-envs 4096
 For SMPL point tracking and seed-backed RSI, continue with
 [SMPL retargeting](smpl_retargeting.md).
 
+## EgoHTR outdoor crops
+
+```bash
+orcs-egohtr stage --clips 03
+play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --viewer viser
+train Orcs-PerLoco-EgoHtr-AdaptSonic --env.scene.num-envs 512
+```
+
+- Same PerLoco agent, observations, actions and rewards; precomputed convex terrain.
+- Default roster: 03. `stage --clips 03 04 05 06` exports a list and prints its
+  roster; set `ORCS_EGOHTR_ROSTER` to that path for both training and playback.
+- No UMR or licensed human model is required to consume staged EgoHTR data.
+- Preparation, alternate roots and caveats: [EgoHTR](ego_htr.md#play-and-train).
+
 ## troubleshooting
 
 - `No module named pxr` or `smplx`: rerun `scripts/setup/sync_deps.sh` (without

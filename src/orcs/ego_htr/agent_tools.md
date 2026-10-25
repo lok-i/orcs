@@ -27,6 +27,7 @@ Errors exit nonzero. `--workspace PATH` precedes the command.
 | Optional images/gallery | `ego report --clip 03 --run ID --compare accepted` |
 | Scan/proxy and human videos | Add `--videos --human` to `report` |
 | Launch Viser | `ego view --port 8085` (optional `--clip 03 --time 4.5`) |
+| Export reviewed clips for PerLoco | `ego stage --clips 03 --run accepted` (accepts a list; returns a roster path) |
 | Review pending comments | `ego notes --clip 03 --pending` |
 | Record a comment without the browser | `ego comment --clip 03 --run ID --frame 137 --text 'left heel'` |
 | Mark work awaiting review | `ego notes --clip 03 --resolve NOTE_ID --status addressed --run ID --text 'change/evidence'` |
@@ -237,3 +238,29 @@ viewer evidence is saved locally in `logs/ego_htr/migration_validation.json`.
 Historical inventory prose, discarded trials and virtual environments stay local
 research artifacts. No runtime code imports the legacy log scripts. Source assets,
 licensed models, learned weights, generated motions and videos remain ignored.
+
+## PerLoco handoff
+
+- `stage --clips LABEL...` snapshots each selected accepted run; `--run ID`
+  explicitly overrides that selector. It does not accept or alter review results.
+- Source adapter: `tasks/perloco/sources/egohtr.py`. Shared native staging handles
+  timestamp interpolation, named joint permutation, velocities and ORCS robot FK.
+- Output defaults to `data/terrain_motions/egohtr`. Each crop has `export.json`
+  with source identity and content hashes, `level_0.00/tile.json`, copied hulls,
+  `sample0/motion.npz` and metadata. Identical staging is reusable; changed inputs
+  require a fresh `--out`, with `ORCS_EGOHTR_ROOT` pointing the task there.
+- Select the returned roster with `ORCS_EGOHTR_ROSTER` for **both train and play**.
+  Without an override, the packaged roster selects 03. One source/agent task
+  accepts any staged list; crop families are columns with one row, not difficulty.
+- The training task is `Orcs-PerLoco-EgoHtr-AdaptSonic`. It reads staged files only:
+  optional UMR, body models and review workspaces are not runtime dependencies.
+- Review remains 30 Hz. Training export is 50 Hz; output row `k` maps to source
+  frame `source_start_frame + k * source_fps / fps` from metadata. Check intermediate
+  native-G1 contacts as well as the original frame poses; interpolation can add collisions.
+- Preserve the reviewed scale: qpos is already in robot space; only proxy vertices
+  receive `smpl_scale`. The terrain wrapper loads convex files into a fixed body,
+  uses a catch floor below the crop, and gives sensors the same contact surfaces.
+- Visual acceptance is not a physical-readiness gate. Before a long run, inspect
+  native terrain/self contacts, worst-frame resets, sensor hits, actuation and PPO
+  memory/overflow under the actual training domain. Create a new review revision
+  for a needed motion fix; do not patch the staged joint arrays in place.

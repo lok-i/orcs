@@ -11,22 +11,22 @@ quaternions wxyz to match MuJoCo. A clip's root trajectory is expressed in the
 SAME tile-local frame as its tile's geometry, which is what lets RSI place the
 robot on the terrain by adding `env_origins` and nothing else.
 
-Terrain geometry is boxes when it can be (exact, and the cheapest primitive
-pair MuJoCo has) and a heightfield when it cannot. Both are fields of one
-`TileSpec`, not two classes, because a tile may need both — a box obstacle on
-a scanned slope is one tile, not two.
+Terrain geometry uses boxes for authored obstacles and file-backed convex pieces
+for scanned terrain. The optional heightfield channel is a staging format only;
+the runtime currently supports boxes and convex meshes.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 import numpy as np
 
 __all__ = [
-    "BoxSpec", "HFieldSpec", "TileSpec", "ClipSpec", "SmplSpec",
+    "BoxSpec", "MeshSpec", "HFieldSpec", "TileSpec", "ClipSpec", "SmplSpec",
     "TerrainMotionSource", "box_from_vertices",
 ]
 
@@ -41,6 +41,14 @@ class BoxSpec:
     """Orientation, wxyz. Yaw-only for every source we have so far."""
     half: tuple[float, float, float]
     """Half-extents along the box's own axes (MuJoCo's `size` for a box)."""
+
+
+@dataclass(frozen=True)
+class MeshSpec:
+    """One precomputed convex collision piece; never decomposed at runtime."""
+
+    file: Path
+    scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,11 @@ class TileSpec:
     level: float
     boxes: tuple[BoxSpec, ...] = ()
     hfield: HFieldSpec | None = None
+    meshes: tuple[MeshSpec, ...] = ()
+    floor_z: float = 0.0
+    """Top of the catch slab. Scans place it below their lowest surface."""
+    size: tuple[float, float] | None = None
+    """Minimum centred tile footprint, including reference/sensor clearance."""
 
     @property
     def key(self) -> str:

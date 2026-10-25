@@ -62,6 +62,12 @@ def parser():
     c.add_argument("--compare", default="accepted")
     c.add_argument("--videos", action="store_true")
     c.add_argument("--human", action="store_true")
+    c = command("stage", "Export reviewed clips for PerLoco training (no UMR)")
+    c.add_argument("--clips", nargs="+", required=True, help="Viewer labels or clip IDs")
+    c.add_argument("--run", default="accepted", help="Pin this revision for each clip")
+    c.add_argument("--out", type=Path, help="Default: data/terrain_motions/egohtr")
+    c.add_argument("--device", default="cuda:0")
+    c.add_argument("--batch", type=int, default=256)
     c = command("view", "Launch the Viser review interface")
     c.add_argument("--host", default="127.0.0.1")
     c.add_argument("--port", type=int, default=8085)
@@ -167,6 +173,10 @@ def dispatch(a):
         from orcs.ego_htr.report import report
 
         return report(ws, a.clip, a.run, a.compare, a.videos, a.human)
+    if a.command == "stage":
+        from orcs.cli._stage_egohtr import stage
+
+        return stage(ws, a.clips, a.run, a.out, a.device, a.batch)
     if a.command == "view":
         from orcs.ego_htr.viewer import Viewer
 

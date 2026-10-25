@@ -8,6 +8,7 @@ a default hiding in a bare id.
   Orcs-PerLoco-Grail-AdaptSonic        GRAIL curb
   Orcs-PerLoco-Grail-AdaptSonic-Smpl   ...reading the HUMAN, not the retarget
   Orcs-PerLoco-Grail-TaRa              its floor
+  Orcs-PerLoco-EgoHtr-AdaptSonic       reviewed outdoor terrain crops
 
 `-Smpl` is the SONIC retargeting task: the SMPL-X reconstruction drives the
 frozen SMPL encoder and all-point tracking rewards, while a phase-1
@@ -37,7 +38,12 @@ from functools import partial
 
 from orcs.core.registry import register_all
 from orcs.core.rl import SMPL_CKPT, adapt_sonic_agent_cfg, tara_agent_cfg
-from orcs.tasks.perloco.env_cfg import grail_env_cfg, grail_smpl_env_cfg, omni_env_cfg
+from orcs.tasks.perloco.env_cfg import (
+    egohtr_env_cfg,
+    grail_env_cfg,
+    grail_smpl_env_cfg,
+    omni_env_cfg,
+)
 
 # The agents come from `orcs.core.rl` — a task picks one and names its
 # experiment, it never declares PPO. See that module's docstring. Both
@@ -45,6 +51,9 @@ from orcs.tasks.perloco.env_cfg import grail_env_cfg, grail_smpl_env_cfg, omni_e
 _smpl_sonic = partial(adapt_sonic_agent_cfg, base_checkpoint=SMPL_CKPT)
 
 _TASKS = (
+    ("Orcs-PerLoco-EgoHtr-AdaptSonic",
+     egohtr_env_cfg,
+     partial(adapt_sonic_agent_cfg, "orcs_perloco_egohtr")),
     ("Orcs-PerLoco-OmRe-AdaptSonic",
      partial(omni_env_cfg, agent="sonic"),
      partial(adapt_sonic_agent_cfg, "orcs_perloco_omre")),

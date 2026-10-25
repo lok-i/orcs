@@ -376,6 +376,8 @@ class TerrainMotionCommandCfg(MultiClipMotionCommandCfg):
     tile_keys: tuple[str, ...] = ()
     n_rows: int = 1
     clips: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    dataset_hashes: dict[str, str] = field(default_factory=dict)
+    """Export manifest hashes, captured with the training configuration."""
     command_space: Literal["robot", "smpl"] = "robot"
     """Which reference the frozen SONIC encoder reads. Viz-relevant here only —
     the tokenizer obs term is what actually switches (see `env_cfg`), and the

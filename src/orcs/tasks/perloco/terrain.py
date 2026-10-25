@@ -39,8 +39,8 @@ the tile origin is 2.20 m, so 4.4 m is the hard floor and 6.0 leaves a margin
 for RSI randomization without a robot ever seeing its neighbour's geometry."""
 
 _FLOOR_DEPTH = 0.5
-"""Thickness of the per-tile ground slab. Its TOP is z=0 — the plane every
-staged clip's root trajectory is expressed against."""
+"""Thickness of the per-tile ground slab. Its top defaults to z=0; scanned
+crops set floor_z below their valid surfaces."""
 
 FLOOR_RGBA = (0.35, 0.36, 0.38, 1.0)
 """The tile ground slab's colour — PUBLIC, because it is the only channel that
@@ -89,8 +89,12 @@ class TileTerrainCfg(SubTerrainCfg):
                 f"render_z_scale on '{self.family}' level {level}: this source's "
                 "level axis is not an obstacle height, so re-scaling to a "
                 "z_scale is undefined (GRAIL stages one level_0.00 row)")
-        tile = json.loads((_tile_dir(self.root, self.family, level)
-                           / "tile.json").read_text())
+        directory = _tile_dir(self.root, self.family, level)
+        tile = json.loads((directory / "tile.json").read_text())
+        if tile.get("hfield"):
+            raise ValueError("Staged heightfields are not yet supported by this builder")
+        if any(a < b for a, b in zip(self.size, tile.get("size", (0, 0)), strict=True)):
+            raise ValueError(f"Terrain tile {self.family} requires size >= {tile['size']}")
 
         body = spec.body("terrain")
         cx, cy = 0.5 * self.size[0], 0.5 * self.size[1]
@@ -101,7 +105,7 @@ class TileTerrainCfg(SubTerrainCfg):
             geom=body.add_geom(
                 type=mujoco.mjtGeom.mjGEOM_BOX,
                 size=(cx, cy, 0.5 * _FLOOR_DEPTH),
-                pos=(cx, cy, -0.5 * _FLOOR_DEPTH),
+                pos=(cx, cy, tile.get("floor_z", 0.0) - 0.5 * _FLOOR_DEPTH),
                 rgba=_FLOOR_RGBA,
             ),
             color=_FLOOR_RGBA,
@@ -119,6 +123,22 @@ class TileTerrainCfg(SubTerrainCfg):
                     rgba=box_rgba,
                 ),
                 color=box_rgba,
+            ))
+        for index, mesh in enumerate(tile.get("meshes", ())):
+            path = (directory / mesh["file"]).resolve()
+            if not path.is_relative_to(directory.resolve()):
+                raise ValueError(f"Mesh path escapes its staged tile: {mesh['file']}")
+            if self.render_z_scale is not None:
+                raise ValueError("render_z_scale is not defined for convex terrain")
+            name = f"{self.family}_{row}_hull_{index}"
+            spec.add_mesh(name=name, file=str(path), scale=mesh["scale"])
+            color = (0.47, 0.51, 0.48, 1.0)
+            geoms.append(TerrainGeometry(
+                geom=body.add_geom(
+                    type=mujoco.mjtGeom.mjGEOM_MESH, meshname=name,
+                    pos=(cx, cy, 0.0), group=0, contype=1, conaffinity=1,
+                    rgba=color,
+                ), color=color,
             ))
         # Spawn origin == the staged tile's own origin, so RSI is
         # `clip.root_pos + env_origins` and nothing else.
