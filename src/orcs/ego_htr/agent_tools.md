@@ -155,6 +155,11 @@ Example revision override (ranges are half-open **prepared-source frame IDs**):
 
 - Omitting `targets` reuses the parent's target cache; `{}` regenerates feet.
   Regenerating feet preserves existing palms unless `hand_reference` replaces them.
+- `support_surface`: `"scan"` (existing default) or `"proxy"` for stance planes
+  fitted to top-facing convex collision surfaces. Proxy mode rejects underside
+  hits, which can otherwise attract soles into thin slabs. `sole_clearance`
+  sets the nonnegative plane clearance in metres (default `0.004`). Native
+  full-sole contacts and swing-foot clearance still need an independent audit.
 - `weight_boosts`: `{side,start,end,gain}` gives a sine-squared gain over that range.
 - `foot_heading_overrides`: `{side,start,end,direction:"forward",weight,fade}`
   rotates only that foot's target footprint toward the pelvis-forward direction;
@@ -165,6 +170,17 @@ Example revision override (ranges are half-open **prepared-source frame IDs**):
   reviewed intervals so climbing posture remains available elsewhere.
 - Root continuity/velocity costs, root/joint speed bounds, native collision and
   separation penalties are explicit solver keys; defaults in `review_defaults.json`.
+- `egohtr_review_orcs_terrain_cost` (default `0`, disabled) enables additional
+  robot–terrain clearance constraints using ORCS's native robot geometry and FK.
+  `egohtr_review_orcs_terrain_margin` sets their clearance (default `0.005` m).
+  This complements the native **self**-collision check: UMR's terrain constraints
+  alone use a different robot. Validate all frames and the staged 50 Hz motion
+  with the task's native colliders before training.
+- `egohtr_review_orcs_terrain_substeps` (default `1`) adds clearance constraints
+  between source poses. Use `5` to cover the staged 30→50 Hz interpolation grid;
+  it costs more solver time. `egohtr_review_exact_root_rotation_limit=true`
+  uses the quaternion-difference Jacobian for the root speed constraint instead
+  of the older angular box approximation (default `false` for recipe parity).
 - Other review keys: foot cost/separation, knee separation/flexion target/cost,
   elbow posture target/cost, heading cost, balance cost, native margin and hand
   preservation cost. Use existing `egohtr_review_*` keys from presets/patch.
@@ -182,6 +198,7 @@ Example revision override (ranges are half-open **prepared-source frame IDs**):
 | Frame selection and 30 Hz | Reject truncated/misaligned outputs |
 | Joint ranges | Physical and requested configuration limits |
 | Native self collision / crossed feet | Review-run gates: <2 mm / zero crossings |
+| Native terrain penetration | All-frame ORCS colliders; <2 mm gate when native terrain constraints are enabled |
 | Joint/root speed | Recorded solver bounds with numerical tolerance |
 | Proxy penetration | Body/frame outliers; proxy may fill holes in an open scan |
 | Sole scan distance | Five sole probes; unsigned nearest distance alone cannot prove support |

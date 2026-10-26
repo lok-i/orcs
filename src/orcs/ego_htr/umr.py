@@ -168,7 +168,14 @@ def runtime_config(ws, run, scratch):
         cfg.setdefault("solver", {})["egohtr_review_targets"] = str(
             ws.asset(run, "targets")
         )
-        cfg["solver"]["egohtr_review_orcs_xml"] = str(ws.asset(run, "orcs_robot"))
+        # UMR's optional native-terrain cache also writes a temporary combined
+        # XML beside this input. Keep all solver writes outside immutable assets.
+        tree, meshes = mesh_files(ws.asset(run, "orcs_robot"))
+        for node, path in meshes:
+            node.set("file", str(path))
+        native_xml = scratch / "orcs_robot.xml"
+        tree.write(native_xml, encoding="unicode")
+        cfg["solver"]["egohtr_review_orcs_xml"] = str(native_xml)
     return cfg
 
 

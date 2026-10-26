@@ -73,6 +73,7 @@ def audit(ws, run, surface=True, debug=False):
     native_data = mujoco.MjData(native)
     addresses = [native.joint(str(n)).qposadr[0] for n in motion["robot_joint_names"]]
     collision, collision_data, scan, scale = scene(ws, run, collision=True)
+    native_scene, native_scene_data, _, _ = scene(ws, run, collision=True, native=True)
     foot_ids = np.array(
         [
             [model.body(f"{s}_ankle_roll_sphere_{i}_link").id for i in range(1, 6)]
@@ -89,6 +90,8 @@ def audit(ws, run, surface=True, debug=False):
     self_depth = []
     umr_self = []
     terrain = []
+    native_terrain = []
+    native_worst = []
     separation = []
     points = []
     ankle_points = []
@@ -140,6 +143,36 @@ def audit(ws, run, surface=True, debug=False):
             if native.geom_bodyid[c.geom1] > 0 and native.geom_bodyid[c.geom2] > 0
         ]
         self_depth.append(max(0.0, -min(depths, default=0.0)))
+        native_scene_data.qpos[:7] = pose[:7]
+        native_scene_data.qpos[addresses] = pose[7:]
+        mujoco.mj_kinematics(native_scene, native_scene_data)
+        mujoco.mj_comPos(native_scene, native_scene_data)
+        mujoco.mj_collision(native_scene, native_scene_data)
+        native_contacts = [
+            c
+            for c in native_scene_data.contact[: native_scene_data.ncon]
+            if (native_scene.geom_bodyid[c.geom1] == 0)
+            != (native_scene.geom_bodyid[c.geom2] == 0)
+        ]
+        native_contact = min(native_contacts, key=lambda c: c.dist, default=None)
+        native_depth = (
+            max(0.0, -float(native_contact.dist)) if native_contact is not None else 0.0
+        )
+        native_terrain.append(native_depth)
+        if native_depth > 0.002:
+            g = (
+                native_contact.geom1
+                if native_scene.geom_bodyid[native_contact.geom1]
+                else native_contact.geom2
+            )
+            native_worst.append(
+                dict(
+                    frame=frame,
+                    source_frame=int(motion["source_frames"][frame]),
+                    depth_m=native_depth,
+                    geom=native_scene.geom(g).name,
+                )
+            )
         collision_data.qpos[:] = pose
         mujoco.mj_kinematics(collision, collision_data)
         mujoco.mj_comPos(collision, collision_data)
@@ -240,6 +273,10 @@ def audit(ws, run, surface=True, debug=False):
         orcs_self_m=stats(self_depth),
         umr_self_m=stats(umr_self),
         terrain_penetration_m=stats(terrain),
+        orcs_terrain_penetration_m=stats(native_terrain),
+        worst_orcs_terrain_contacts=sorted(native_worst, key=lambda r: -r["depth_m"])[
+            :15
+        ],
         worst_terrain_contacts=sorted(worst, key=lambda r: -r["depth_m"])[:15],
         crossed_foot_frames=int((np.asarray(separation) < 0).sum()),
         min_foot_separation_m=float(min(separation)),
@@ -323,6 +360,10 @@ def audit(ws, run, surface=True, debug=False):
             root_rotation=root["rotation_radps"]["component"].get("max", 0)
             <= solver.get("egohtr_review_max_root_rotation_velocity", 2.0) + 0.03,
         )
+        if solver.get("egohtr_review_orcs_terrain_cost", 0.0) > 0:
+            gates["native_terrain"] = (
+                checks["orcs_terrain_penetration_m"]["max"] < 0.002
+            )
     checks.update(
         gates=gates,
         passed=all(gates.values()),
@@ -337,6 +378,7 @@ def audit(ws, run, surface=True, debug=False):
             folder / "audit.npz",
             orcs_self_m=self_depth,
             terrain_m=terrain,
+            orcs_terrain_m=native_terrain,
             separation_m=separation,
             points=points,
             velocity=velocities,

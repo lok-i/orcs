@@ -133,7 +133,7 @@ def model_for(ws, run):
     return mujoco.MjModel.from_xml_path(str(ws.asset(run, "robot")))
 
 
-def scene(ws, run, collision=False):
+def scene(ws, run, collision=False, native=False):
     """Build the same robot/scan/proxy view used by geometric audits and reports."""
     import mujoco
     import numpy as np
@@ -141,7 +141,9 @@ def scene(ws, run, collision=False):
 
     motion = load_motion(ws.run_dir(run) / "motion.npz")
     scale = float(motion["smpl_scale"].item())
-    spec = mujoco.MjSpec.from_file(str(ws.asset(run, "robot")))
+    spec = mujoco.MjSpec.from_file(
+        str(ws.asset(run, "orcs_robot" if native else "robot"))
+    )
     spec.visual.global_.offwidth = 960
     spec.visual.global_.offheight = 720
     spec.visual.headlight.ambient[:] = (0.48, 0.48, 0.48)

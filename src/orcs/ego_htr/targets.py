@@ -38,15 +38,19 @@ def override_blend(start, end, count, fade):
     return values
 
 
-def ray_height(ray, points, expected):
+def ray_height(ray, points, expected, *, upward_only=False):
     origin = points.copy()
     origin[:, 2] = expected + 0.22
-    loc, ids, _ = ray.intersects_location(
+    loc, ids, faces = ray.intersects_location(
         origin, np.tile([0.0, 0.0, -1.0], (len(origin), 1)), multiple_hits=True
     )
     height = np.full(len(origin), np.nan)
-    # The nearest vertical surface to the anticipated sole avoids a distant
-    # underside when the crop has multiple scan layers.
+    if upward_only and len(ids):
+        keep = ray.mesh.face_normals[faces, 2] > 0.25
+        loc, ids = loc[keep], ids[keep]
+    # Choose the nearest layer around the anticipated sole. Proxy support
+    # planning additionally rejects downward faces: proximity alone can choose
+    # the underside of a thin slab and place a sole inside its collider.
     if len(ids):
         order = np.argsort(np.abs(loc[:, 2] - expected[ids]))
         first = np.unique(ids[order], return_index=True)[1]
@@ -57,6 +61,12 @@ def ray_height(ray, points, expected):
 
 def build(source, terrain, scale, output, options=None):
     options = options or {}
+    surface = options.get("support_surface", "scan")
+    if surface not in ("scan", "proxy"):
+        raise ValueError("support_surface must be 'scan' or 'proxy'")
+    clearance = float(options.get("sole_clearance", 0.004))
+    if not np.isfinite(clearance) or clearance < 0:
+        raise ValueError("sole_clearance must be finite and nonnegative")
     source, terrain, output = Path(source), Path(terrain), Path(output)
     joints = np.load(source / "egohtr_joints.npy").astype(float) * scale
     n = len(joints)
@@ -135,10 +145,13 @@ def build(source, terrain, scale, output, options=None):
             flat = points.reshape(-1, 3)
             expect = np.repeat(candidates[:, 2], 5)
             heights = ray_height(scan_ray, flat, expect).reshape(-1, 5)
-            proxy_heights = ray_height(proxy_ray, flat, expect).reshape(-1, 5)
+            proxy_heights = ray_height(
+                proxy_ray, flat, expect, upward_only=surface == "proxy"
+            ).reshape(-1, 5)
+            support_heights = proxy_heights if surface == "proxy" else heights
             best = None
             A = np.c_[xy[:, :2], np.ones(5)]
-            for i, hs in enumerate(heights):
+            for i, hs in enumerate(support_heights):
                 valid = np.isfinite(hs)
                 if valid.sum() < 3:
                     continue
@@ -148,9 +161,9 @@ def build(source, terrain, scale, output, options=None):
                     continue
                 plane = A @ np.array([a, b, c])
                 residual = hs[valid] - plane[valid]
-                # Raise just enough to avoid the scan; discourage candidates
-                # whose convex proxy covers the usable scan by a large amount.
-                raise_z = max(0.0, float(residual.max())) + 0.004
+                # Clear the chosen support surface. In scan mode, also
+                # discourage patches with substantial convex proxy overfill.
+                raise_z = max(0.0, float(residual.max())) + clearance
                 mismatch = (
                     np.nanmax(proxy_heights[i] - plane)
                     if np.isfinite(proxy_heights[i]).any()
@@ -289,7 +302,7 @@ def build(source, terrain, scale, output, options=None):
     )
     return dict(
         segments=segments,
-        source="Filtered source ankles/toes plus local scan plane fits",
+        source=f"Filtered source ankles/toes plus local {surface} plane fits",
         overrides=options,
     )
 
