@@ -74,6 +74,7 @@ def apply(multi_clip_cfgs: tuple[type, ...] = ()) -> None:
     _install_sentinels(multi_clip_cfgs)
     _patch_entrypoints_reinstall(multi_clip_cfgs)
     _patch_play_init_agent()
+    _patch_viser_play_defaults()
     _muffle_mesh_support_warning()
     _patch_put_data_nccdmax()
 
@@ -105,6 +106,30 @@ def _patch_entrypoints_reinstall(multi_clip_cfgs: tuple[type, ...]) -> None:
 
         wrapper._orcs_reinstall = True  # type: ignore[attr-defined]
         setattr(mod, fn_name, wrapper)
+
+
+def _patch_viser_play_defaults() -> None:
+    """Start mjlab's Viser GUI in dark mode with camera tracking unchecked.
+
+    Set the scene state before its checkbox is built so the control and camera
+    agree. These are startup defaults; the ordinary GUI callbacks stay active.
+    """
+    import functools
+
+    from mjlab.viewer.viser.scene import MjlabViserScene
+
+    original = MjlabViserScene.create_scene_gui
+    if getattr(original, "_orcs_play_defaults", False):
+        return
+
+    @functools.wraps(original)
+    def create_scene_gui(self, *args, **kwargs):
+        self.camera_tracking_enabled = False
+        self.server.gui.configure_theme(dark_mode=True)
+        return original(self, *args, **kwargs)
+
+    create_scene_gui._orcs_play_defaults = True  # type: ignore[attr-defined]
+    MjlabViserScene.create_scene_gui = create_scene_gui
 
 
 def _patch_put_data_nccdmax() -> None:

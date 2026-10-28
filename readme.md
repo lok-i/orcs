@@ -99,6 +99,8 @@ play Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl --agent random --viewer native
 - releases: [`lkrajan/orcs`](https://huggingface.co/lkrajan/orcs); fetched on use
 - all releases: `bash scripts/setup/download_released_models.sh`
 - trained checkpoints: `--checkpoint-file` or `--wandb-run-path`
+- `--viewer viser`: starts with **Track camera off** and **Dark Mode on**;
+  both remain adjustable in the viewer.
 
 ## train
 

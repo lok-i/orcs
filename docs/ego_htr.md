@@ -63,6 +63,9 @@ Export the accepted 03 once, then play the frozen base:
 - EgoHTR sets `sim.mujoco.nccdmax=128` for train and play; no environment prefix needed.
 - Play fixes sliding friction to **1.0 on all foot colliders**. Hands/terrain retain
   their nominal settings; training retains its existing friction randomization.
+- Train and play finish each crop with **one step of end padding** (20 ms).
+  These references end in motion; this task does not require a final standing hold.
+  The endpoint default is local to EgoHTR; other PerLoco tasks are unchanged.
 - `initial` constructs the frozen SONIC base with an untrained adapter.
 - The policy viewer runs physics; the review viewer replays the reference.
 - Staged reference/proxy viewer: `orcs-view-terrain --source egohtr --port 8087`.
@@ -126,6 +129,20 @@ WANDB_USERNAME=lkrajan \
 | `stage --out PATH` | Alternative generated dataset root |
 | `ORCS_EGOHTR_ROOT` | Load that alternative root during train/play |
 | `ORCS_EGOHTR_ROSTER` | Ordinary PerLoco TOML roster selecting staged crop families |
+
+Select only 03/05 from an existing export snapshot:
+
+```bash
+ORCS_EGOHTR_ROOT=/path/to/staged-snapshot \
+ORCS_EGOHTR_ROSTER=src/orcs/tasks/perloco/rosters/egohtr_03_05.toml \
+  .venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic \
+  --agent trained --checkpoint-file /path/to/checkpoint.pt \
+  --num-envs 2 --viewer viser
+```
+
+- The subset reuses the staged motions and terrain; it does not retarget or retrain.
+- A checkpoint trained on all four clips remains a four-clip-trained checkpoint
+  when evaluated on this subset. Validate tracking after changing a selection.
 
 - Export snapshots motion/terrain hashes and copies the hull files. A repeated
   identical export reuses them; a changed reference needs a fresh `--out`.

@@ -164,6 +164,8 @@ Example revision override (ranges are half-open **prepared-source frame IDs**):
 - `foot_heading_overrides`: `{side,start,end,direction:"forward",weight,fade}`
   rotates only that foot's target footprint toward the pelvis-forward direction;
   use it on diagnosed swing intervals and taper interior boundaries.
+  Add `preserve_tilt:true` to retain the fitted sole-plane normal when adjusting
+  heading on sloped support. The default preserves earlier recipe behavior.
 - `joint_posture_overrides`: `{joint,start,end,target,cost,fade}` adds a smooth,
   frame-local hinge preference. `heading_cost_overrides` similarly scales the
   pelvis heading/upright cost over `{start,end,scale,fade}`. Keep these local to
@@ -181,6 +183,14 @@ Example revision override (ranges are half-open **prepared-source frame IDs**):
   it costs more solver time. `egohtr_review_exact_root_rotation_limit=true`
   uses the quaternion-difference Jacobian for the root speed constraint instead
   of the older angular box approximation (default `false` for recipe parity).
+- `egohtr_review_orcs_self_substeps` (default `1`) likewise checks native self
+  clearance between source poses. Use `5` when wrists/hips or limbs overlap only
+  after 50 Hz resampling; increasing endpoint margins alone can miss these cases.
+- `egohtr_review_initial_qpos` optionally seeds the first sequential solve with
+  a complete G1 pose (root XYZ, WXYZ, native joint order). Record its source run
+  and any initial clearance in the override summary. This is an optimization
+  seed, not an exported trajectory offset; use it when zero-joint initialization
+  starts inside a scan or chooses the wrong side of a thin surface.
 - Other review keys: foot cost/separation, knee separation/flexion target/cost,
   elbow posture target/cost, heading cost, balance cost, native margin and hand
   preservation cost. Use existing `egohtr_review_*` keys from presets/patch.

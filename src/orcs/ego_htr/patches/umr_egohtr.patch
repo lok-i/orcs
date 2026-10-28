@@ -1,5 +1,5 @@
 diff --git a/scripts/retarget_smpl_to_humanoid_surface_vector.py b/scripts/retarget_smpl_to_humanoid_surface_vector.py
-index eb53a37..410d6fb 100644
+index eb53a37..4029aff 100644
 --- a/scripts/retarget_smpl_to_humanoid_surface_vector.py
 +++ b/scripts/retarget_smpl_to_humanoid_surface_vector.py
 @@ -1031,7 +1031,10 @@ def scale_mjcf_mesh_assets(root: ET.Element, mesh_scale: float) -> None:
@@ -202,7 +202,7 @@ index eb53a37..410d6fb 100644
          if use_root_step_box:
              common.apply_qvel_box_limit(
                  step_lower,
-@@ -2027,6 +2190,78 @@ def solve_frame_body_segment_qp(
+@@ -2027,6 +2190,89 @@ def solve_frame_body_segment_qp(
          ineq_rows = []
          ineq_bounds = []
          ineq_soft_costs = []
@@ -219,13 +219,24 @@ index eb53a37..410d6fb 100644
 +                        ineq_bounds.append(limit-sign * root_delta[root_rotation_dof_ids[axis]])
 +                        ineq_soft_costs.append(0.)  # Hard velocity bound.
 +            aux_model, aux_data, aux_cache = review_frame["orcs_collision"]
-+            common.set_qpos(aux_model, aux_data, qpos)
-+            aux_jacobians, aux_distances = common.compute_robot_self_penetration_rows(
-+                aux_model, aux_data, aux_cache, .10)
-+            for jac, distance in zip(aux_jacobians, aux_distances):
-+                ineq_rows.append(-jac)
-+                ineq_bounds.append(float(distance)-review_frame["orcs_margin"])
-+                ineq_soft_costs.append(review_frame["orcs_collision_cost"])
++            self_substeps = review_frame["orcs_self_substeps"] if qpos_prev is not None else 1
++            for step in range(1, self_substeps + 1):
++                fraction = step / self_substeps
++                sample = qpos
++                if fraction < 1.:
++                    # Match staged lerp/slerp, including self contacts that
++                    # do not exist at either 30 Hz endpoint.
++                    sample = qpos_prev.copy()
++                    delta = np.zeros(model.nv)
++                    mujoco.mj_differentiatePos(model, delta, 1., qpos_prev, qpos)
++                    mujoco.mj_integratePos(model, sample, delta, fraction)
++                common.set_qpos(aux_model, aux_data, sample)
++                aux_jacobians, aux_distances = common.compute_robot_self_penetration_rows(
++                    aux_model, aux_data, aux_cache, .10)
++                for jac, distance in zip(aux_jacobians, aux_distances):
++                    ineq_rows.append(-fraction * jac)
++                    ineq_bounds.append(float(distance)-review_frame["orcs_margin"])
++                    ineq_soft_costs.append(review_frame["orcs_collision_cost"])
 +            # Use the native robot's geometry AND kinematics for terrain
 +            # clearance. UMR's robot differs at the hands, waist and soles.
 +            if review_frame.get("orcs_terrain") is not None:
@@ -281,7 +292,7 @@ index eb53a37..410d6fb 100644
          ground_mode = str(args.ground_penetration_hard_constraint_mode)
          if bool(args.ground_penetration_hard_constraint) and ground_mode in {"surface_slots", "surface_slots_all"}:
              if ground_mode == "surface_slots_all":
-@@ -2109,6 +2344,7 @@ def solve_frame_body_segment_qp(
+@@ -2109,6 +2355,7 @@ def solve_frame_body_segment_qp(
              ineq_b=ineq_b,
              ineq_soft_costs=ineq_soft_costs_array,
              l2_step_limits=l2_step_limits,
@@ -289,13 +300,15 @@ index eb53a37..410d6fb 100644
          )
          mujoco.mj_integratePos(model, qpos, dq, 1.0)
          qpos = common.clamp_joint_ranges(model, qpos, joint_limits_by_qpos=joint_limits_by_qpos)
-@@ -2530,6 +2766,40 @@ def main():
+@@ -2530,6 +2777,42 @@ def main():
      robot_xml = prepare_robot_xml(args)
      model = mujoco.MjModel.from_xml_path(str(robot_xml))
      data_mj = mujoco.MjData(model)
 +    review_cfg = section(args.config_data, "solver")
 +    if int(review_cfg.get("egohtr_review_orcs_terrain_substeps", 1)) < 1:
 +        raise ValueError("Native terrain substeps must be positive")
++    if int(review_cfg.get("egohtr_review_orcs_self_substeps", 1)) < 1:
++        raise ValueError("Native self-collision substeps must be positive")
 +    review_data = None
 +    review_orcs_collision = None
 +    review_orcs_terrain = None
@@ -330,7 +343,30 @@ index eb53a37..410d6fb 100644
      robot_self_penetration_cache = common.build_robot_self_penetration_cache(model, args)
      ground_penetration_collision_cache = common.build_ground_penetration_collision_cache(model, args)
      robot_object_penetration_cache = build_robot_object_penetration_cache(
-@@ -2744,6 +3014,42 @@ def main():
+@@ -2688,7 +2971,22 @@ def main():
+             "expected 'sequential' or 'bidirectional'."
+         )
+ 
++    review_initial_qpos = review_cfg.get("egohtr_review_initial_qpos")
++    if review_initial_qpos is not None:
++        review_initial_qpos = np.asarray(review_initial_qpos, dtype=float)
++        if (review_initial_qpos.shape != (model.nq,)
++                or not np.isfinite(review_initial_qpos).all()
++                or np.linalg.norm(review_initial_qpos[3:7]) < 1e-8
++                or trajectory_warm_start_mode != "sequential"):
++            raise ValueError("Review initial qpos requires a finite native-order pose and sequential solve")
++        review_initial_qpos = common.clamp_joint_ranges(
++            model, review_initial_qpos, joint_limits_by_qpos=joint_limits_by_qpos)
++
+     def initial_qpos_for_frame(out_idx: int):
++        if out_idx == 0 and review_initial_qpos is not None:
++            # Optimization seed only: subsequent poses still follow the source
++            # and contact targets. Useful when zero joints start inside a scan.
++            return review_initial_qpos.copy()
+         q_init = q_body_zero.copy()
+         q_init[:3] = common.source_root_joint_position(joints_scaled[out_idx], source_joint_names)
+         q_init[3:7] = common.source_qpos_body_heading(joints_scaled[out_idx], source_joint_names)
+@@ -2744,6 +3042,43 @@ def main():
                  ground_penetration_collision_cache=ground_penetration_collision_cache,
                  robot_object_penetration_cache=robot_object_penetration_cache,
                  ground_contact_anchor_state=ground_contact_anchor_state,
@@ -349,6 +385,7 @@ index eb53a37..410d6fb 100644
 +                    "max_root_rotation_velocity": float(review_cfg.get("egohtr_review_max_root_rotation_velocity", 2.0)),
 +                    "exact_root_rotation_limit": bool(review_cfg.get("egohtr_review_exact_root_rotation_limit", False)),
 +                    "orcs_collision_cost": float(review_cfg.get("egohtr_review_orcs_collision_cost", 10000000.0)),
++                    "orcs_self_substeps": int(review_cfg.get("egohtr_review_orcs_self_substeps", 1)),
 +                    "separation_cost": float(review_cfg.get("egohtr_review_separation_cost", 1000000.0)),
 +                    "orcs_collision": review_orcs_collision,
 +                    "orcs_margin": float(review_cfg.get("egohtr_review_orcs_margin", .01)),

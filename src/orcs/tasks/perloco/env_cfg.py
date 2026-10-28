@@ -407,6 +407,10 @@ def egohtr_env_cfg(
         dataset_root=root,
     )
     cfg.commands["motion"].dataset_hashes = provenance
+    # These crops end in motion, not a settled pose. Match the EgoHTR training
+    # runs: finish at the clip boundary instead of holding the final moving
+    # velocity targets for two seconds. Keep train/play defaults aligned.
+    cfg.terminations["exceeded_motion"].params["epsilon_steps"] = 1
     # Mesh contacts need a separate budget from authored box terrains.
     cfg.sim.nconmax = 256
     cfg.sim.njmax = 768

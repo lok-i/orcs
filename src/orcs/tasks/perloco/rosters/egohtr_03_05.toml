@@ -1,0 +1,7 @@
+# Reviewed 03/05 subset. ORCS_EGOHTR_ROOT chooses the immutable export snapshot;
+# each family's export.json records the exact motion and terrain revision.
+families = [
+  "rocky-path_s7_bzb_01__40-50s",
+  "cliff-jump_s4_bzb_01__28-38s",
+]
+levels = [0.0]

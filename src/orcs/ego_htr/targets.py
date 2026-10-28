@@ -249,8 +249,18 @@ def build(source, terrain, scale, output, options=None):
             raise ValueError("Foot heading direction must be 'forward'")
         for local_frame, frame in enumerate(range(start, end)):
             forward = unit(np.cross(left[frame], [0.0, 0.0, 1.0]))
-            lateral = np.cross([0.0, 0.0, 1.0], forward)
-            rotation = np.stack([forward, lateral, [0.0, 0.0, 1.0]], axis=1)
+            normal = np.array([0.0, 0.0, 1.0])
+            if override.get("preserve_tilt", False):
+                # Change heading within the existing sole plane. Flattening
+                # a planted footprint here discards the fitted terrain slope.
+                centered = goals[frame, side] - goals[frame, side].mean(axis=0)
+                _, _, vh = np.linalg.svd(centered, full_matrices=False)
+                normal = vh[-1]
+                if normal[2] < 0:
+                    normal = -normal
+                forward = unit(forward - normal * np.dot(forward, normal))
+            lateral = np.cross(normal, forward)
+            rotation = np.stack([forward, lateral, normal], axis=1)
             centroid = goals[frame, side].mean(axis=0)
             desired = centroid + (LOCAL - LOCAL.mean(axis=0)) @ rotation.T
             alpha = blend[local_frame]
