@@ -69,6 +69,62 @@ def test_bad_second_crop_does_not_partially_install(bundle):
     assert not out.exists()
 
 
+def test_notice_upgrade_preserves_payload_and_rejects_other_metadata_changes(bundle):
+    motions, _, out, _ = bundle
+    install_egohtr(*bundle)
+    original = {p.relative_to(out): sha(p) for p in out.rglob("*")
+                if p.is_file() and p.name not in ("metadata.json", "export.json")}
+    path = motions / "data/unitree_g1/egohtr/ascent/sample1/metadata.json"
+    meta = json.loads(path.read_text())
+    meta["source_notice"] = {"attribution": "Source authors", "license": "CC-BY-4.0"}
+    path.write_text(json.dumps(meta))
+    assert install_egohtr(*bundle)["refreshed_notices"]
+    assert install_egohtr(*bundle)["reused"]
+    assert all(sha(out / relative) == digest for relative, digest in original.items())
+    assert json.loads((out / "ascent/level_0.00/sample0/metadata.json").read_text()) == meta
+    meta["review_run"] = "different reference"
+    path.write_text(json.dumps(meta))
+    with pytest.raises(FileExistsError, match="another export"):
+        install_egohtr(*bundle)
+
+
+def test_notice_upgrade_does_not_hide_modified_payload(bundle):
+    motions, _, out, _ = bundle
+    install_egohtr(*bundle)
+    path = motions / "data/unitree_g1/egohtr/ascent/sample1/metadata.json"
+    meta = json.loads(path.read_text())
+    meta["source_notice"] = {"attribution": "Source authors"}
+    path.write_text(json.dumps(meta))
+    target = out / "window/level_0.00/sample0/motion.npz"
+    target.write_bytes(b"local edit")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        install_egohtr(*bundle)
+    assert target.read_bytes() == b"local edit"
+    assert "source_notice" not in json.loads(
+        (out / "ascent/level_0.00/sample0/metadata.json").read_text())
+
+
+def test_notice_upgrade_restores_existing_export_if_activation_fails(bundle, monkeypatch):
+    motions, _, out, _ = bundle
+    install_egohtr(*bundle)
+    original = {p.relative_to(out): p.read_bytes() for p in out.rglob("*") if p.is_file()}
+    path = motions / "data/unitree_g1/egohtr/ascent/sample1/metadata.json"
+    meta = json.loads(path.read_text())
+    meta["source_notice"] = {"attribution": "Source authors"}
+    path.write_text(json.dumps(meta))
+    rename = Path.rename
+
+    def fail_activation(path, destination):
+        if path.name == "bundle" and destination == out:
+            raise OSError("simulated activation failure")
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", fail_activation)
+    with pytest.raises(OSError, match="activation failure"):
+        install_egohtr(*bundle)
+    assert {p.relative_to(out): p.read_bytes() for p in out.rglob("*") if p.is_file()} == original
+
+
 def test_installer_rejects_mismatched_terrain_even_with_valid_checksum(bundle):
     motions, assets, _, _ = bundle
     meta_path = motions / "data/unitree_g1/egohtr/ascent/sample1/metadata.json"

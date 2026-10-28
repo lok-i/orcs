@@ -136,12 +136,12 @@ PerLoco ships the reviewed 03 rocky ascent and 05 window crossing. Normal data
 setup installs their paired references and terrains:
 
 ```bash
-.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --num-envs 2 --viewer viser
+.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent release --num-envs 2 --viewer viser
 ```
 
 - EgoHTR defaults: CCD capacity 128 for train/play; play foot friction 1.0.
 - Joint 03/05 training: [10k updates in `lkrajan/orcs`](docs/ego_htr.md#joint-0305-training).
-- Development setup pins the dependency PR heads; see [setup status](docs/ego_htr.md#play-and-train).
+- Development setup pins the dependency PR heads and [HF checkpoint candidate](https://huggingface.co/lkrajan/orcs/discussions/1); see [setup status](docs/ego_htr.md#play-and-train).
 - Multi-clip selection: [EgoHTR tasks](docs/ego_htr.md#multiple-crops).
 
 ## paths

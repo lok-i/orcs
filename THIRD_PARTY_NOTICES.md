@@ -43,7 +43,7 @@ bundled in the ORCS Python distribution:
 | [GRAIL](https://github.com/NVlabs/GRAIL) | Terrain-motion source dataset | NVIDIA's upstream repository and data terms |
 | [OmniRetarget Dataset](https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset) | Retargeted terrain and object motions | MIT as declared by its dataset card |
 | [SMPL-X](https://smpl-x.is.tue.mpg.de/) | Manually supplied body-model files | SMPL-X model license |
-| [EgoHTR](https://huggingface.co/datasets/leggedrobotics/egohtr) | Selected human motions and terrain scans | Dataset's upstream access and distribution terms |
+| [EgoHTR](https://huggingface.co/datasets/leggedrobotics/egohtr) | Selected human motions, terrain scans and processed 03/05 pairs | CC-BY-4.0; original dataset access conditions also apply to its downloaders. Attribution, modifications and a conditions summary travel in processed sample metadata and terrain provenance. |
 | [UMR](https://github.com/hanyang9/UMR) | Optional scene-aware G1 retargeting | MIT; integration patch notice above |
 | [CoACD](https://github.com/SarahWeiii/CoACD) | Optional terrain collision decomposition | Its upstream distribution and license |
 | [mjlab](https://github.com/mujocolab/mjlab), [RSL-RL](https://github.com/leggedrobotics/rsl_rl), and the installed assets package | Simulation, learning, and model assets | Their respective distributions and licenses |

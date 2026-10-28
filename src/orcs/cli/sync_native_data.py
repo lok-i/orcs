@@ -7,6 +7,7 @@ files into PerLoco's existing layout; no simulator or retargeter is imported.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import shutil
@@ -60,13 +61,21 @@ def _verify(path: Path, expected: str) -> None:
         raise ValueError(f"EgoHTR checksum mismatch: {path}; check dependency revisions and LFS files")
 
 
+def _without_notice(manifest: dict) -> dict:
+    """Ignore only the portable source notice and its metadata file checksum."""
+    manifest = copy.deepcopy(manifest)
+    manifest["identity"]["source"].pop("source_notice", None)
+    manifest["files"].pop("level_0.00/sample0/metadata.json", None)
+    return manifest
+
+
 def install_egohtr(
     retargeted_root: Path | None = None,
     asset_root: Path | None = None,
     out: Path | None = None,
     roster: Path | None = None,
 ) -> dict:
-    """Copy the rostered processed bundle, refusing to replace different data."""
+    """Copy processed pairs; refresh only notices in otherwise identical exports."""
     retargeted_root = (retargeted_root or DATA_ROOT / "retargeted_motions").resolve()
     asset_root = (asset_root or assets_source()).resolve()
     out = (out or DATA_ROOT / "terrain_motions/egohtr").resolve()
@@ -101,21 +110,32 @@ def install_egohtr(
         )
         bundles.append((family, payload, manifest))
 
+    refresh_notices = False
     if out.exists():
         for family, _, manifest in bundles:
             folder = out / family
             recorded = folder / "export.json"
-            if not recorded.is_file() or json.loads(recorded.read_text()) != manifest:
+            previous = json.loads(recorded.read_text()) if recorded.is_file() else None
+            if previous is None or _without_notice(previous) != _without_notice(manifest):
                 raise FileExistsError(
                     f"{out} contains another export or incomplete data. Move it aside "
                     "to preserve it, or choose a fresh --out; no files were changed."
                 )
             actual = {str(p.relative_to(folder)) for p in folder.rglob("*") if p.is_file()}
-            if actual != set(manifest["files"]) | {"export.json"}:
+            if actual != set(previous["files"]) | {"export.json"}:
                 raise ValueError(f"Unexpected or missing files in installed EgoHTR crop: {folder}")
-            for relative, sha in manifest["files"].items():
+            for relative, sha in previous["files"].items():
                 _verify(_file(folder, relative), sha)
-        return dict(root=str(out), clips=families, reused=True)
+            # A valid manifest must describe the actual metadata too. Keep every
+            # source/pairing field immutable; only source_notice may be refreshed.
+            metadata = json.loads((folder / "level_0.00/sample0/metadata.json").read_text())
+            if metadata != previous["identity"]["source"]:
+                raise ValueError(f"Metadata does not match installed EgoHTR manifest: {folder}")
+            refresh_notices |= previous != manifest
+        if not refresh_notices:
+            return dict(root=str(out), clips=families, reused=True)
+        if {p.name for p in out.iterdir()} != set(families):
+            raise ValueError(f"Unexpected files in installed EgoHTR root: {out}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".egohtr-", dir=out.parent) as temporary:
@@ -128,8 +148,17 @@ def install_egohtr(
                 shutil.copyfile(source, target)
                 _verify(target, manifest["files"][relative])
             (folder / "export.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        prepared.rename(out)
-    return dict(root=str(out), clips=families, reused=False)
+        if refresh_notices:
+            previous_root = Path(temporary) / "previous"
+            out.rename(previous_root)
+            try:
+                prepared.rename(out)
+            except BaseException:
+                previous_root.rename(out)
+                raise
+        else:
+            prepared.rename(out)
+    return dict(root=str(out), clips=families, reused=False, refreshed_notices=refresh_notices)
 
 
 def main() -> None:

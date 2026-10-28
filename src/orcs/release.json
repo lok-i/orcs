@@ -1,7 +1,7 @@
 {
   "schema": "orcs.release.v1",
   "repo_id": "lkrajan/orcs",
-  "revision": "v0.1.0",
+  "revision": "b374fc2f3d3276b38486d2d5c58d515d7e2df808",
   "compatibility": {
     "mocke": "d7e2bbe22fbb93231cc12a738eb2585771081ca6",
     "rsl_rl": "7a28369ae0295a232ff3dad9913e811ee87cf4d0"
@@ -46,6 +46,25 @@
         "sha256": "74c9bb3f1e58130eda87c9995b6f0c14b0077e28e5e01cf610725dba57714a50"
       },
       "source_run": "vbp/omni-object/gcyrhxjr"
+    },
+    "Orcs-PerLoco-EgoHtr-AdaptSonic": {
+      "checkpoint": {
+        "path": "Orcs-PerLoco-EgoHtr-AdaptSonic/checkpoint.pt",
+        "source_name": "model_9999.pt",
+        "iteration": 9999,
+        "size_bytes": 66424778,
+        "sha256": "4b12e57d7c9e83c0e3ab29a4cd7635acc7e3594393df1dbd38c9f31dfd333908"
+      },
+      "source_run": "lkrajan/orcs/6ot4spsx",
+      "compatibility": {
+        "assets": "678ec74310ceaab28ff0567134d84a5bba26d827",
+        "retargeted_motions": "1fd472a3a102045b4d1ee7509a151dcb91cb9e87",
+        "mocke": "b50fb6d11e7616598dec8b444e88c55b559ec87b",
+        "rsl_rl": "215b6f4ceda569d2ca39df64dd679b9af15375cb"
+      }
     }
-  }
+  },
+  "status": "candidate; final tag will be created after review",
+  "release": "v0.1.1",
+  "review": "https://huggingface.co/lkrajan/orcs/discussions/1"
 }

@@ -60,11 +60,14 @@ EgoHTR download, UMR, resampling, FK or CoACD step is required.
 > [motion-data PR](https://huggingface.co/datasets/l-k-r/retargeted_motions/discussions/14)
 > and [assets PR](https://github.com/drcl-deploy/assets/pull/58). Both remain open
 > for review; release pins will be updated to their merged main commits.
+> `--agent release` downloads the joint policy from the immutable commit of
+> [HF model PR #1](https://huggingface.co/lkrajan/orcs/discussions/1). The final
+> `v0.1.1` tag is pending review; `v0.1.0` remains unchanged.
 
 ```bash
 bash scripts/setup/sync_deps.sh --no-smpl
 bash scripts/setup/sync_data.sh --no-smpl
-.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --num-envs 2 --viewer viser
+.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent release --num-envs 2 --viewer viser
 ```
 
 - Already installed? Run only `play`; there is no separate EgoHTR setup mode.
@@ -73,7 +76,7 @@ bash scripts/setup/sync_data.sh --no-smpl
 - Policy viewer: `http://localhost:8080`; use `--viewer native` for a desktop window.
 - `initial` constructs the frozen SONIC base with an untrained adapter.
 - Policy playback runs physics; the review viewer replays the reference.
-- The released checkpoint will use the ordinary `--agent release` path once published.
+- `release` downloads and verifies the joint 03/05 checkpoint; W&B access is unnecessary.
 
 | Shipped crop | Reviewed revision | Reference | Terrain |
 |---|---|---|---|
@@ -90,8 +93,11 @@ bash scripts/setup/sync_data.sh --no-smpl
 - Motion metadata pins the matching terrain descriptor; descriptors pin mesh hashes.
 - Installer verifies hashes and copies the exact training inputs. An identical
   repeat is reused; another export or modified local data is never overwritten.
-  Move an older `data/terrain_motions/egohtr` aside before installing this bundle.
+  Source notices can refresh automatically when every other field and payload
+  is identical. Move a different `data/terrain_motions/egohtr` export aside first.
 - Runtime files are self-contained. Original review logs and raw scans are unnecessary.
+- Each sample's metadata preserves the EgoHTR citation, CC-BY-4.0 license link,
+  changes and original access-conditions summary through lean setup.
 - The two terrains form one atlas; each world receives the reference belonging
   to its terrain. Independent robot worlds do not collide with each other.
 - Height scans raycast the same convex surfaces used for collisions.
