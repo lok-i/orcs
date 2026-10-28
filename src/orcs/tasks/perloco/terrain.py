@@ -49,8 +49,8 @@ says which terrain geoms are ground and which are obstacle.
 mjlab renames every terrain geom to `terrain_<i>` at merge
 (`terrain_generator._build`), so a role-carrying NAME does not survive; the
 nominal rgba does, and `color_scheme="height"` is what writes it. A consumer
-that recolours the terrain matches against this."""
-_FLOOR_RGBA = FLOOR_RGBA
+that recolours the terrain matches against this default (or the tile's
+explicit `floor_rgba` override)."""
 _BOX_RGBA_LO = np.array([0.24, 0.46, 0.86, 1.0])   # easiest level
 _BOX_RGBA_HI = np.array([0.88, 0.34, 0.28, 1.0])   # hardest level
 
@@ -72,6 +72,8 @@ class TileTerrainCfg(SubTerrainCfg):
     root: Path = field(default_factory=Path)
     family: str = ""
     levels: tuple[float, ...] = ()
+    floor_rgba: tuple[float, float, float, float] = FLOOR_RGBA
+    mesh_rgba: tuple[float, float, float, float] = (0.47, 0.51, 0.48, 1.0)
     render_z_scale: float | None = None
     """Render every tile at THIS absolute z_scale instead of its own level.
     `None` = staged geometry, and the two axes stay paired.
@@ -106,9 +108,9 @@ class TileTerrainCfg(SubTerrainCfg):
                 type=mujoco.mjtGeom.mjGEOM_BOX,
                 size=(cx, cy, 0.5 * _FLOOR_DEPTH),
                 pos=(cx, cy, tile.get("floor_z", 0.0) - 0.5 * _FLOOR_DEPTH),
-                rgba=_FLOOR_RGBA,
+                rgba=self.floor_rgba,
             ),
-            color=_FLOOR_RGBA,
+            color=self.floor_rgba,
         )]
         # Staged boxes are bottom-pinned at z=0 and `level` IS their z scale, so
         # an absolute re-scale is one factor on pos.z and half.z.
@@ -132,7 +134,7 @@ class TileTerrainCfg(SubTerrainCfg):
                 raise ValueError("render_z_scale is not defined for convex terrain")
             name = f"{self.family}_{row}_hull_{index}"
             spec.add_mesh(name=name, file=str(path), scale=mesh["scale"])
-            color = (0.47, 0.51, 0.48, 1.0)
+            color = self.mesh_rgba
             geoms.append(TerrainGeometry(
                 geom=body.add_geom(
                     type=mujoco.mjtGeom.mjGEOM_MESH, meshname=name,

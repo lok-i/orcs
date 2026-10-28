@@ -60,6 +60,9 @@ Export the accepted 03 once, then play the frozen base:
 ```
 
 - Policy viewer: `http://localhost:8080`. Use `--viewer native` for a desktop window.
+- EgoHTR's [display palette](../src/orcs/ego_htr/palette.py): warm gray terrain,
+  charcoal ground, pale blue reference (12% opacity), cyan height-scan points.
+  These color overrides apply only to EgoHTR tasks.
 - EgoHTR sets `sim.mujoco.nccdmax=128` for train and play; no environment prefix needed.
 - Play fixes sliding friction to **1.0 on all foot colliders**. Hands/terrain retain
   their nominal settings; training retains its existing friction randomization.

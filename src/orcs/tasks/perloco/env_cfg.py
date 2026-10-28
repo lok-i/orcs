@@ -50,6 +50,7 @@ from orcs.core.data.seeds import SeedMotion
 from orcs.core.obs import apply_obs_noise
 from orcs.core.paths import DATA_ROOT
 from orcs.core.robustness import apply_robot_robustness, strip_domain
+from orcs.ego_htr.palette import GROUND_RGBA, REFERENCE_RGBA, SCAN_RGBA, TERRAIN_RGBA
 from orcs.tasks.perloco import mdp
 from orcs.tasks.perloco.egohtr_sim import EgoHtrMujocoCfg
 from orcs.tasks.perloco.mdp.commands import (
@@ -61,6 +62,7 @@ from orcs.tasks.perloco.roster import Roster, load_roster
 from orcs.tasks.perloco.sensors import (
     GROUND_CONTACT_SENSOR_NAME,
     PERLOCO_KILL_BODIES,
+    TERRAIN_SCAN_SENSOR_NAME,
     ground_contact_sensor,
     terrain_scan_sensor,
 )
@@ -407,6 +409,14 @@ def egohtr_env_cfg(
         dataset_root=root,
     )
     cfg.commands["motion"].dataset_hashes = provenance
+    # EgoHTR display palette only; shared PerLoco defaults stay unchanged.
+    for tile_cfg in cfg.scene.terrain.terrain_generator.sub_terrains.values():
+        tile_cfg.floor_rgba = GROUND_RGBA
+        tile_cfg.mesh_rgba = TERRAIN_RGBA
+    cfg.commands["motion"].viz.ghost_color = REFERENCE_RGBA
+    for sensor_cfg in cfg.scene.sensors:
+        if sensor_cfg.name == TERRAIN_SCAN_SENSOR_NAME:
+            sensor_cfg.viz.hit_sphere_color = SCAN_RGBA
     # These crops end in motion, not a settled pose. Match the EgoHTR training
     # runs: finish at the clip boundary instead of holding the final moving
     # velocity targets for two seconds. Keep train/play defaults aligned.
