@@ -52,6 +52,12 @@ def test_release_manifest_ships(wheel):
     assert "orcs/release.json" in set(wheel.namelist())
 
 
+def test_native_setup_ships_without_local_release_recorder(wheel):
+    names = set(wheel.namelist())
+    assert "orcs/cli/sync_native_data.py" in names
+    assert "orcs/cli/ego_htr_preview.py" not in names
+
+
 def test_ego_htr_skill_recipes_and_patch_ship(wheel, tmp_path):
     expected = [
         "SKILL.md",

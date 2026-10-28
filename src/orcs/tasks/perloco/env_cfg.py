@@ -373,7 +373,7 @@ def egohtr_env_cfg(
 ) -> ManagerBasedRlEnvCfg:
     """One or many reviewed EgoHTR crops, using the ordinary PerLoco MDP.
 
-    The packaged roster starts with 03. `ORCS_EGOHTR_ROSTER` selects an exported
+    The packaged roster selects shipped 03/05. `ORCS_EGOHTR_ROSTER` selects an exported
     list; `ORCS_EGOHTR_ROOT` points at an alternative immutable staging directory.
     Explicit factory arguments win over both environment variables.
     """

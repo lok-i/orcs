@@ -132,15 +132,16 @@ Start an agent chat:
 - Leave frame notes in Viser; review each revision with **Reload files → Latest**.
 - Setup, controls and scope: [EgoHTR preparation](docs/ego_htr.md).
 
-Trainable PerLoco task from accepted 03:
+PerLoco ships the reviewed 03 rocky ascent and 05 window crossing. Normal data
+setup installs their paired references and terrains:
 
 ```bash
-.venv/bin/python -m orcs.cli.ego_htr stage --clips 03
-.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --viewer viser
+.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --num-envs 2 --viewer viser
 ```
 
 - EgoHTR defaults: CCD capacity 128 for train/play; play foot friction 1.0.
-- Full 03 training: [10k updates in `lkrajan/orcs`](docs/ego_htr.md#03-full-training).
+- Joint 03/05 training: [10k updates in `lkrajan/orcs`](docs/ego_htr.md#joint-0305-training).
+- Development setup pins the dependency PR heads; see [setup status](docs/ego_htr.md#play-and-train).
 - Multi-clip selection: [EgoHTR tasks](docs/ego_htr.md#multiple-crops).
 
 ## paths

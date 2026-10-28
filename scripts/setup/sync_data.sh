@@ -2,7 +2,7 @@
 # Sync data and generated inputs. Run sync_deps.sh first.
 #
 #   sync_data.sh [MODE...]       default: all
-#     inhouse   locked retargeted/reconstructed motions + nominal stand
+#     inhouse   locked native motions (including EgoHTR) + reconstructed + nominal
 #     omre      OmniRetarget terrain motions
 #     grail     GRAIL terrain motions
 #     all       all of the above
@@ -46,6 +46,10 @@ use_venv
 if has inhouse; then
     lean_sparse=$((1 - WITH_SMPL))
     sync_rows "$rows" "$lean_sparse"
+
+    echo
+    echo "=== install: shipped EgoHTR motion/terrain pairs ==="
+    python -m orcs.cli.sync_native_data
 
     echo
     echo "=== generate: nominal motion ==="

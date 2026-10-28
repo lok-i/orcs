@@ -128,7 +128,7 @@ PYEOF
 lean_include() {
     local repo="$1" globs err
     err=$(mktemp)
-    globs=$(python "$REPO_ROOT/src/orcs/core/paths.py" --lfs-include 2>"$err" \
+    globs=$(python -m orcs.cli.sync_native_data --lfs-include --retargeted-root "$repo" 2>"$err" \
         | sed -n 's/^include //p') || true
     if [ -z "$globs" ]; then
         echo "[ERROR] ORCS motion roster resolved no LFS includes:" >&2

@@ -1,4 +1,7 @@
-# Initial learning target. Export any list with `orcs-egohtr stage --clips ...`
-# and select its generated roster via ORCS_EGOHTR_ROSTER for train AND play.
-families = ["rocky-path_s7_bzb_01__40-50s"]
+# Shipped 03/05 references. Normal data setup pairs retargeted_motions with assets.
+# Custom review exports can still use ORCS_EGOHTR_ROOT / ORCS_EGOHTR_ROSTER.
+families = [
+  "rocky-path_s7_bzb_01__40-50s",
+  "cliff-jump_s4_bzb_01__28-38s",
+]
 levels = [0.0]

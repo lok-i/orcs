@@ -52,38 +52,60 @@ Start an agent chat with:
 
 ## Play and train
 
-Export the accepted 03 once, then play the frozen base:
+Normal ORCS data setup installs the shipped **03 + 05** motion/terrain pairs.
+It copies verified, processed files from `retargeted_motions` and `assets`; no raw
+EgoHTR download, UMR, resampling, FK or CoACD step is required.
+
+> Development preview: `deps.lock` pins the heads of the
+> [motion-data PR](https://huggingface.co/datasets/l-k-r/retargeted_motions/discussions/14)
+> and [assets PR](https://github.com/drcl-deploy/assets/pull/58). Both remain open
+> for review; release pins will be updated to their merged main commits.
 
 ```bash
-.venv/bin/python -m orcs.cli.ego_htr stage --clips 03
-.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --viewer viser
+bash scripts/setup/sync_deps.sh --no-smpl
+bash scripts/setup/sync_data.sh --no-smpl
+.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --num-envs 2 --viewer viser
 ```
 
-- Policy viewer: `http://localhost:8080`. Use `--viewer native` for a desktop window.
-- EgoHTR's [display palette](../src/orcs/ego_htr/palette.py): warm gray terrain,
-  charcoal ground, pale blue reference (12% opacity), cyan height-scan points.
-  These color overrides apply only to EgoHTR tasks.
-- EgoHTR sets `sim.mujoco.nccdmax=128` for train and play; no environment prefix needed.
-- Play fixes sliding friction to **1.0 on all foot colliders**. Hands/terrain retain
-  their nominal settings; training retains its existing friction randomization.
-- Train and play finish each crop with **one step of end padding** (20 ms).
-  These references end in motion; this task does not require a final standing hold.
-  The endpoint default is local to EgoHTR; other PerLoco tasks are unchanged.
+- Already installed? Run only `play`; there is no separate EgoHTR setup mode.
+- `sync_data.sh inhouse --no-smpl` also installs the shipped pair, without fetching
+  the independent OmRe/GRAIL datasets.
+- Policy viewer: `http://localhost:8080`; use `--viewer native` for a desktop window.
 - `initial` constructs the frozen SONIC base with an untrained adapter.
-- The policy viewer runs physics; the review viewer replays the reference.
-- Staged reference/proxy viewer: `orcs-view-terrain --source egohtr --port 8087`.
+- Policy playback runs physics; the review viewer replays the reference.
+- The released checkpoint will use the ordinary `--agent release` path once published.
 
-### 03 full training
+| Shipped crop | Reviewed revision | Reference | Terrain |
+|---|---|---|---|
+| 03 rocky ascent, `rocky-path_s7_bzb_01__40-50s` | `0009_natural-step-v3` | 499 frames at 50 Hz | 360 convex pieces |
+| 05 window crossing, `cliff-jump_s4_bzb_01__28-38s` | `0006_native-manifold` | 499 frames at 50 Hz | 192 convex pieces |
 
-Prepared recipe for the accepted 03 crop; W&B project:
-[`lkrajan/orcs`](https://forge.coreweave.com/wandb/lkrajan/orcs).
+| Owner | Files |
+|---|---|
+| `retargeted_motions` | `data/unitree_g1/egohtr/<clip>/sample1/{motion.npz,metadata.json}` |
+| `assets` | `terrain/egohtr/<clip>/{tile.json,meshes/*.obj,provenance.json}` |
+| Local runtime | `data/terrain_motions/egohtr/<clip>/level_0.00/` |
+| Selection | Packaged `tasks/perloco/rosters/egohtr.toml`, default 03 + 05 |
+
+- Motion metadata pins the matching terrain descriptor; descriptors pin mesh hashes.
+- Installer verifies hashes and copies the exact training inputs. An identical
+  repeat is reused; another export or modified local data is never overwritten.
+  Move an older `data/terrain_motions/egohtr` aside before installing this bundle.
+- Runtime files are self-contained. Original review logs and raw scans are unnecessary.
+- The two terrains form one atlas; each world receives the reference belonging
+  to its terrain. Independent robot worlds do not collide with each other.
+- Height scans raycast the same convex surfaces used for collisions.
+- EgoHTR's [palette](../src/orcs/ego_htr/palette.py): warm gray terrain, charcoal
+  ground, pale blue reference (12% opacity), cyan height-scan points.
+
+### Joint 03/05 training
 
 ```bash
 WANDB_USERNAME=lkrajan \
   .venv/bin/train Orcs-PerLoco-EgoHtr-AdaptSonic \
   --agent.logger wandb \
   --agent.wandb-project orcs \
-  --agent.experiment-name PerLoco/EgoHtr/03 \
+  --agent.experiment-name PerLoco/EgoHtr/03-05 \
   --env.scene.num-envs 4096 \
   --agent.max-iterations 10000 \
   --agent.save-interval 1000 \
@@ -91,86 +113,33 @@ WANDB_USERNAME=lkrajan \
   --env.terminations.exceeded-motion.params.epsilon-steps 1
 ```
 
-| Setting | Rationale |
-|---|---|
-| 10,000 updates / 7,000 anneal | Current 03 experiment budget; final 3,000 updates start at frame zero |
-| 4,096 environments | Completed the 03 full run on the 24 GiB GPU with CCD capacity 128 |
-| CCD 128 / zero reset lift | Keep collision capacity sufficient without a vertical reference-reset offset |
-| End padding: 1 step | Avoid the two-second frozen pose with moving velocity targets at this crop's end |
-| `WANDB_USERNAME=lkrajan` | This checkout's RSL-RL writer passes it as the W&B entity |
-
-- The anneal gradually shrinks the allowed reset window; it does not initially
-  filter unstable intermediate poses.
-- Grail, OmRe and EgoHTR share this annealing implementation. Their code default
-  is 0 (disabled); the earlier OmRe commands explicitly selected 10,000 annealing
-  updates for a 15,000-update run. This 03 experiment uses the shorter 10k / 7k schedule.
-- Training retains the existing 0.4 m pelvis-Z / 0.8 rad orientation terminations,
-  observations, actions, rewards and domain randomization.
-- This command starts a fresh run. It does not change the project or schedule of
-  an already-running process.
-- Run names use the default timestamp. Checkpoints:
-  `logs/rsl_rl/PerLoco/EgoHtr/03/<timestamp>/`.
+- 10k updates, 7k phase annealing; final 3k updates start from frame zero.
+- Run names use the default timestamp. W&B entity is `lkrajan`, project `orcs`.
+- Existing PerLoco observations, rewards, actions and training randomization apply.
+- Both clips end in motion: EgoHTR uses one step (20 ms) of endpoint padding.
 
 ### Multiple crops
 
-One policy can consume a list of reviewed crops:
+Author a new reference with the review workflow, then export into a separate root:
 
 ```bash
-.venv/bin/python -m orcs.cli.ego_htr stage --clips 03 04 05 06
+.venv/bin/python -m orcs.cli.ego_htr stage --clips 03 04 05 06 --out /path/to/custom-export
 # Use the roster path printed by stage for both train and play:
+ORCS_EGOHTR_ROOT=/path/to/custom-export \
 ORCS_EGOHTR_ROSTER=/path/to/printed-roster.toml \
-WANDB_USERNAME=lkrajan \
-  .venv/bin/train Orcs-PerLoco-EgoHtr-AdaptSonic \
-  --agent.wandb-project orcs --env.scene.num-envs 512
+  .venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --viewer viser
 ```
 
-| Setting | Meaning |
+| Option | Meaning |
 |---|---|
-| Packaged default | 03 only; no runtime code depends on its label |
-| `stage --clips ...` | Viewer labels or full clip IDs; defaults to each accepted revision |
-| `stage --run ID` | Explicit revision; the same selector is applied to every selected clip |
-| `stage --out PATH` | Alternative generated dataset root |
-| `ORCS_EGOHTR_ROOT` | Load that alternative root during train/play |
-| `ORCS_EGOHTR_ROSTER` | Ordinary PerLoco TOML roster selecting staged crop families |
+| `stage --clips ...` | Viewer labels or full crop IDs, defaulting to accepted revisions |
+| `stage --run ID` | Pin a specific revision |
+| `stage --out PATH` | Separate immutable export root |
+| `ORCS_EGOHTR_ROOT` | Custom runtime root; omitted for shipped references |
+| `ORCS_EGOHTR_ROSTER` | Custom selection; omitted for shipped 03/05 |
 
-Select only 03/05 from an existing export snapshot:
-
-```bash
-ORCS_EGOHTR_ROOT=/path/to/staged-snapshot \
-ORCS_EGOHTR_ROSTER=src/orcs/tasks/perloco/rosters/egohtr_03_05.toml \
-  .venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic \
-  --agent trained --checkpoint-file /path/to/checkpoint.pt \
-  --num-envs 2 --viewer viser
-```
-
-- The subset reuses the staged motions and terrain; it does not retarget or retrain.
-- A checkpoint trained on all four clips remains a four-clip-trained checkpoint
-  when evaluated on this subset. Validate tracking after changing a selection.
-
-- Export snapshots motion/terrain hashes and copies the hull files. A repeated
-  identical export reuses them; a changed reference needs a fresh `--out`.
-- Training needs the staged dataset and ORCS dependencies; UMR, SMPL-X and review
-  logs are unnecessary. Keep generated datasets local/untracked.
-- One crop gives every independent simulation world the same terrain origin.
-  Training resets sample reference phases; play starts at the beginning.
-- Multiple crops share a terrain atlas. Each environment's motion is restricted
-  to its assigned terrain. Robot worlds do not collide with one another.
-- Geometry loads from files; no CoACD or procedural generation runs during training.
-- The height scan reads the same convex surfaces used for collision. Dense scan
-  meshes remain in the review viewer.
-
-03 system checks on RTX 3090 (24 GiB), including real PPO updates:
-
-| Worlds | PPO updates | Sampled whole-GPU peak | Seconds/update |
-|---:|---:|---:|---:|
-| 512 | 100 | 2.76 GiB | 1.07 |
-| 4096 | 10 | 8.62 GiB | 3.11 |
-
-- Peaks include about 1.5 GiB of pre-existing device usage; these are short runs.
-- These short benchmarks used CCD capacity 64. The subsequent 03 full run
-  completed at 4,096 worlds with capacity 128; its VRAM peak was not measured here.
-- Checkpoint save/reload and Viser startup passed. The final 03 checkpoint
-  completed 191/192 frame-zero evaluation episodes under the training domain.
+Existing scripts using `egohtr_03_05.toml` remain compatible; `egohtr.toml` is the
+canonical default. Changing a custom crop requires contact and policy validation.
 
 ### Collision settings
 
@@ -210,8 +179,7 @@ ORCS_EGOHTR_ROSTER=src/orcs/tasks/perloco/rosters/egohtr_03_05.toml \
 
 - EgoHTR, G1, stationary terrain and 30 Hz review constraints.
 - Kinematic checks and playback do not establish controller stability.
-- The memory figures above cover 03; the four-crop atlas needs its own PPO budget.
-- 03's reviewed hunch/roughness is parked; 04/05/06 remain preserved references.
+- 03's reviewed hunch/roughness is parked; 04/06 remain local review references.
 - `Orcs-PerLoco-EgoHtr-AdaptSonic` shares PerLoco's MDP. It is a trainable task,
   not a released trained checkpoint. Native contacts and 50 Hz interpolation
   need checking when admitting another crop; visual acceptance alone is insufficient.
