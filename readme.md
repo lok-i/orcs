@@ -139,6 +139,10 @@ orcs-pseudo-retarget --scene uolm --all
 | `ORCS_SMPLX_DIR` | `<deps>/body_models` |
 | `ORCS_RELEASE_ROOT` | `~/.cache/orcs/releases` or `$XDG_CACHE_HOME/orcs/releases` |
 
+## contributing
+
+[Contribution guide](CONTRIBUTING.md): PR format, dependency changes and validation.
+
 ## license and credits
 
 ORCS code and documentation are [BSD-3-Clause](LICENSE). Third-party code,
