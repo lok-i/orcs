@@ -119,15 +119,35 @@ train Orcs-PerLoco-Grail-AdaptSonic --env.scene.num-envs 4096
 
 ## retarget
 
+**Scripted**
+
 ```bash
 orcs-pseudo-retarget --scene perloco-grail --all
 orcs-pseudo-retarget --scene uolm --all
 ```
 
-- `--all`: every sample in the scene's default motion sets
-- more sets and options: [SMPL retargeting](docs/smpl_retargeting.md)
-- scene-aware retargeting with frame comments and agent-assisted revisions:
-  [EgoHTR + UMR workflow](docs/ego_htr.md#use)
+`--all`: every sample in the scene's default motion sets.
+[Options and setup](docs/smpl_retargeting.md).
+
+**Agentic**
+
+Launch the review viewer:
+
+```bash
+.venv/bin/python -m orcs.cli.ego_htr view --port 8085
+```
+
+Then ask your coding agent:
+
+```text
+Read src/orcs/ego_htr/SKILL.md. Help me prepare and retarget
+an EgoHTR clip, then revise it from my frame comments in the viewer.
+```
+
+Play → leave frame comments → ask for revisions → reload and compare.
+
+*Currently supports EgoHTR → G1 through UMR.
+[Setup and workflow](docs/ego_htr.md#use).*
 
 ## paths
 
