@@ -20,8 +20,8 @@ EXPECTED_TASKS = {
 def test_release_manifest_contract():
     manifest = release.release_manifest()
     assert manifest["repo_id"] == "lkrajan/orcs"
-    # Candidate commit is downloadable before the user merges/tags the HF PR.
-    assert manifest["revision"] == "b374fc2f3d3276b38486d2d5c58d515d7e2df808"
+    # Pin the merged model bundle, independent of later main/tag changes.
+    assert manifest["revision"] == "92fa052800ab5bf911b0057132f5dd47b32d7413"
     assert manifest["release"] == "v0.1.1"
     assert set(manifest["models"]) == EXPECTED_TASKS
     for task_id, model in manifest["models"].items():

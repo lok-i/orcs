@@ -41,6 +41,14 @@ training and retargeting tools for privileged humanoid control:
       <code>Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl</code>
     </td>
   </tr>
+  <tr>
+    <td align="center">
+      <a href="docs/ego_htr.md"><img width="360" src="docs/media/egohtr.gif" alt="Orcs-PerLoco-EgoHtr-AdaptSonic: 05 window crossing"></a><br>
+      <code>Orcs-PerLoco-EgoHtr-AdaptSonic</code><br>
+      One policy · rocky ascent + window crossing
+    </td>
+    <td></td>
+  </tr>
 </table>
 
 ## install
@@ -79,8 +87,8 @@ bash scripts/setup/sync_data.sh --no-smpl
 ## play
 
 ```bash
-# release
-play Orcs-Dodge-AdaptSonic --agent release --viewer native
+# release: one policy for rocky ascent + window crossing
+play Orcs-PerLoco-EgoHtr-AdaptSonic --agent release --num-envs 2 --viewer viser
 
 # initial
 play Orcs-Uolm-AdaptSonic --agent initial --viewer native
@@ -97,6 +105,7 @@ play Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl --agent random --viewer native
 ```
 
 - releases: [`lkrajan/orcs`](https://huggingface.co/lkrajan/orcs); fetched on use
+- EgoHTR task and training: [guide](docs/ego_htr.md#play-and-train)
 - all releases: `bash scripts/setup/download_released_models.sh`
 - trained checkpoints: `--checkpoint-file` or `--wandb-run-path`
 - `--viewer viser`: starts with **Track camera off** and **Dark Mode on**;
@@ -118,31 +127,8 @@ orcs-pseudo-retarget --scene uolm --all
 
 - `--all`: every sample in the scene's default motion sets
 - more sets and options: [SMPL retargeting](docs/smpl_retargeting.md)
-
-## egoHTR review
-
-```bash
-.venv/bin/python -m orcs.cli.ego_htr view --port 8085
-```
-
-Start an agent chat:
-
-> Read `src/orcs/ego_htr/SKILL.md`. Review my EgoHTR frame comments and continue the retargeting workflow.
-
-- Leave frame notes in Viser; review each revision with **Reload files → Latest**.
-- Setup, controls and scope: [EgoHTR preparation](docs/ego_htr.md).
-
-PerLoco ships the reviewed 03 rocky ascent and 05 window crossing. Normal data
-setup installs their paired references and terrains:
-
-```bash
-.venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent release --num-envs 2 --viewer viser
-```
-
-- EgoHTR defaults: CCD capacity 128 for train/play; play foot friction 1.0.
-- Joint 03/05 training: [10k updates in `lkrajan/orcs`](docs/ego_htr.md#joint-0305-training).
-- Development setup pins the dependency PR heads and [HF checkpoint candidate](https://huggingface.co/lkrajan/orcs/discussions/1); see [setup status](docs/ego_htr.md#play-and-train).
-- Multi-clip selection: [EgoHTR tasks](docs/ego_htr.md#multiple-crops).
+- scene-aware retargeting with frame comments and agent-assisted revisions:
+  [EgoHTR + UMR workflow](docs/ego_htr.md#use)
 
 ## paths
 

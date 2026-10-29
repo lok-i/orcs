@@ -1,6 +1,6 @@
 [project]
 name = "orcs"
-version = "0.1.0"
+version = "0.1.1"
 description = "Optimize, Retarget, Control Suite — post-training humanoid controllers with privileged observations"
 readme = "readme.md"
 # 3.11, not 3.10: `tomllib` (rosters) is stdlib only from 3.11.

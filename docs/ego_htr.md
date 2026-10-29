@@ -56,13 +56,9 @@ Normal ORCS data setup installs the shipped **03 + 05** motion/terrain pairs.
 It copies verified, processed files from `retargeted_motions` and `assets`; no raw
 EgoHTR download, UMR, resampling, FK or CoACD step is required.
 
-> Development preview: `deps.lock` pins the heads of the
-> [motion-data PR](https://huggingface.co/datasets/l-k-r/retargeted_motions/discussions/14)
-> and [assets PR](https://github.com/drcl-deploy/assets/pull/58). Both remain open
-> for review; release pins will be updated to their merged main commits.
-> `--agent release` downloads the joint policy from the immutable commit of
-> [HF model PR #1](https://huggingface.co/lkrajan/orcs/discussions/1). The final
-> `v0.1.1` tag is pending review; `v0.1.0` remains unchanged.
+`deps.lock` pins the merged motion and terrain revisions. The packaged
+`release.json` pins the merged [HF model bundle](https://huggingface.co/lkrajan/orcs/tree/92fa052800ab5bf911b0057132f5dd47b32d7413)
+by commit and verifies checkpoint size and SHA-256 on download.
 
 ```bash
 bash scripts/setup/sync_deps.sh --no-smpl
@@ -186,6 +182,6 @@ canonical default. Changing a custom crop requires contact and policy validation
 - EgoHTR, G1, stationary terrain and 30 Hz review constraints.
 - Kinematic checks and playback do not establish controller stability.
 - 03's reviewed hunch/roughness is parked; 04/06 remain local review references.
-- `Orcs-PerLoco-EgoHtr-AdaptSonic` shares PerLoco's MDP. It is a trainable task,
-  not a released trained checkpoint. Native contacts and 50 Hz interpolation
-  need checking when admitting another crop; visual acceptance alone is insufficient.
+- `Orcs-PerLoco-EgoHtr-AdaptSonic` shares PerLoco's MDP and includes a released
+  joint 03/05 policy. Native contacts and 50 Hz interpolation need checking when
+  admitting another crop; visual acceptance alone is insufficient.
