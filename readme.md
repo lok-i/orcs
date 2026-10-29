@@ -160,7 +160,7 @@ ORCS builds on [SONIC](https://nvlabs.github.io/GEAR-SONIC/),
 [EgoHTR](https://huggingface.co/datasets/leggedrobotics/egohtr), and
 [UMR](https://hanyang9.github.io/UMR/).
 Thank you to their authors and contributors. Please cite the projects and datasets
-you use; [EgoHTR and UMR citations](docs/ego_htr.md#credits-and-citations).
+you use.
 
 ## citation
 
