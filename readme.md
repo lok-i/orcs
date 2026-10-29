@@ -44,8 +44,7 @@ training and retargeting tools for privileged humanoid control:
   <tr>
     <td align="center">
       <a href="docs/ego_htr.md"><img width="360" src="docs/media/egohtr.gif" alt="Orcs-PerLoco-EgoHtr-AdaptSonic: 05 window crossing"></a><br>
-      <code>Orcs-PerLoco-EgoHtr-AdaptSonic</code><br>
-      One policy · rocky ascent + window crossing
+      <code>Orcs-PerLoco-EgoHtr-AdaptSonic</code>
     </td>
     <td></td>
   </tr>
