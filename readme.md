@@ -75,13 +75,7 @@ bash scripts/setup/sync_deps.sh --no-smpl
 bash scripts/setup/sync_data.sh --no-smpl
 ```
 
-- `sync_data.sh`: default `all`; modes `inhouse`, `omre`, `grail`
-- `--no-smpl`: non-SMPL tasks + roster-selected retargeted motions
-- full setup: prompts for the three licensed SMPL-X model files
-- dependency changes: rerun `sync_deps.sh` with the same mode
-- missing optional data: affected tasks skip; inspect `orcs.SKIP_REASON`
-- details: [PerLoco](docs/perceptive_locomotion.md) ·
-  [SMPL retargeting](docs/smpl_retargeting.md)
+`--no-smpl` skips SMPL support as full setup prompts for three licensed SMPL-X model files (details: [PerLoco](docs/perceptive_locomotion.md) · [SMPL retargeting](docs/smpl_retargeting.md)).
 
 ## play
 
@@ -94,7 +88,10 @@ play Orcs-Uolm-AdaptSonic --agent initial --viewer native
 
 # trained
 play Orcs-PerLoco-OmRe-AdaptSonic --agent trained \
-  --checkpoint-file /path/to/checkpoint.pt --viewer native
+  --checkpoint-file /path/to/checkpoint.pt --viewer native # from local checkpoint
+
+play Orcs-PerLoco-OmRe-AdaptSonic --agent trained \
+  --wandb-run-path entity/project/run-id --viewer native # from wandb
 
 # zero
 play Orcs-PerLoco-Grail-AdaptSonic-Smpl --agent zero --viewer native
@@ -103,12 +100,7 @@ play Orcs-PerLoco-Grail-AdaptSonic-Smpl --agent zero --viewer native
 play Orcs-Uolm-SmallCubeTable-AdaptSonic-Smpl --agent random --viewer native
 ```
 
-- releases: [`lkrajan/orcs`](https://huggingface.co/lkrajan/orcs); fetched on use
-- EgoHTR task and training: [guide](docs/ego_htr.md#play-and-train)
-- all releases: `bash scripts/setup/download_released_models.sh`
-- trained checkpoints: `--checkpoint-file` or `--wandb-run-path`
-- `--viewer viser`: starts with **Track camera off** and **Dark Mode on**;
-  both remain adjustable in the viewer.
+released checkpoints from [`lkrajan/orcs`](https://huggingface.co/lkrajan/orcs) are auto-downloaded on demand.
 
 ## train
 
@@ -119,7 +111,7 @@ train Orcs-PerLoco-Grail-AdaptSonic --env.scene.num-envs 4096
 
 ## retarget
 
-**Scripted**
+**scripted**
 
 ```bash
 orcs-pseudo-retarget --scene perloco-grail --all
@@ -127,27 +119,25 @@ orcs-pseudo-retarget --scene uolm --all
 ```
 
 `--all`: every sample in the scene's default motion sets.
-[Options and setup](docs/smpl_retargeting.md).
+[options and setup](docs/smpl_retargeting.md).
 
-**Agentic**
+**agentic**
 
-Launch the review viewer:
+launch the review viewer:
 
 ```bash
 .venv/bin/python -m orcs.cli.ego_htr view --port 8085
 ```
 
-Then ask your coding agent:
+then ask your coding agent:
 
 ```text
-Read src/orcs/ego_htr/SKILL.md. Help me prepare and retarget
+read src/orcs/ego_htr/SKILL.md. help me prepare and retarget
 an EgoHTR clip, then revise it from my frame comments in the viewer.
 ```
 
-Play → leave frame comments → ask for revisions → reload and compare.
-
-*Currently supports EgoHTR → G1 through UMR.
-[Setup and workflow](docs/ego_htr.md#use).*
+> **note:** currently supports EgoHTR → G1 through UMR.
+> [setup and workflow](docs/ego_htr.md#use).
 
 ## paths
 

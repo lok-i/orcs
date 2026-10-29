@@ -268,6 +268,8 @@ licensed models, learned weights, generated motions and videos remain ignored.
 
 ## PerLoco handoff
 
+- End-to-end directory map and commands:
+  [reviewed revisions to training](../../../docs/ego_htr.md#multiple-crops).
 - `stage --clips LABEL...` snapshots each selected accepted run; `--run ID`
   explicitly overrides that selector. It does not accept or alter review results.
 - Source adapter: `tasks/perloco/sources/egohtr.py`. Shared native staging handles
@@ -276,8 +278,14 @@ licensed models, learned weights, generated motions and videos remain ignored.
   with source identity and content hashes, `level_0.00/tile.json`, copied hulls,
   `sample0/motion.npz` and metadata. Identical staging is reusable; changed inputs
   require a fresh `--out`, with `ORCS_EGOHTR_ROOT` pointing the task there.
+  Use `data/terrain_motions/egohtr_exports/<selection>-vNN` for custom snapshots;
+  leave the default root for the installed release pair. This is a naming
+  convention, not an automatically allocated export directory.
 - Select the returned roster with `ORCS_EGOHTR_ROSTER` for **both train and play**.
-  Without an override, the packaged roster selects 03. One source/agent task
+  Record both root and roster in the handoff; the roster selects families while
+  each export manifest pins its reviewed motion and terrain. Later acceptance
+  does not update this export. Do not hand-edit staged arrays to revise a motion.
+  Without overrides, the packaged roster selects shipped 03 + 05. One source/agent task
   accepts any staged list; crop families are columns with one row, not difficulty.
 - The training task is `Orcs-PerLoco-EgoHtr-AdaptSonic`. It reads staged files only:
   optional UMR, body models and review workspaces are not runtime dependencies.

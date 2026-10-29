@@ -122,20 +122,86 @@ WANDB_USERNAME=lkrajan \
 
 ### Multiple crops
 
-Author a new reference with the review workflow, then export into a separate root:
+The handoff uses two separate stores: [review history](#files-and-setup) and a
+self-contained training export. The agent handles these steps after review.
+
+```text
+prepare → retarget → audit → viewer comments → new revision
+                             ↓ user accepts an exact run ID
+                       clip.json: accepted
+                             ↓ stage --clips ... --run accepted
+                 export root + generated roster.toml
+                             ↓ same two paths for play and train
+                 Orcs-PerLoco-EgoHtr-AdaptSonic
+```
+
+1. Inspect each clip; after user approval, accept its exact revision. Replace
+   `RUN_ID` below with the reviewed ID; repeat for each changed clip.
+
+   ```bash
+   .venv/bin/python -m orcs.cli.ego_htr inspect --clip 03
+   .venv/bin/python -m orcs.cli.ego_htr accept --clip 03 --run RUN_ID
+   ```
+
+2. Export the selection. Use `data/terrain_motions/egohtr_exports/<selection>-vNN`
+   as the local naming convention; the CLI accepts any explicit `--out` path.
+   Increment the snapshot name when a selected revision changes.
+
+   ```bash
+   .venv/bin/python -m orcs.cli.ego_htr stage --clips 03 05 --run accepted \
+     --out data/terrain_motions/egohtr_exports/03-05-v01
+   ```
+
+3. Use the **`root` and `roster` paths returned by stage** for both commands below;
+   replace `/absolute/export/root` and `/absolute/export/root/rosters/HASH.toml`.
+   Inspect native contacts at 50 Hz and initial-policy resets before training.
 
 ```bash
-.venv/bin/python -m orcs.cli.ego_htr stage --clips 03 04 05 06 --out /path/to/custom-export
-# Use the roster path printed by stage for both train and play:
-ORCS_EGOHTR_ROOT=/path/to/custom-export \
-ORCS_EGOHTR_ROSTER=/path/to/printed-roster.toml \
+ORCS_EGOHTR_ROOT=/absolute/export/root \
+ORCS_EGOHTR_ROSTER=/absolute/export/root/rosters/HASH.toml \
   .venv/bin/play Orcs-PerLoco-EgoHtr-AdaptSonic --agent initial --viewer viser
+
+ORCS_EGOHTR_ROOT=/absolute/export/root \
+ORCS_EGOHTR_ROSTER=/absolute/export/root/rosters/HASH.toml \
+  .venv/bin/train Orcs-PerLoco-EgoHtr-AdaptSonic --env.scene.num-envs 4096
 ```
+
+Add the desired training options from [joint training](#joint-0305-training).
+Use the same export/roster pair when playing the resulting checkpoint.
+
+```text
+<export-root>/
+  rosters/<selection-hash>.toml
+  <clip-id>/
+    export.json                    # exact review ID, source/terrain identity, file hashes
+    level_0.00/
+      tile.json                    # matching terrain descriptor
+      meshes/*.obj                 # copied convex pieces
+      sample0/{motion.npz,metadata.json}  # native G1 motion at 50 Hz
+```
+
+The generated roster selects full clip IDs, for example:
+
+```toml
+families = ["rocky-path_s7_bzb_01__40-50s", "cliff-jump_s4_bzb_01__28-38s"]
+levels = [0.0]
+```
+
+- The roster selects crops; **the export root and its manifests pin revisions**.
+  Both terrain and motion use this selection. A roster alone does not pin the data.
+- `stage` copies terrain, resamples 30 → 50 Hz and computes native G1 states.
+  Training no longer reads the review workspace, raw dataset or UMR checkout.
+- Accepting another revision does not change an existing export. Identical exports
+  are reusable; changed inputs for an existing crop are refused at that output path.
+- Keep `data/terrain_motions/egohtr` for the installed release pair. Custom exports
+  use explicit paths; omitting `--out` still defaults to that installed-data location.
+- Keep the export and roster with the experiment. Do not edit staged NPZ files or
+  collision meshes in place; revise, review and export a new snapshot.
 
 | Option | Meaning |
 |---|---|
 | `stage --clips ...` | Viewer labels or full crop IDs, defaulting to accepted revisions |
-| `stage --run ID` | Pin a specific revision |
+| `stage --run ID` | Select that ID for every listed clip; `accepted` resolves separately per clip |
 | `stage --out PATH` | Separate immutable export root |
 | `ORCS_EGOHTR_ROOT` | Custom runtime root; omitted for shipped references |
 | `ORCS_EGOHTR_ROSTER` | Custom selection; omitted for shipped 03/05 |
@@ -166,10 +232,38 @@ canonical default. Changing a custom crop requires contact and policy validation
 ## Files and setup
 
 - Code: `src/orcs/ego_htr/`; one CLI: `orcs.cli.ego_htr` (`orcs-egohtr` after installation).
-- Local runs: `logs/ego_htr/<sequence>__<start>-<end>s/<iteration>/`.
-- Each completed motion run: **`run.json`, `motion.npz`, `run.log`**.
-- Source/robot/terrain/targets/correspondence are shared under `_cache/`.
-- Comments: one `notes.jsonl` per clip. Optional `reports/` and `debug/` are generated on request.
+- Default review root: `<ORCS root>/logs/ego_htr`; `--workspace PATH` before the
+  subcommand overrides it. Use the same workspace for viewer and agent commands.
+
+```text
+logs/ego_htr/
+  workspace.json                   # external dataset, UMR, interpreter, body-model paths
+  _cache/<kind>/<content-key>/      # shared inputs, robots, terrain, targets, correspondence
+  <sequence>__<start>-<end>s/        # clip ID; labels such as 03 are lookup aliases
+    clip.json                      # source interval, latest and accepted run IDs
+    notes.jsonl                    # comments, dispositions and acceptance history
+    0000_<label>/
+      run.json                     # parent, recipe, assets, checks, motion hash
+      motion.npz                   # complete review trajectory at 30 Hz
+      run.log
+    0001_<label>/...
+```
+
+- Clip IDs default to sequence + time interval; a recipe can explicitly override
+  `id`. Keep the default naming convention for new crops.
+- Revision numbers are allocated automatically per clip and never reused.
+  Prepared/failed runs may have no `motion.npz`; only completed candidates appear
+  as Latest. Accepted changes only through explicit `accept` after user review.
+- Completed motions are immutable. Notes retain the exact revision, motion hash
+  and source frame; revisions reuse shared caches instead of copying the scene.
+- Optional reports/debug live with their revision. `prune` previews cleanup and
+  protects latest, accepted and running revisions; it retains metadata and caches.
+- Move or back up the workspace as a unit. The
+  [training handoff](#multiple-crops) produces a separate self-contained export;
+  a fresh installation of the released task does not recreate this review history.
+
+Optional preparation environment:
+
 - `egohtr` is an optional Python extra for viewer/report/download tools.
 - UMR remains an external checkout and isolated interpreter, configured once by
   the agent. No mandatory UMR dependency or change to the training environment.
