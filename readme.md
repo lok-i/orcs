@@ -149,8 +149,18 @@ ORCS code and documentation are [BSD-3-Clause](LICENSE). Third-party code,
 models, datasets, and body-model files retain their upstream terms; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-ORCS builds on SONIC, GRAIL, OmniRetarget, DexMachina, ResMimic, MimicKit,
-mjlab, and RSL-RL. Please cite the relevant projects and datasets.
+ORCS builds on [SONIC](https://nvlabs.github.io/GEAR-SONIC/),
+[GRAIL](https://github.com/NVlabs/GRAIL),
+[OmniRetarget](https://omniretarget.github.io/),
+[DexMachina](https://github.com/MandiZhao/dexmachina),
+[ResMimic](https://resmimic.github.io/),
+[MimicKit](https://github.com/xbpeng/MimicKit),
+[mjlab](https://github.com/mujocolab/mjlab),
+[RSL-RL](https://github.com/leggedrobotics/rsl_rl),
+[EgoHTR](https://huggingface.co/datasets/leggedrobotics/egohtr), and
+[UMR](https://hanyang9.github.io/UMR/).
+Thank you to their authors and contributors. Please cite the projects and datasets
+you use; [EgoHTR and UMR citations](docs/ego_htr.md#credits-and-citations).
 
 ## citation
 

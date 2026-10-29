@@ -185,3 +185,40 @@ canonical default. Changing a custom crop requires contact and policy validation
 - `Orcs-PerLoco-EgoHtr-AdaptSonic` shares PerLoco's MDP and includes a released
   joint 03/05 policy. Native contacts and 50 Hz interpolation need checking when
   admitting another crop; visual acceptance alone is insufficient.
+
+## Credits and citations
+
+| Project | Contribution | Paper | Source |
+|---|---|---|---|
+| EgoHTR — Alex Brandes et al., ETH Zürich | Human motion and scanned terrain | [Egocentric 4D Demonstrations of Human Terrain Traversal](https://arxiv.org/abs/2607.13472) | [Dataset](https://huggingface.co/datasets/leggedrobotics/egohtr) |
+| UMR — Hanyang Cao et al. | Scene-aware motion retargeting | [Unified Motion Retargeting for Humanoids with Learned Point Cloud Correspondence](https://arxiv.org/abs/2609.02134) | [Code](https://github.com/hanyang9/UMR) |
+
+- Please cite the relevant papers when using these data or tools in research.
+- Licenses, attribution and access conditions: [third-party notices](../THIRD_PARTY_NOTICES.md).
+
+<details>
+<summary>BibTeX: EgoHTR and UMR</summary>
+
+```bibtex
+@misc{brandes2026egohtregocentric4ddemonstrations,
+  title={EgoHTR: Egocentric 4D Demonstrations of Human Terrain Traversal},
+  author={Alex Brandes and Haig Conti Georges Sajelian and Manthan Patel and Dominik Hollidt and Chenhao Li and Matthias Heyrman and Oliver Hausdoerfer and Manuel Kaufmann and Xi Wang and Jonas Frey and Angela P. Schoellig and Christian Holz and Marc Pollefeys and Marco Hutter},
+  year={2026},
+  eprint={2607.13472},
+  archivePrefix={arXiv},
+  primaryClass={cs.RO},
+  url={https://arxiv.org/abs/2607.13472},
+}
+
+@misc{cao2026unifiedmotionretargetinghumanoids,
+  title={Unified Motion Retargeting for Humanoids with Learned Point Cloud Correspondence},
+  author={Hanyang Cao and Yuetong Fang and Taesoo Kwon and Runyi Yu and Ji Ma and Jing Tan and Yangchen Zhou and Baoze Du and Yi Gu and Yukang Gao and Ruoli Dai and Lei Han and Renjing Xu},
+  year={2026},
+  eprint={2609.02134},
+  archivePrefix={arXiv},
+  primaryClass={cs.RO},
+  url={https://arxiv.org/abs/2609.02134},
+}
+```
+
+</details>
