@@ -26,7 +26,7 @@ rows=$(lock_rows dependencies/)
 if [ "$CHECK_ONLY" = 0 ]; then
     use_venv
 
-    extras="dev,perloco"
+    extras="dev,perloco,hoiretarget"
     [ "$WITH_SMPL" = 0 ] || extras="$extras,smpl"
     echo
     echo "=== orcs (self: $extras) ==="

@@ -266,10 +266,13 @@ class ObjectMotionCommand(MultiClipMotionCommand):
         in object order, so clip->object is a repeat_interleave. Flat otherwise.
         """
         cfg = self.cfg
+        if cfg.include_motions is not None and not cfg.ordered_object_names:
+            raise ValueError("An explicit object roster requires ordered_object_names")
         if cfg.ordered_object_names:
             files_by_obj, files_ordered = get_motion_files_for_objects(
                 list(cfg.ordered_object_names), cfg.dataset_dir,
                 exclude_motions=list(cfg.exclude_motions or ()),
+                include_motions=cfg.include_motions,
             )
             counts = [len(files_by_obj[n]) for n in cfg.ordered_object_names]
             self._clip_object_ids = torch.repeat_interleave(
@@ -893,6 +896,9 @@ class ObjectMotionCommandCfg(MultiClipMotionCommandCfg):
     # assigned object (env->object read from sim.world_to_variant).
     # None -> single-object flat scan (e.g. the repose cube task).
     ordered_object_names: tuple[str, ...] | None = None
+
+    # Explicit dataset/motion/sample roster within the object-keyed dataset.
+    include_motions: tuple[str, ...] | None = None
 
     # Conditional object RSI randomization ({x..yaw} -> (lo, hi) dicts):
     #   object_init_pose_range        — applied only at clip-start inits

@@ -6,6 +6,8 @@ different things — and the command space is an optional suffix that defaults t
 the native robot one.
 
   Orcs-Uolm-AdaptSonic        frozen SONIC base + LoRA adapter. THE task.
+  Orcs-Uolm-Suitcase-AdaptSonic
+                             the same recipe over 63 HOI-Retarget suitcase clips.
   Orcs-Uolm-TaRa             tabula rasa from-scratch MLP — the no-frozen-base
                              floor to measure the adapter against.
   Orcs-Uolm-AdaptSonic-Smpl   reconstructed chair-flip + selected tire-roll,
@@ -87,6 +89,10 @@ _ADAPTER_RANK = 28
 # Do NOT reach for the action term's `scale` instead — see `sonic_adapter_actor`.
 _STD_SCALE = 1.3
 
+_native_agent = partial(
+    adapt_sonic_agent_cfg, rank=_ADAPTER_RANK, alpha=_ADAPTER_RANK, std_scale=_STD_SCALE
+)
+
 # The agents come from `orcs.core.rl` — a task picks one and names its
 # experiment, it never declares PPO. See that module's docstring.
 _TASKS = (
@@ -96,8 +102,10 @@ _TASKS = (
     # once and the next suspect is the VOF decay outrunning the learning rate.
     ("Orcs-Uolm-AdaptSonic",
      partial(uolm_env_cfg),
-     partial(adapt_sonic_agent_cfg, "orcs_uolm",
-             rank=_ADAPTER_RANK, alpha=_ADAPTER_RANK, std_scale=_STD_SCALE)),
+     partial(_native_agent, "orcs_uolm")),
+    ("Orcs-Uolm-Suitcase-AdaptSonic",
+     partial(uolm_env_cfg, roster="suitcase"),
+     partial(_native_agent, "orcs_uolm_suitcase")),
     ("Orcs-Uolm-TaRa",
      partial(uolm_env_cfg, agent="tara"),
      partial(tara_agent_cfg, "orcs_uolm_tara")),

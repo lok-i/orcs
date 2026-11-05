@@ -5,9 +5,10 @@
 #     inhouse   locked native motions (including EgoHTR) + reconstructed + nominal
 #     omre      OmniRetarget terrain motions
 #     grail     GRAIL terrain motions
+#     hoiretarget  selected suitcase motions; discard source after staging
 #     all       all of the above
 #   --no-smpl   sparse native motion roster; skip reconstructed/GRAIL SMPL data
-#   --check     verify selected lock rows only; no network or generation
+#   --check     verify selected checkouts/HOI native files; no network or generation
 
 set -euo pipefail
 . "$(dirname "$0")/_common.sh"
@@ -19,9 +20,9 @@ for arg in "$@"; do
     case "$arg" in
         --check) CHECK_ONLY=1 ;;
         --no-smpl) WITH_SMPL=0 ;;
-        all|inhouse|omre|grail) modes+=("$arg") ;;
-        -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
-        *) echo "[ERROR] unknown argument: $arg (expected all|inhouse|omre|grail|--no-smpl|--check)"; exit 2 ;;
+        all|inhouse|omre|grail|hoiretarget) modes+=("$arg") ;;
+        -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+        *) echo "[ERROR] unknown argument: $arg (expected all|inhouse|omre|grail|hoiretarget|--no-smpl|--check)"; exit 2 ;;
     esac
 done
 [ ${#modes[@]} -gt 0 ] || modes=(all)
@@ -38,10 +39,17 @@ fi
 
 if [ "$CHECK_ONLY" = 1 ]; then
     [ -z "$rows" ] || verify_rows "$rows" data/
+    if has hoiretarget; then
+        "$REPO_ROOT/.venv/bin/python" -m orcs.cli.stage_hoi_motions --check
+    fi
     exit
 fi
 
 use_venv
+
+if has hoiretarget; then
+    python -m orcs.cli.stage_hoi_motions
+fi
 
 if has inhouse; then
     lean_sparse=$((1 - WITH_SMPL))

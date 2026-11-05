@@ -44,6 +44,7 @@ bundled in the ORCS Python distribution:
 | [OmniRetarget Dataset](https://huggingface.co/datasets/omniretarget/OmniRetarget_Dataset) | Retargeted terrain and object motions | MIT as declared by its dataset card |
 | [SMPL-X](https://smpl-x.is.tue.mpg.de/) | Manually supplied body-model files | SMPL-X model license |
 | [EgoHTR](https://huggingface.co/datasets/leggedrobotics/egohtr) | Selected human motions, terrain scans and processed 03/05 pairs | CC-BY-4.0; original dataset access conditions also apply to its downloaders. Attribution, modifications and a conditions summary travel in processed sample metadata and terrain provenance. |
+| [HOI-Retarget](https://huggingface.co/datasets/leggedrobotics/hoi-retarget) | 63 selected OMOMO G1 suitcase trajectories | Dataset card declares CC-BY-NC-SA-4.0 for trajectories; OMOMO object geometry is MIT. Source pins, attribution and conversion details travel in the native manifest and sample metadata. Generated trajectories retain upstream terms. |
 | [UMR](https://github.com/hanyang9/UMR) | Optional scene-aware G1 retargeting | MIT; integration patch notice above |
 | [CoACD](https://github.com/SarahWeiii/CoACD) | Optional terrain collision decomposition | Its upstream distribution and license |
 | [mjlab](https://github.com/mujocolab/mjlab), [RSL-RL](https://github.com/leggedrobotics/rsl_rl), and the installed assets package | Simulation, learning, and model assets | Their respective distributions and licenses |
@@ -51,3 +52,13 @@ bundled in the ORCS Python distribution:
 Users are responsible for obtaining restricted datasets and body models and
 for complying with their terms. A citation or acknowledgement does not replace
 a license.
+
+The suitcase references derive from Jiaman Li et al., [*Object Motion Guided
+Human Motion Synthesis*](https://lijiaman.github.io/projects/omomo/)
+(OMOMO, SIGGRAPH Asia 2023), through Jihwan Shin et al.,
+*HOI-Retarget: Contact-Centric Retargeting for Human-Object Interaction*
+(arXiv:2609.34674, 2026). HOI-Retarget's dataset card credits contact annotations
+from [InterAct](https://github.com/wzyabcas/InterAct). ORCS changes joint order,
+object-frame origin and sampling rate, computes native FK/velocities, and
+generates contact schedules against its simulation geometry. It does not
+redistribute the raw shard or upstream retargeting code in the Python package.

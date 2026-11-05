@@ -41,11 +41,11 @@ def wheel(tmp_path_factory) -> zipfile.ZipFile:
 def test_rosters_ship(wheel):
     """setuptools drops non-.py by default; PerLoco cannot build a grid without
     these, and the failure is a SILENT skipped registration."""
-    rosters = sorted(REPO.glob("src/orcs/tasks/perloco/rosters/*.toml"))
+    rosters = sorted(REPO.glob("src/orcs/tasks/*/rosters/*.toml"))
     assert rosters, "no rosters in the source tree — this test is checking nothing"
     names = set(wheel.namelist())
     for r in rosters:
-        assert f"orcs/tasks/perloco/rosters/{r.name}" in names
+        assert r.relative_to(REPO / "src").as_posix() in names
 
 
 def test_release_manifest_ships(wheel):

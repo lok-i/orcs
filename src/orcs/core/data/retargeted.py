@@ -63,16 +63,35 @@ def get_motion_files_for_objects(
     ordered_object_names: list[str],
     path_to_datasets: str,
     exclude_motions: list[str] | None = None,
+    include_motions: tuple[str, ...] | None = None,
 ) -> tuple[dict[str, list[str]], list[str]]:
     """Files per requested object and the same files in roster order."""
     motion_files_by_object = load_motion_files_from_datasets(
         path_to_datasets, exclude_motions=exclude_motions
     )
 
+    if include_motions is not None:
+        if not include_motions or len(set(include_motions)) != len(include_motions):
+            raise ValueError("include_motions must be nonempty and unique")
+        root = Path(path_to_datasets)
+        available = {
+            Path(f).parent.relative_to(root).as_posix(): (name, f)
+            for name, files in motion_files_by_object.items() for f in files
+        }
+        selected_files: dict[str, list[str]] = {name: [] for name in ordered_object_names}
+        for sample in include_motions:
+            if sample not in available:
+                raise FileNotFoundError(f"Selected sample {sample!r} is missing under {root}")
+            name, motion_file = available[sample]
+            if name not in selected_files:
+                raise ValueError(f"Selected sample {sample!r} has unexpected object {name!r}")
+            selected_files[name].append(motion_file)
+        motion_files_by_object = selected_files
+
     selected: dict[str, list[str]] = {}
     ordered: list[str] = []
     for object_name in ordered_object_names:
-        if object_name not in motion_files_by_object:
+        if not motion_files_by_object.get(object_name):
             raise ValueError(
                 f"No motion files found for object '{object_name}' under "
                 f"path_to_datasets={path_to_datasets}. Check your datasets or assets."

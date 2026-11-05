@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-Guidance for Claude Code (claude.ai/code) in this repository. **This file is an index, not
+Read [AGENTS.md](AGENTS.md) first for shared contributor-agent guidance.
+
+Additional guidance for Claude Code (claude.ai/code) in this repository. **This file is an index, not
 an encyclopedia** — read the linked docs; do not grow this file with findings.
 
 ## Library
@@ -10,7 +12,7 @@ an encyclopedia** — read the linked docs; do not grow this file with findings.
 | [docs/ethos.md](docs/ethos.md) | what orcs is, the privileged-observation thesis, the `core`/`assets`/`tasks` layer contract + import rules, task slots, how to add a task |
 | [readme.md](readme.md) | every command — setup, `play`/`train`, SMPL scripts, lint, env-var overrides |
 
-One-line version: `orcs` (Oracle Robot Control Synthesis) trains privileged/oracle policies for
+One-line version: `orcs` (Optimize, Retarget, Control Suite) trains privileged/oracle policies for
 humanoid control on mjlab. It is **not** a task — tasks self-register under `src/orcs/tasks/`.
 
 | task | what | docs |
@@ -54,7 +56,8 @@ them that way. Same rule for non-`.py` runtime files (`rosters/*.toml`): declare
    `mocke`, `assets`, `rsl_rl`.
 5. **When orcs is a dependency, the CONSUMER's lock wins.** `mocke`/`rsl_rl`/`assets` are one
    editable install per venv, so a consumer (today: `vibe`) decides their SHAs and this
-   lock is what a STANDALONE orcs checkout uses. Both currently agree.
+   lock is what a STANDALONE orcs checkout uses. Compare their actual revisions;
+   source compatibility does not imply identical asset or dataset pins.
    `core/deps.py` records what orcs was validated against and prints drift at import —
    believe it, especially for `mocke`. Dev on orcs alone belongs in its own venv; running
    `sync_deps.sh` inside a consumer's venv silently re-points the shared deps.
@@ -96,9 +99,11 @@ orcs is thin; the substance lives in four pinned deps (`deps.lock`, materialized
   | base ckpt | `last_ported.pt` | `smpl_ported.pt` |
   | rewards/RSI | full MoTr rewards + robustness domain | source point/object rewards; seed state supplies RSI only |
 
-- **SMPL frames** are a real gotcha — conventions table in [readme.md](readme.md#smpl-data-conventions).
-  `smpl_joints` reach the encoder RAW; only `pose_aa` root + `transl` get y-up→z-up converted.
-  [smpl_data.py](src/orcs/tasks/uolm/smpl_data.py) owns it.
+- **SMPL frames** are source-specific. The legacy SONIC reader in
+  [smpl_data.py](src/orcs/tasks/uolm/smpl_data.py) sends `smpl_joints` to the encoder
+  raw and converts the `pose_aa` root + `transl` from y-up to z-up. Registered
+  reconstructed recipes use [sources/reconstructed.py](src/orcs/tasks/uolm/sources/reconstructed.py);
+  see [SMPL retargeting](docs/smpl_retargeting.md) for their cache and seed contract.
 - **Object collision**: all objects use convex decomposition (`cvx_dcmp`), never whole hulls —
   container-shaped hulls are a narrowphase trap (~11× slower). Hull is a per-object override only.
 - **[core/_mjlab_compat.py](src/orcs/core/_mjlab_compat.py)** patches mjlab at task-discovery time

@@ -53,6 +53,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "orcs" = ["release.json"]
 "orcs.tasks.perloco" = ["rosters/*.toml"]
+"orcs.tasks.uolm" = ["rosters/*.toml"]
 "orcs.ego_htr" = ["SKILL.md", "agent_tools.md", "presets/*.json", "patches/*.patch"]
 
 # mjlab auto-discovers tasks by importing this module at startup.
@@ -67,6 +68,7 @@ orcs = "orcs.registration"
 # orcs can produce the data it consumes. `scripts/*.py` are thin wrappers.
 [project.scripts]
 orcs-stage-terrain = "orcs.cli.stage_terrain_motions:main"
+orcs-stage-hoi = "orcs.cli.stage_hoi_motions:main"
 orcs-view-terrain = "orcs.cli.view_terrain_motions:main"
 orcs-build-smpl = "orcs.cli.build_smpl_dataset:main"
 orcs-rollout-smpl = "orcs.cli.rollout_smpl:main"
@@ -84,6 +86,7 @@ perloco = [
     "usd-core",   # GRAIL tile geometry (`from pxr import Usd`)
     "viser",      # orcs-view-terrain
 ]
+hoiretarget = ["pyarrow>=17"]  # offline parquet staging; no HOI optimizer needed
 smpl = ["smplx"]  # GRAIL/UOLM body-model forward passes
 # Viewer and optional reports only. UMR/CoACD/SMPL-X remain in a separate env.
 egohtr = ["viser", "mjviser", "trimesh", "pillow", "requests", "huggingface-hub"]

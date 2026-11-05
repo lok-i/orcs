@@ -194,4 +194,4 @@ def test_native_setup_import_does_not_load_simulator_or_retargeting():
 def test_ordinary_setup_installs_shipped_pairs_without_new_mode():
     setup = (Path(__file__).parents[1] / "scripts/setup/sync_data.sh").read_text()
     assert "python -m orcs.cli.sync_native_data" in setup
-    assert "all|inhouse|omre|grail)" in setup
+    assert "all|inhouse|omre|grail|hoiretarget)" in setup

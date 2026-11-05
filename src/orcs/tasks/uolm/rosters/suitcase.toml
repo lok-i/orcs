@@ -1,0 +1,145 @@
+# HOI-Retarget OMOMO G1: QC pass, full pickup/carry/place, deep pelvis.
+# Explicit selection: carry path >= 0.5 m; pelvis below 0.5 m while holding.
+# Short net-displacement clips remain part of the repertoire.
+root = "hoi_motions/unitree_g1"
+object_names = ["suitcase"]
+motions = [
+    "omomo/sub1_suitcase_010/sample1",
+    "omomo/sub1_suitcase_011/sample1",
+    "omomo/sub1_suitcase_012/sample1",
+    "omomo/sub1_suitcase_013/sample1",
+    "omomo/sub1_suitcase_014/sample1",
+    "omomo/sub1_suitcase_015/sample1",
+    "omomo/sub1_suitcase_016/sample1",
+    "omomo/sub1_suitcase_017/sample1",
+    "omomo/sub1_suitcase_018/sample1",
+    "omomo/sub1_suitcase_019/sample1",
+    "omomo/sub1_suitcase_020/sample1",
+    "omomo/sub1_suitcase_023/sample1",
+    "omomo/sub1_suitcase_024/sample1",
+    "omomo/sub1_suitcase_027/sample1",
+    "omomo/sub1_suitcase_028/sample1",
+    "omomo/sub1_suitcase_029/sample1",
+    "omomo/sub1_suitcase_033/sample1",
+    "omomo/sub1_suitcase_036/sample1",
+    "omomo/sub1_suitcase_037/sample1",
+    "omomo/sub1_suitcase_042/sample1",
+    "omomo/sub1_suitcase_043/sample1",
+    "omomo/sub1_suitcase_045/sample1",
+    "omomo/sub1_suitcase_046/sample1",
+    "omomo/sub1_suitcase_047/sample1",
+    "omomo/sub1_suitcase_048/sample1",
+    "omomo/sub1_suitcase_049/sample1",
+    "omomo/sub1_suitcase_070/sample1",
+    "omomo/sub1_suitcase_072/sample1",
+    "omomo/sub1_suitcase_075/sample1",
+    "omomo/sub1_suitcase_076/sample1",
+    "omomo/sub1_suitcase_077/sample1",
+    "omomo/sub1_suitcase_079/sample1",
+    "omomo/sub4_suitcase_006/sample1",
+    "omomo/sub4_suitcase_007/sample1",
+    "omomo/sub4_suitcase_008/sample1",
+    "omomo/sub4_suitcase_009/sample1",
+    "omomo/sub4_suitcase_010/sample1",
+    "omomo/sub4_suitcase_012/sample1",
+    "omomo/sub4_suitcase_013/sample1",
+    "omomo/sub4_suitcase_014/sample1",
+    "omomo/sub4_suitcase_015/sample1",
+    "omomo/sub4_suitcase_016/sample1",
+    "omomo/sub4_suitcase_017/sample1",
+    "omomo/sub4_suitcase_024/sample1",
+    "omomo/sub4_suitcase_025/sample1",
+    "omomo/sub4_suitcase_026/sample1",
+    "omomo/sub4_suitcase_029/sample1",
+    "omomo/sub5_suitcase_012/sample1",
+    "omomo/sub5_suitcase_014/sample1",
+    "omomo/sub5_suitcase_017/sample1",
+    "omomo/sub5_suitcase_046/sample1",
+    "omomo/sub8_suitcase_006/sample1",
+    "omomo/sub8_suitcase_007/sample1",
+    "omomo/sub8_suitcase_008/sample1",
+    "omomo/sub8_suitcase_009/sample1",
+    "omomo/sub8_suitcase_010/sample1",
+    "omomo/sub8_suitcase_011/sample1",
+    "omomo/sub8_suitcase_013/sample1",
+    "omomo/sub8_suitcase_014/sample1",
+    "omomo/sub8_suitcase_015/sample1",
+    "omomo/sub8_suitcase_016/sample1",
+    "omomo/sub8_suitcase_019/sample1",
+    "omomo/sub8_suitcase_020/sample1",
+]
+
+[source]
+repo = "leggedrobotics/hoi-retarget"
+revision = "b5ac8125e497e6735d6314e63a0e1eedf6229336"
+parquet = "data/omomo/unitree_g1/train-00000-of-00001.parquet"
+sha256 = "ab7a40ffd1f94f603abc455f879f5a7b0cefa9785a0e077bcb1df0719f522b7f"
+size_bytes = 474422158
+mesh = "assets/objects/objects/suitcase/suitcase.obj"
+mesh_sha256 = "4271f2e55ac85f2ebb2a4b80494c8392819476317d9bc5c95e25c20f9597e87b"
+license = "CC-BY-NC-SA-4.0"
+
+[tags]
+sub1_suitcase_010 = { destination = "left", pelvis_m = 0.32, carried_path_m = 1.78 }
+sub1_suitcase_011 = { destination = "left", pelvis_m = 0.36, carried_path_m = 1.75 }
+sub1_suitcase_012 = { destination = "left", pelvis_m = 0.31, carried_path_m = 1.93 }
+sub1_suitcase_013 = { destination = "left", pelvis_m = 0.31, carried_path_m = 2.4 }
+sub1_suitcase_014 = { destination = "back", pelvis_m = 0.31, carried_path_m = 2.24 }
+sub1_suitcase_015 = { destination = "right", pelvis_m = 0.3, carried_path_m = 1.38 }
+sub1_suitcase_016 = { destination = "back", pelvis_m = 0.34, carried_path_m = 1.84 }
+sub1_suitcase_017 = { destination = "back", pelvis_m = 0.24, carried_path_m = 1.8 }
+sub1_suitcase_018 = { destination = "back", pelvis_m = 0.32, carried_path_m = 2.31 }
+sub1_suitcase_019 = { destination = "right", pelvis_m = 0.3, carried_path_m = 2.29 }
+sub1_suitcase_020 = { destination = "back", pelvis_m = 0.47, carried_path_m = 0.97 }
+sub1_suitcase_023 = { destination = "right", pelvis_m = 0.48, carried_path_m = 0.59 }
+sub1_suitcase_024 = { destination = "right", pelvis_m = 0.49, carried_path_m = 0.61 }
+sub1_suitcase_027 = { destination = "short", pelvis_m = 0.35, carried_path_m = 0.56 }
+sub1_suitcase_028 = { destination = "ahead", pelvis_m = 0.33, carried_path_m = 0.93 }
+sub1_suitcase_029 = { destination = "short", pelvis_m = 0.4, carried_path_m = 0.56 }
+sub1_suitcase_033 = { destination = "left", pelvis_m = 0.44, carried_path_m = 2.06 }
+sub1_suitcase_036 = { destination = "ahead", pelvis_m = 0.47, carried_path_m = 1.55 }
+sub1_suitcase_037 = { destination = "left", pelvis_m = 0.47, carried_path_m = 1.9 }
+sub1_suitcase_042 = { destination = "ahead", pelvis_m = 0.32, carried_path_m = 0.92 }
+sub1_suitcase_043 = { destination = "ahead", pelvis_m = 0.4, carried_path_m = 0.78 }
+sub1_suitcase_045 = { destination = "short", pelvis_m = 0.48, carried_path_m = 0.75 }
+sub1_suitcase_046 = { destination = "short", pelvis_m = 0.42, carried_path_m = 0.52 }
+sub1_suitcase_047 = { destination = "left", pelvis_m = 0.43, carried_path_m = 0.86 }
+sub1_suitcase_048 = { destination = "left", pelvis_m = 0.37, carried_path_m = 0.66 }
+sub1_suitcase_049 = { destination = "left", pelvis_m = 0.36, carried_path_m = 1.09 }
+sub1_suitcase_070 = { destination = "left", pelvis_m = 0.48, carried_path_m = 1.79 }
+sub1_suitcase_072 = { destination = "back", pelvis_m = 0.26, carried_path_m = 2.39 }
+sub1_suitcase_075 = { destination = "back", pelvis_m = 0.39, carried_path_m = 2.74 }
+sub1_suitcase_076 = { destination = "left", pelvis_m = 0.43, carried_path_m = 1.88 }
+sub1_suitcase_077 = { destination = "back", pelvis_m = 0.45, carried_path_m = 2.51 }
+sub1_suitcase_079 = { destination = "back", pelvis_m = 0.47, carried_path_m = 2.1 }
+sub4_suitcase_006 = { destination = "ahead", pelvis_m = 0.34, carried_path_m = 1.72 }
+sub4_suitcase_007 = { destination = "ahead", pelvis_m = 0.34, carried_path_m = 2.27 }
+sub4_suitcase_008 = { destination = "right", pelvis_m = 0.35, carried_path_m = 2.33 }
+sub4_suitcase_009 = { destination = "right", pelvis_m = 0.34, carried_path_m = 2.36 }
+sub4_suitcase_010 = { destination = "ahead", pelvis_m = 0.36, carried_path_m = 2.41 }
+sub4_suitcase_012 = { destination = "short", pelvis_m = 0.41, carried_path_m = 0.9 }
+sub4_suitcase_013 = { destination = "short", pelvis_m = 0.47, carried_path_m = 1.12 }
+sub4_suitcase_014 = { destination = "short", pelvis_m = 0.31, carried_path_m = 0.86 }
+sub4_suitcase_015 = { destination = "short", pelvis_m = 0.45, carried_path_m = 0.81 }
+sub4_suitcase_016 = { destination = "short", pelvis_m = 0.46, carried_path_m = 0.79 }
+sub4_suitcase_017 = { destination = "short", pelvis_m = 0.48, carried_path_m = 1.35 }
+sub4_suitcase_024 = { destination = "short", pelvis_m = 0.46, carried_path_m = 0.61 }
+sub4_suitcase_025 = { destination = "short", pelvis_m = 0.48, carried_path_m = 0.68 }
+sub4_suitcase_026 = { destination = "short", pelvis_m = 0.44, carried_path_m = 1.33 }
+sub4_suitcase_029 = { destination = "short", pelvis_m = 0.49, carried_path_m = 1.86 }
+sub5_suitcase_012 = { destination = "left", pelvis_m = 0.24, carried_path_m = 1.74 }
+sub5_suitcase_014 = { destination = "ahead", pelvis_m = 0.27, carried_path_m = 2.04 }
+sub5_suitcase_017 = { destination = "right", pelvis_m = 0.27, carried_path_m = 2.93 }
+sub5_suitcase_046 = { destination = "ahead", pelvis_m = 0.26, carried_path_m = 2.56 }
+sub8_suitcase_006 = { destination = "ahead", pelvis_m = 0.39, carried_path_m = 1.28 }
+sub8_suitcase_007 = { destination = "right", pelvis_m = 0.4, carried_path_m = 1.55 }
+sub8_suitcase_008 = { destination = "right", pelvis_m = 0.4, carried_path_m = 1.82 }
+sub8_suitcase_009 = { destination = "right", pelvis_m = 0.39, carried_path_m = 2.77 }
+sub8_suitcase_010 = { destination = "right", pelvis_m = 0.39, carried_path_m = 2.83 }
+sub8_suitcase_011 = { destination = "back", pelvis_m = 0.4, carried_path_m = 2.73 }
+sub8_suitcase_013 = { destination = "back", pelvis_m = 0.43, carried_path_m = 1.74 }
+sub8_suitcase_014 = { destination = "back", pelvis_m = 0.42, carried_path_m = 1.54 }
+sub8_suitcase_015 = { destination = "left", pelvis_m = 0.42, carried_path_m = 1.49 }
+sub8_suitcase_016 = { destination = "left", pelvis_m = 0.39, carried_path_m = 1.76 }
+sub8_suitcase_019 = { destination = "ahead", pelvis_m = 0.43, carried_path_m = 1.23 }
+sub8_suitcase_020 = { destination = "ahead", pelvis_m = 0.41, carried_path_m = 1.43 }

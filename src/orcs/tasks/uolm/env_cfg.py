@@ -58,6 +58,7 @@ from orcs.tasks.uolm.mdp.commands import (
 from orcs.tasks.uolm.mdp.demo_loader import get_motion_files_for_objects
 from orcs.tasks.uolm.observation_cfgs import ObsCtx, sonic_obs, tara_obs
 from orcs.tasks.uolm.robustness import apply_robustness
+from orcs.tasks.uolm.roster import load_roster, resolve_roster
 from orcs.tasks.uolm.sensors import (
     CONTACT_GRAPH_BODY_NAMES,
     CONTACT_GRAPH_SENSOR_NAME,
@@ -97,11 +98,14 @@ _MOTION_PAD_EPS_SEC = 2.0
 
 @lru_cache(maxsize=None)
 def _resolve_motions(
-    names: tuple[str, ...], excludes: tuple[str, ...]
+    names: tuple[str, ...], excludes: tuple[str, ...],
+    dataset_dir: str = _G1_DATASETS_ROOT,
+    includes: tuple[str, ...] | None = None,
 ) -> tuple[tuple[str, ...], int]:
     """(ordered motion files, longest clip in frames) — cached per roster."""
     _, files = get_motion_files_for_objects(
-        list(names), _G1_DATASETS_ROOT, exclude_motions=list(excludes)
+        list(names), dataset_dir, exclude_motions=list(excludes),
+        include_motions=includes,
     )
     max_len = max(int(np.load(f)["joint_pos"].shape[0]) for f in files)
     return tuple(files), max_len
@@ -195,6 +199,8 @@ def uolm_env_cfg(
     agent: str = "sonic",
     play: bool = False,
     object_names: tuple[str, ...] | None = None,
+    dataset_dir: str | None = None,
+    roster: str | None = None,
     collision: Collision | Mapping[str, Collision] | None = None,
     num_steps_per_env: int = 24,
     robot_cfg: Callable[[], EntityCfg] | None = None,
@@ -215,6 +221,9 @@ def uolm_env_cfg(
                    so that pairing is rejected.
 
     Injection points for a downstream consumer (§ethos: adapt, don't fork):
+      dataset_dir optional native-data root (legacy root by default).
+      roster      packaged roster name or TOML path; fixes the object and clip
+                  selection and checks the staged provenance before loading.
       robot_cfg   the G1 variant to build on — physics is identical across
                   variants, so this only picks the visual set (a consumer with
                   a camera wants out-of-frame meshes demoted).
@@ -228,6 +237,17 @@ def uolm_env_cfg(
     assert not (agent == "tara" and command_space == "smpl"), (
         "the smpl command space rides the SONIC smpl encoder — no tabula-rasa variant")
 
+    includes = None
+    if dataset_dir is not None or roster is not None:
+        if command_space != "robot" or _bootstrap_motion is not None:
+            raise ValueError("dataset_dir/roster require the native robot command path")
+    if roster is not None:
+        spec = load_roster(roster)
+        if object_names is not None and tuple(object_names) != spec.object_names:
+            raise ValueError("object_names disagree with the selected roster")
+        object_names = spec.object_names
+        dataset_dir = str(resolve_roster(spec, dataset_dir))
+        includes = spec.motions
     names = tuple(object_names or _DEFAULT_OBJECT_NAMES)
     obj = SceneEntityCfg(OBJECT_BODY_NAME)
     _p = {"command_name": "motion"}
@@ -247,9 +267,11 @@ def uolm_env_cfg(
         if motion_file is None:  # dataset not built yet — harmless placeholder
             motion_file = _resolve_motions(names, _EXCLUDE_MOTIONS)[0][0]
     else:
-        files, max_clip_len = _resolve_motions(names, _EXCLUDE_MOTIONS)
-        motion_file, dataset_dir = files[0], _G1_DATASETS_ROOT
-        cmd_object_names, cmd_excludes = names, _EXCLUDE_MOTIONS
+        excludes = () if roster is not None else _EXCLUDE_MOTIONS
+        dataset_dir = dataset_dir or _G1_DATASETS_ROOT
+        files, max_clip_len = _resolve_motions(names, excludes, dataset_dir, includes)
+        motion_file = files[0]
+        cmd_object_names, cmd_excludes = names, excludes
 
     cfg = ManagerBasedRlEnvCfg(
         scene=SceneCfg(
@@ -332,6 +354,7 @@ def uolm_env_cfg(
         dataset_dir=dataset_dir,
         ordered_object_names=cmd_object_names,
         exclude_motions=cmd_excludes,
+        include_motions=includes,
         object_entity_name=OBJECT_BODY_NAME,
         command_space=command_space,
         future_steps=5,

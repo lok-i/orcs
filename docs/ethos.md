@@ -7,7 +7,7 @@ Why orcs exists, what it believes, and how the tree is shaped. Usage lives in
 
 | | |
 |---|---|
-| `orcs` | **O**racle **R**obot **C**ontrol **S**ynthesis |
+| `orcs` | **O**ptimize, **R**etarget, **C**ontrol **S**uite |
 | oracle | a policy that sees what the robot cannot — full sim state |
 | synthesis | we *build* the oracle, then hand its competence down |
 | why "orc" | one horde, many bodies. Tasks are members, not forks. |
@@ -162,11 +162,16 @@ omissions do not produce import-time warnings.
    `orcs.core.registry.register_all(_TASKS)` — per-row, so one unstaged dataset
    costs one task and `SKIP_REASON[task_id]` says why. A checkout without data
    must still import.
-2. Task id is `Orcs-<Name>-[<Source>-]<Agent>[-<CommandSpace>]`. The agent is
+2. Task id is `Orcs-<Name>-[<SourceOrScene>-]<Agent>[-<CommandSpace>]`. The agent is
    **always** an explicit token, so no row's identity depends on knowing the
    default. The SOURCE slot appears only when provenance changes code — reader,
    file format, joint order, conventions (perloco's `OmRe`/`Grail` do; its curb
    vs stair terrains do not, so those are a roster line, not a task).
+   A named scene preset can also occupy this slot: UOLM's `Suitcase`,
+   `SmallCubeTable` and `BigCubeFloor` bind a physical scene and default motion
+   collection to the shared factory. Experimental clip subsets belong in
+   rosters, not additional task IDs. Source revision and exact clip selection
+   remain recorded in the roster and staged metadata.
 3. Add one `import orcs.tasks.<name>` line to `src/orcs/registration.py`.
 4. Draw robots/objects from `orcs.assets`, paths from `orcs.core.paths`. If you
    need a new robot, add `orcs/assets/<robot>.py` and re-export it.

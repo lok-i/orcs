@@ -86,6 +86,9 @@ play Orcs-PerLoco-EgoHtr-AdaptSonic --agent release --num-envs 2 --viewer viser
 # initial
 play Orcs-Uolm-AdaptSonic --agent initial --viewer native
 
+# one suitcase, 63 HOI-Retarget motions
+play Orcs-Uolm-Suitcase-AdaptSonic --agent initial --num-envs 1 --viewer viser
+
 # trained
 play Orcs-PerLoco-OmRe-AdaptSonic --agent trained \
   --checkpoint-file /path/to/checkpoint.pt --viewer native # from local checkpoint
@@ -108,6 +111,11 @@ released checkpoints from [`lkrajan/orcs`](https://huggingface.co/lkrajan/orcs) 
 train Orcs-Uolm-AdaptSonic --env.scene.num-envs 4096
 train Orcs-PerLoco-Grail-AdaptSonic --env.scene.num-envs 4096
 ```
+
+The [suitcase task](docs/hoi_suitcase.md) uses the same UOLM agent recipe over
+63 HOI-Retarget clips. Default data setup includes it; sync it separately with
+`bash scripts/setup/sync_data.sh hoiretarget --no-smpl`. Setup downloads one
+OMOMO G1 shard, stages only the selected clips, and removes its temporary source.
 
 ## retarget
 
