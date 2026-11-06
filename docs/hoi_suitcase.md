@@ -26,13 +26,12 @@ The initial policy is the frozen SONIC controller with its zero-initialized
 adapter. Use the viewer's motion selector to inspect individual clips. A new
 task does not yet have a released adapter checkpoint.
 
-For a first training experiment, keep the UOLM recipe and its decaying virtual
-object force. A 15,000-update budget includes about 5,000 updates after assistance
-ends; it is an initial learning experiment, not a convergence guarantee:
+To train with the UOLM recipe and a 20,000-update phase-annealing schedule:
 
 ```bash
 train Orcs-Uolm-Suitcase-AdaptSonic --env.scene.num-envs 4096 \
-  --agent.max-iterations 15000 --agent.run-name suitcase_vof_baseline
+  --env.commands.motion.init-phase-anneal-iterations 20000 \
+  --agent.max-iterations 20000
 ```
 
 The existing force multiplier is 1 initially, 0.1 at update 2,500, 0.01 at
@@ -42,6 +41,13 @@ and orientation errors, contact consistency, and object/fall terminations.
 Training returns while assistance is active are not evidence of independent
 manipulation. Use trained-checkpoint playback (which removes the virtual force)
 to review pickup, carry, placement and the final hold from frame zero.
+
+For a no-VOF ablation, append
+`--env.events.virtual-object-force.params.natural-frequency 0.0`.
+This disables both force and torque from the first step while preserving the
+phase-annealing schedule and other task settings. The logged
+`VirtualObjectForce/alpha` still follows its schedule; with zero natural
+frequency the applied wrench is zero regardless of that multiplier.
 
 ## Data ownership
 

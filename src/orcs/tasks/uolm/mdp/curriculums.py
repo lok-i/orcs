@@ -29,8 +29,10 @@ only knob is ωₙ. Gains are then multiplied by α(t):
   decay_mode="exponential": α(t) = terminal_scale ** (t/t*)
 
 Past t* (=``decay_by_policy_iterations``) α goes to exactly 0 and the wrench is
-cleared once. m and I (mean principal moment) are read per-world from the model
-at init (stays correct under mass DR, which writes per-world).
+cleared once. m and I (mean principal moment) are read per-world from the live
+model when applying the wrench: startup/reset randomization can change them
+after this event term is constructed. A zero natural frequency disables both
+force and torque without changing the curriculum clock.
 """
 
 from __future__ import annotations
@@ -76,25 +78,10 @@ class VirtualObjectForceCurriculum(ManagerTermBase):
         self._object = env.scene[p.get("object_cfg", SceneEntityCfg("object")).name]
         self._command_name: str = p.get("command_name", "motion")
 
-
-        idx = self._object.data.indexing.body_ids
-        model = self._object.data.model
-        self._mass = model.body_mass[:, idx].sum(-1, keepdim=True).to(env.device)
-        self._inertia = (
-            model.body_inertia[:, idx].mean(-1).sum(-1, keepdim=True).to(env.device)
-        )
-
-        self._kp_lin = self._mass * self._wn**2
-        self._kd_lin = 2.0 * self._mass * self._wn
-        self._kp_ang = self._inertia * self._wn**2
-        self._kd_ang = 2.0 * self._inertia * self._wn
-
         print(
             f"[VirtualObjectForceCurriculum] wn={self._wn}, "
             f"terminal_scale={self._terminal_scale}, decay_mode={self._decay_mode}, "
-            f"decay_iters={self._decay_iters}, "
-            f"mass range=[{self._mass.min().item():.3f}, {self._mass.max().item():.3f}] kg, "
-            f"inertia range=[{self._inertia.min().item():.2e}, {self._inertia.max().item():.2e}] kg·m²"
+            f"decay_iters={self._decay_iters}"
         )
 
     def __call__(
@@ -121,21 +108,29 @@ class VirtualObjectForceCurriculum(ManagerTermBase):
         env.extras["log"]["VirtualObjectForce/alpha"] = self.alpha
 
         obj = self._object
-        if self.alpha == 0.0:
+        if self.alpha == 0.0 or self._wn == 0.0:
             if not self._wrench_cleared:  # xfrc_applied persists — clear once
                 zeros = torch.zeros(env.num_envs, 1, 3, device=env.device)
                 obj.write_external_wrench_to_sim(zeros, zeros)
                 self._wrench_cleared = True
             return
 
+        # Event terms are constructed before startup DR; model arrays may
+        # also be rebound during expansion. Never retain their initial values.
+        idx = obj.data.indexing.body_ids
+        model = obj.data.model
+        mass = model.body_mass[:, idx].sum(-1, keepdim=True).to(env.device)
+        inertia = model.body_inertia[:, idx].mean(-1).sum(-1, keepdim=True).to(env.device)
+        kp, kd = self._wn**2, 2.0 * self._wn
+
         cmd = env.command_manager.get_term(self._command_name)
-        force_w = self.alpha * (
-            self._kp_lin * (cmd.object_pos_w - obj.data.root_link_pos_w)
-            - self._kd_lin * obj.data.root_link_lin_vel_w
+        force_w = self.alpha * mass * (
+            kp * (cmd.object_pos_w - obj.data.root_link_pos_w)
+            - kd * obj.data.root_link_lin_vel_w
         )
         ori_err_w = _quat_error_world(obj.data.root_link_quat_w, cmd.object_quat_w)
-        torque_w = self.alpha * (
-            self._kp_ang * ori_err_w - self._kd_ang * obj.data.root_link_ang_vel_w
+        torque_w = self.alpha * inertia * (
+            kp * ori_err_w - kd * obj.data.root_link_ang_vel_w
         )
 
         obj.write_external_wrench_to_sim(
