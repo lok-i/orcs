@@ -43,6 +43,7 @@ from mocke.mdp.joint_maps import G1_TRACKED_BODY_NAMES as _G1_BODY_NAMES
 
 from orcs.core.data.loader import ConcatMotionLoader
 from orcs.core.data.scan import scan_flat
+from orcs.core.mdp.adaptive_sampling import AdaptiveMotionSampler
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -95,18 +96,19 @@ class MultiClipMotionCommand(MotionCommand):
         )
         self.body_quat_relative_w[:, :, 0] = 1.0
 
-        self.bin_count = int(self.motion.time_step_total // (1 / env.step_dt)) + 1
-        self.bin_failed_count = torch.zeros(
-            self.bin_count, dtype=torch.float, device=self.device
-        )
-        self._current_bin_failed = torch.zeros(
-            self.bin_count, dtype=torch.float, device=self.device
-        )
-        self.kernel = torch.tensor(
-            [cfg.adaptive_lambda**i for i in range(cfg.adaptive_kernel_size)],
-            device=self.device,
-        )
-        self.kernel = self.kernel / self.kernel.sum()
+        self._adaptive_sampler = None
+        if cfg.sampling_mode == "adaptive":
+            self._adaptive_sampler = AdaptiveMotionSampler(
+                self.motion.clip_lengths, env.step_dt,
+                kernel_size=cfg.adaptive_kernel_size, decay=cfg.adaptive_lambda,
+                uniform_prior=cfg.adaptive_uniform_ratio, alpha=cfg.adaptive_alpha,
+                start_fraction=cfg.adaptive_start_from_zero_ratio,
+            )
+            self._adaptive_episode = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            self._adaptive_last_step = env.common_step_counter
+            weights = self._adaptive_sampler.weights().sum(1)
+            self._adaptive_probabilities = weights / weights.sum()
+            self.metrics["sampling_start_from_zero"] = torch.zeros(self.num_envs, device=self.device)
         for metric in (
             "error_anchor_pos",
             "error_anchor_rot",
@@ -140,6 +142,11 @@ class MultiClipMotionCommand(MotionCommand):
         self.metrics["init_phase_max"] = torch.zeros(self.num_envs, device=self.device)
 
         self._init_task()
+        if self._adaptive_sampler is not None:
+            self._adaptive_log_names = [
+                f"MotionSampling/clip_{row['index']:03d}:{row['id']}"
+                for row in self.motion_catalog()
+            ]
 
     # ── extension hooks ──
 
@@ -257,6 +264,18 @@ class MultiClipMotionCommand(MotionCommand):
         L = self.motion.max_clip_length
 
         allowed = self._clip_allowance(env_ids)  # (n, n_clips) | None
+        if self._adaptive_sampler is not None:
+            clips, frames, probabilities = self._adaptive_sampler.sample(
+                n, allowed=allowed, phase_max=self._init_phase_max,
+                start_from_zero=self.cfg.start_from_zero,
+            )
+            self._adaptive_probabilities = probabilities
+            entropy = -(probabilities * probabilities.clamp_min(1e-12).log()).sum()
+            normalizer = np.log(self.motion.n_clips) if self.motion.n_clips > 1 else 1.0
+            self.metrics["sampling_entropy"][env_ids] = entropy / normalizer
+            self.metrics["sampling_top1_prob"][env_ids] = probabilities.max()
+            self.metrics["sampling_start_from_zero"][env_ids] = (frames == 0).float()
+            return clips, self.motion.clip_offsets[clips] + frames
 
         # Force frame 0: pick a clip uniformly (within allowance), init at start.
         if self.cfg.start_from_zero:
@@ -294,8 +313,27 @@ class MultiClipMotionCommand(MotionCommand):
         global_steps = self.motion.clip_offsets[clip_ids] + local_frames
         return clip_ids, global_steps
 
+    def reset(self, env_ids: torch.Tensor) -> dict[str, float]:
+        # Command reset precedes termination-manager reset. Read the previous
+        # episode's clip/frame here, before RSI overwrites either. Count a
+        # failed episode once even when several native failure terms fire.
+        if self._adaptive_sampler is not None:
+            failed = (self._env.termination_manager.terminated[env_ids]
+                      & (self._env.episode_length_buf[env_ids] > 0)
+                      & self._adaptive_episode[env_ids])
+            selected = env_ids[failed]
+            self._adaptive_sampler.record_failures(
+                self._clip_ids[selected], self.local_reference_frames[selected])
+            self._adaptive_episode[env_ids] = False
+        return super().reset(env_ids)
+
     def _resample_command(self, env_ids: torch.Tensor) -> None:
         """Sample a new clip + frame and RSI the robot onto it."""
+        if self._adaptive_sampler is not None:
+            self._refresh_init_phase()
+            queued = getattr(self, "_queued_clips", None)
+            # Forced benchmark episodes bypass both sampling and statistics.
+            self._adaptive_episode[env_ids] = True if queued is None else queued[env_ids] < 0
         clip_ids, global_steps = self._sample_init_frame(env_ids)
         self._clip_ids[env_ids] = clip_ids
         self.time_steps[env_ids] = global_steps
@@ -341,6 +379,14 @@ class MultiClipMotionCommand(MotionCommand):
 
     # ── step ──
 
+    def _refresh_init_phase(self) -> None:
+        if self.cfg.init_phase_anneal_iterations > 0 and hasattr(
+            self._env, "policy_update_count"
+        ):
+            self._init_phase_max = max(
+                0.0, 1.0 - self._env.policy_update_count / self.cfg.init_phase_anneal_iterations
+            )
+
     def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
         """Advance all commands on a policy step, or only reset environments.
 
@@ -350,16 +396,18 @@ class MultiClipMotionCommand(MotionCommand):
         argument.
         """
         # Phase annealing: _init_phase_max 1→0 over N policy updates.
-        if self.cfg.init_phase_anneal_iterations > 0 and hasattr(
-            self._env, "policy_update_count"
-        ):
-            k = self._env.policy_update_count
-            self._init_phase_max = max(
-                0.0, 1.0 - k / self.cfg.init_phase_anneal_iterations
-            )
+        self._refresh_init_phase()
         self.metrics["init_phase_max"][:] = self._init_phase_max
         log = self._env.extras.setdefault("log", {})
         log["PhaseAnnealing/init_phase_max"] = self._init_phase_max
+        if self._adaptive_sampler is not None:
+            step = self._env.common_step_counter
+            if env_ids is None and step != self._adaptive_last_step:
+                self._adaptive_sampler.advance()
+                self._adaptive_last_step = step
+            # Named per-clip probabilities retain identity through the runner's
+            # scalar averaging; averaging an integer argmax would not.
+            log.update(zip(self._adaptive_log_names, self._adaptive_probabilities.unbind(), strict=True))
 
         self._update_task()
 
@@ -454,9 +502,13 @@ class MultiClipMotionCommandCfg(MotionCommandCfg):
     # MotionCommand defaults — 14 tracked bodies
     anchor_body_name: str = "pelvis"
     body_names: tuple[str, ...] = _G1_BODY_NAMES
-    # NOTE: base-class adaptive sampling is NOT wired to the multi-clip
-    # sampler; pinned to "start" (per-clip adaptive sampling = future PR).
+    # "adaptive" opts into failure-biased clip/phase sampling. "start" and
+    # "uniform" retain ORCS's legacy RSI path; start_from_zero controls phase.
     sampling_mode: Literal["adaptive", "uniform", "start"] = "start"
+
+    # Fraction of adaptive resets that pick a uniform allowed clip at frame 0.
+    # Inherited adaptive_* settings control the EMA, prior and lookback kernel.
+    adaptive_start_from_zero_ratio: float = 0.25
 
     # Phase annealing: init_phase_max 1→0 over N policy updates.
     # Caps WHERE envs can start; clips always run to natural end.

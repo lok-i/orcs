@@ -18,6 +18,7 @@ def test_motion_update_scopes_frame_advance_to_reset_env_ids() -> None:
     command.time_steps = torch.tensor([1, 2, 5])
     command._steps_past_end = torch.zeros(3, dtype=torch.long)
     command._update_task = lambda: None
+    command._adaptive_sampler = None
     command.update_relative_body_poses = lambda: None
 
     command._update_command(torch.tensor([1]))

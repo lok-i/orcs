@@ -40,6 +40,9 @@ own their task selection, language interfaces and evaluation worlds.
 - Motion-repertoire benchmarks use the training task plus its `BenchmarkSpec`,
   preserving native failures and full observation widths. New task families
   declare scene assignment and horizon hooks; core never branches on task names.
+- Adaptive motion sampling is opt-in shared command logic. Keep failure bins
+  within each clip, respect live scene allowances and phase limits, and let
+  queued benchmark resets bypass sampling and failure statistics.
 
 ## Data and controller contracts
 
