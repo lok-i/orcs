@@ -19,6 +19,7 @@ from functools import partial
 
 from orcs.core.registry import register_all
 from orcs.core.rl import adapt_sonic_agent_cfg
+from orcs.tasks.dodge.benchmark import SPEC
 from orcs.tasks.dodge.env_cfg import dodge_env_cfg
 
 _TASKS = (
@@ -27,5 +28,5 @@ _TASKS = (
      partial(adapt_sonic_agent_cfg, "orcs_dodge")),
 )
 
-SKIP_REASON: dict[str, str] = register_all(_TASKS)
+SKIP_REASON: dict[str, str] = register_all(_TASKS, benchmark=SPEC)
 """{task_id: why it could not register}. Empty when every task registered."""

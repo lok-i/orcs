@@ -117,6 +117,18 @@ The [suitcase task](docs/hoi_suitcase.md) uses the same UOLM agent recipe over
 `bash scripts/setup/sync_data.sh hoiretarget --no-smpl`. Setup downloads one
 OMOMO G1 shard, stages only the selected clips, and removes its temporary source.
 
+## motion repertoire
+
+```bash
+orcs-bench-motion-repertoire Orcs-Uolm-Suitcase-AdaptSonic \
+  --wandb-run-path lkrajan/orcs/zih7cd4i \
+  --num-envs 4096 --trials-per-motion 65
+```
+
+Equal trials for every reference clip, native task failures, generic tracking
+metrics, and a local browser report. Smaller environment counts run successive
+batches. [Protocol, local checkpoints, exports and task hooks](docs/motion_repertoire.md).
+
 ## retarget
 
 **scripted**

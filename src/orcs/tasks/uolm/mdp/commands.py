@@ -345,6 +345,11 @@ class ObjectMotionCommand(MultiClipMotionCommand):
             return None
         return self._clip_allowed[self._env_object_ids[env_ids]].float()
 
+    def motion_context_ids(self) -> torch.Tensor:
+        if self._clip_object_ids is None:
+            return super().motion_context_ids()
+        return self._clip_object_ids
+
     def _reset_task(
         self,
         env_ids: torch.Tensor,

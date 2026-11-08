@@ -134,6 +134,9 @@ class TerrainMotionCommand(MultiClipMotionCommand):
         """(n, n_clips) — the clips staged against the tile this env is on."""
         return self._tile_mask[self._env_tile(env_ids)]
 
+    def motion_context_ids(self) -> torch.Tensor:
+        return self._clip_tile
+
     def _debug_vis_impl(self, visualizer) -> None:
         """Robot ghost in robot space; the human skeleton alone in smpl space.
 

@@ -16,6 +16,8 @@ from typing import Callable, Iterable
 
 from mjlab.tasks.registry import register_mjlab_task
 
+from orcs.core.motion_benchmark.contract import SPECS, BenchmarkSpec
+
 __all__ = ["TaskRow", "register_all", "MISSING_DATA"]
 
 MISSING_DATA = (FileNotFoundError, NotADirectoryError, OSError)
@@ -26,7 +28,9 @@ TaskRow = tuple[str, Callable[..., object], Callable[[], object]]
 """(task_id, env_cfg factory taking `play=`, rl_cfg factory taking nothing)."""
 
 
-def register_all(rows: Iterable[TaskRow]) -> dict[str, str]:
+def register_all(
+    rows: Iterable[TaskRow], *, benchmark: BenchmarkSpec | None = None,
+) -> dict[str, str]:
     """Register each row; return {task_id: reason} for the ones that could not."""
     skipped: dict[str, str] = {}
     for task_id, env_cfg, rl_cfg in rows:
@@ -37,6 +41,8 @@ def register_all(rows: Iterable[TaskRow]) -> dict[str, str]:
                 play_env_cfg=env_cfg(play=True),
                 rl_cfg=rl_cfg(),
             )
+            if benchmark is not None:
+                SPECS[task_id] = benchmark
         except MISSING_DATA as e:
             skipped[task_id] = f"{type(e).__name__}: {e}"
     return skipped

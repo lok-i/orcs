@@ -52,6 +52,10 @@ def test_release_manifest_ships(wheel):
     assert "orcs/release.json" in set(wheel.namelist())
 
 
+def test_motion_report_template_ships(wheel):
+    assert "orcs/core/motion_benchmark/report.html" in set(wheel.namelist())
+
+
 def test_native_setup_ships_without_local_release_recorder(wheel):
     names = set(wheel.namelist())
     assert "orcs/cli/sync_native_data.py" in names

@@ -27,6 +27,7 @@ or promoted envs keep sampling their old identity's clips.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -174,7 +175,77 @@ class MultiClipMotionCommand(MotionCommand):
 
     # ── sampling ──
 
+    def motion_context_ids(self) -> torch.Tensor:
+        """Scene-context ID for each reference; unconstrained commands use zero."""
+        return torch.zeros(self.motion.n_clips, dtype=torch.long, device=self.device)
+
+    def motion_catalog(self) -> list[dict]:
+        """Resolved playable takes, preserving source identity and scene context."""
+        from os.path import commonpath
+
+        source = self.cfg.dataset_dir
+        root = (Path(commonpath(source)).resolve() if isinstance(source, list)
+                else Path(source).resolve())
+        contexts = self.motion_context_ids().cpu().tolist()
+        catalog = []
+        for i, file in enumerate(self.motion.motion_files):
+            path = Path(file).resolve()
+            identity = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
+            catalog.append(dict(index=i, id=identity, path=str(path),
+                                frames=int(self.motion.clip_lengths[i]), context=contexts[i]))
+        return catalog
+
+    def allowed_motion_mask(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Public compatibility query, evaluated against the live scene assignment."""
+        mask = self._clip_allowance(env_ids)
+        if mask is None:
+            return torch.ones(len(env_ids), self.motion.n_clips,
+                              device=self.device, dtype=torch.bool)
+        return mask.bool()
+
+    def queue_reset_clips(self, env_ids: torch.Tensor, clip_ids: torch.Tensor) -> None:
+        """Select frame zero of these clips on the next reset only."""
+        if env_ids.shape != clip_ids.shape or env_ids.ndim != 1:
+            raise ValueError("env_ids and clip_ids must be matching vectors")
+        if (env_ids < 0).any() or (env_ids >= self.num_envs).any() or len(env_ids.unique()) != len(env_ids):
+            raise ValueError("env_ids must select distinct valid worlds")
+        if (clip_ids < 0).any() or (clip_ids >= self.motion.n_clips).any():
+            raise ValueError("clip index outside the resolved repertoire")
+        allowed = self.allowed_motion_mask(env_ids)
+        if not allowed[torch.arange(len(env_ids), device=self.device), clip_ids].all():
+            raise ValueError("reference does not match its world's scene context")
+        if getattr(self, "_queued_clips", None) is None:
+            self._queued_clips = torch.full_like(self._clip_ids, -1)
+        self._queued_clips[env_ids] = clip_ids
+
+    @property
+    def current_clip_ids(self) -> torch.Tensor:
+        return self._clip_ids
+
+    @property
+    def local_reference_frames(self) -> torch.Tensor:
+        return self.time_steps - self.motion.clip_offsets[self._clip_ids]
+
+    @property
+    def hold_steps(self) -> torch.Tensor:
+        return self._steps_past_end
+
     def _sample_init_frame(
+        self, env_ids: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        queued = getattr(self, "_queued_clips", None)
+        if queued is None or not (queued[env_ids] >= 0).any():
+            return self._sample_default_init_frame(env_ids)
+        clips = queued[env_ids].clone()
+        forced = clips >= 0
+        frames = torch.empty_like(clips)
+        frames[forced] = self.motion.clip_offsets[clips[forced]]
+        if (~forced).any():
+            clips[~forced], frames[~forced] = self._sample_default_init_frame(env_ids[~forced])
+        queued[env_ids] = -1
+        return clips, frames
+
+    def _sample_default_init_frame(
         self, env_ids: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample per-env (clip_id, init_frame) with phase annealing.

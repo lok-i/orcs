@@ -38,6 +38,7 @@ from functools import partial
 
 from orcs.core.registry import register_all
 from orcs.core.rl import SMPL_CKPT, adapt_sonic_agent_cfg, tara_agent_cfg
+from orcs.tasks.perloco.benchmark import SPEC
 from orcs.tasks.perloco.env_cfg import (
     egohtr_env_cfg,
     grail_env_cfg,
@@ -71,5 +72,5 @@ _TASKS = (
      partial(tara_agent_cfg, "orcs_perloco_grail_tara")),
 )
 
-SKIP_REASON: dict[str, str] = register_all(_TASKS)
+SKIP_REASON: dict[str, str] = register_all(_TASKS, benchmark=SPEC)
 """{task_id: why it could not register}. Empty when every task registered."""

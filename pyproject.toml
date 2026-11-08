@@ -17,6 +17,7 @@ dependencies = [
     "mujoco-warp==3.8.1",
     "warp-lang==1.13.0",
     "joblib",           # reads SONIC smpl .pkl clips (orcs.tasks.uolm.smpl_data)
+    "matplotlib>=3.8",  # standalone motion-repertoire report figures
     # Capped, not just floored: rsl_rl's WandbLogWriter passes the legacy
     # `Settings(start_method=...)`, which 0.29 turned from a deprecation warning
     # into a hard pydantic `extra_forbidden`. mjlab asks only for >=0.22.3, so a
@@ -54,6 +55,7 @@ where = ["src"]
 "orcs" = ["release.json"]
 "orcs.tasks.perloco" = ["rosters/*.toml"]
 "orcs.tasks.uolm" = ["rosters/*.toml"]
+"orcs.core.motion_benchmark" = ["report.html"]
 "orcs.ego_htr" = ["SKILL.md", "agent_tools.md", "presets/*.json", "patches/*.patch"]
 
 # mjlab auto-discovers tasks by importing this module at startup.
@@ -67,6 +69,7 @@ orcs = "orcs.registration"
 # The data pipeline ships INSIDE the package (`orcs.cli`), so a pip-installed
 # orcs can produce the data it consumes. `scripts/*.py` are thin wrappers.
 [project.scripts]
+orcs-bench-motion-repertoire = "orcs.cli.bench_motion_repertoire:main"
 orcs-stage-terrain = "orcs.cli.stage_terrain_motions:main"
 orcs-stage-hoi = "orcs.cli.stage_hoi_motions:main"
 orcs-view-terrain = "orcs.cli.view_terrain_motions:main"

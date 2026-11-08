@@ -35,6 +35,7 @@ from functools import partial
 
 from orcs.core.registry import register_all
 from orcs.core.rl import SMPL_CKPT, adapt_sonic_agent_cfg, tara_agent_cfg
+from orcs.tasks.uolm.benchmark import SPEC
 from orcs.tasks.uolm.env_cfg import uolm_env_cfg, uolm_smpl_env_cfg
 
 # LoRA size for THIS task's adapter (2026-08-04). rank 16 -> 28, alpha 1 -> 28.
@@ -122,5 +123,5 @@ _TASKS = (
              base_checkpoint=SMPL_CKPT)),
 )
 
-SKIP_REASON: dict[str, str] = register_all(_TASKS)
+SKIP_REASON: dict[str, str] = register_all(_TASKS, benchmark=SPEC)
 """{task_id: why it could not register}. Empty when every task registered."""

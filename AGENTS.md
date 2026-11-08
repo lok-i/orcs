@@ -14,6 +14,7 @@ own their task selection, language interfaces and evaluation worlds.
 - [docs/smpl_retargeting.md](docs/smpl_retargeting.md): seed-backed SMPL tasks.
 - [docs/ego_htr.md](docs/ego_htr.md): EgoHTR staging and assisted retargeting.
 - [docs/hoi_suitcase.md](docs/hoi_suitcase.md): native suitcase roster and staging.
+- [docs/motion_repertoire.md](docs/motion_repertoire.md): balanced policy benchmark and task hooks.
 
 ## Extension rules
 
@@ -36,6 +37,9 @@ own their task selection, language interfaces and evaluation worlds.
   that need task discovery.
 - Registered UOLM SMPL recipes use `uolm_smpl_env_cfg`. The older
   `uolm_env_cfg(command_space="smpl")` path is for rollout/debugging.
+- Motion-repertoire benchmarks use the training task plus its `BenchmarkSpec`,
+  preserving native failures and full observation widths. New task families
+  declare scene assignment and horizon hooks; core never branches on task names.
 
 ## Data and controller contracts
 
