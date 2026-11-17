@@ -117,6 +117,10 @@ The [suitcase task](docs/hoi_suitcase.md) uses the same UOLM agent recipe over
 `bash scripts/setup/sync_data.sh hoiretarget --no-smpl`. Setup downloads one
 OMOMO G1 shard, stages only the selected clips, and removes its temporary source.
 
+[Adaptive sampling](docs/adaptive_sampling.md) optionally biases training resets
+toward difficult clips and phases within each world's allowed scene. It uses
+the same task IDs and agents; the default sampler remains unchanged.
+
 ## motion repertoire
 
 ```bash

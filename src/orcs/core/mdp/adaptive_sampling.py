@@ -2,7 +2,7 @@
 
 Each clip owns its time bins: lookback never crosses reference boundaries.
 Statistics are transient EMA failure counts, not exposure-normalized rates.
-See docs/hoi_suitcase.md for attribution and the training recipe.
+See docs/adaptive_sampling.md for semantics and attribution.
 """
 
 from __future__ import annotations

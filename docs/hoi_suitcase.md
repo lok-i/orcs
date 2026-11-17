@@ -6,6 +6,12 @@ The environment and agent are the native UOLM recipe: frozen SONIC, LoRA rank
 28/alpha 28, std multiplier 1.3, and the existing rewards, contacts, resets,
 robustness and virtual-object-force curriculum.
 
+`Suitcase` names the dedicated 63-motion repertoire. The existing
+`Orcs-Uolm-AdaptSonic` remains the six-object task, including its original
+suitcase reference. The new data does not expand that task's roster. Their
+object-identity observation widths differ, so checkpoints belong to their
+respective task IDs even though the agent recipe is shared.
+
 ## Setup and play
 
 After creating and activating the repository's `.venv`:
@@ -72,42 +78,11 @@ are the existing UOLM recipe. The run name remains the default timestamp.
 The sampler changes training resets only; the repertoire benchmark retains
 equal trials per motion from frame zero.
 
-- About one second of reference time per bin, independently within each clip.
-  Native failure terminations contribute once to a bin's failure count;
-  completion/timeouts alone and forced benchmark episodes do not.
-- Failure counts use an exponential moving average (`adaptive_alpha=0.001`).
-  A three-bin kernel with `adaptive_lambda=0.8` biases starts toward the failure
-  bin and its two preceding bins. It never crosses clip boundaries.
-- Summed bin weights select clips; conditional bin weights select start phases.
-  Live scene compatibility masks apply to both adaptive and uniform selection.
-  Annealing restricts the start phase, while clip difficulty still uses the
-  whole motion. Thus clip prioritization continues after phase reaches zero.
-- A quarter of resets select an allowed clip uniformly and start at frame zero.
-  The other resets use adaptive weights plus `adaptive_uniform_ratio=0.1` as an
-  additive prior. This prior is **not** a guaranteed 10% uniform mixture;
-  the separate quarter of full starts supplies guaranteed baseline practice.
-- `start_from_zero=True` forces all starts to zero, retaining clip adaptation.
-  `init_phase_anneal_iterations=0` disables annealing, allowing adaptive starts
-  throughout the clip unless `start_from_zero` is set.
-- Statistics are runtime-only and start fresh on resume. Policy/optimizer
-  checkpoint handling is unchanged. These are failure counts, not estimates
-  normalized by how often each bin was visited.
-
-Inspect `Metrics/motion/sampling_entropy`, `sampling_top1_prob` and
-`sampling_start_from_zero` for clip concentration and realized full starts.
-`MotionSampling/clip_<index>:<identity>` records the mean clip probabilities
-for the latest reset batch, including the uniform mixture and scene masks.
-These names preserve clip identity through scalar log aggregation. The
-legacy `sampling_top1_bin` metric is not used by the multi-clip sampler.
-
-The implementation follows the failure histogram/EMA and lookback design in
-[BeyondMimic](https://github.com/HybridRobotics/whole_body_tracking/blob/main/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py)
-and [MJLab](https://github.com/mujocolab/mjlab/blob/main/src/mjlab/tasks/tracking/mdp/commands.py).
-Both upstream command defaults use a one-bin kernel; this recipe explicitly
-enables three bins. ORCS adds clip boundaries, scene compatibility, full-start
-practice and its existing phase limits. The default `sampling_mode="start"`
-and the legacy `"uniform"` path retain their previous ORCS behavior;
-`start_from_zero` controls their phase-zero override.
+All 63 clips are compatible with every suitcase world. This recipe uses a
+three-bin lookback and 25% uniform full-start practice. Clip selection remains
+adaptive during the final 1,000 phase-zero updates; sampler histories restart
+on resume. See [shared adaptive sampling](adaptive_sampling.md) for the exact
+distribution, scene constraints, legacy mode semantics and logging.
 
 ## Data ownership
 

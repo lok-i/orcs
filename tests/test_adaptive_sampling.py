@@ -80,6 +80,18 @@ def test_full_start_mixture_and_live_scene_allowance():
         s.sample(1, allowed=torch.zeros(1, 3))
 
 
+def test_failure_bias_cannot_redistribute_worlds_between_scene_contexts():
+    s = sampler((150, 150), start_fraction=0.25, alpha=1)
+    # Each world owns one compatible clip, as in legacy UOLM and current OmRe.
+    allowed = torch.tensor([[1, 0], [1, 0], [0, 1]], dtype=torch.bool)
+    s.record_failures(torch.ones(100, dtype=torch.long), torch.full((100,), 149))
+    s.advance()
+    clips, frames, probabilities = s.sample(3, allowed=allowed, phase_max=0)
+    assert clips.tolist() == [0, 0, 1]
+    assert not frames.any()
+    torch.testing.assert_close(probabilities, torch.tensor([2 / 3, 1 / 3]))
+
+
 @pytest.mark.parametrize("kwargs", [dict(alpha=0), dict(alpha=2), dict(decay=-1),
                                     dict(uniform_prior=0), dict(start_fraction=1.1),
                                     dict(kernel_size=0)])

@@ -15,6 +15,7 @@ own their task selection, language interfaces and evaluation worlds.
 - [docs/ego_htr.md](docs/ego_htr.md): EgoHTR staging and assisted retargeting.
 - [docs/hoi_suitcase.md](docs/hoi_suitcase.md): native suitcase roster and staging.
 - [docs/motion_repertoire.md](docs/motion_repertoire.md): balanced policy benchmark and task hooks.
+- [docs/adaptive_sampling.md](docs/adaptive_sampling.md): shared clip/phase sampling and scene constraints.
 
 ## Extension rules
 
