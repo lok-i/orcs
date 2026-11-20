@@ -4,6 +4,7 @@
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SETUP_DIR="$REPO_ROOT/scripts/setup"
 LOCK_FILE="$REPO_ROOT/deps.lock"
+LOCK_HELPER="$REPO_ROOT/scripts/setup/locked_deps.py"
 
 # Bound git-lfs on shared machines. Lower both when a login node has a tight
 # process cap: LFS_JOBS=1 LFS_GOMAXPROCS=2.
@@ -64,36 +65,27 @@ spin() {
 }
 
 # uv-only. Environment creation is an explicit prerequisite, not a side effect
-# of dependency sync. Requiring ORCS's own active .venv prevents an accidental
-# run from repointing a consumer environment such as Vibe's.
+# of another checkout. Setup creates ORCS's own .venv if absent and rejects an
+# unrelated active environment such as Vibe's.
 use_venv() {
-    command -v uv &>/dev/null || {
-        echo "[ERROR] uv not found. Install it from https://docs.astral.sh/uv/"
-        exit 1
-    }
+    command -v uv >/dev/null || { echo "[ERROR] uv is required."; exit 1; }
     local venv="$REPO_ROOT/.venv"
+    if [ -n "${VIRTUAL_ENV:-}" ] && [ "$(realpath "$VIRTUAL_ENV")" != "$(realpath -m "$venv")" ]; then
+        echo "[ERROR] another environment is active: $VIRTUAL_ENV"
+        echo "        Deactivate it; setup only manages $venv."
+        exit 1
+    fi
     if [ ! -f "$venv/pyvenv.cfg" ]; then
-        echo "[ERROR] no ORCS venv at $venv. Create and activate it first:"
-        echo "        uv venv --python \"\$(cat .python-version)\" --prompt orcs .venv"
-        echo "        source .venv/bin/activate"
-        exit 1
+        uv venv --python "$(cat "$REPO_ROOT/.python-version")" --prompt "$(basename "$REPO_ROOT")" "$venv"
     fi
-    if [ -z "${VIRTUAL_ENV:-}" ] || [ ! -f "$VIRTUAL_ENV/pyvenv.cfg" ]; then
-        echo "[ERROR] ORCS's venv is not active. Run: source .venv/bin/activate"
-        exit 1
-    fi
-    local active
-    active=$(cd "$VIRTUAL_ENV" && pwd -P)
-    venv=$(cd "$venv" && pwd -P)
-    if [ "$active" != "$venv" ]; then
-        echo "[ERROR] wrong venv active: $active"
-        echo "        ORCS setup requires: $venv"
-        echo "        deactivate the current venv, then run: source .venv/bin/activate"
+    if ! "$venv/bin/python" -c 'import sys; sys.exit(sys.version_info[:2] != (3, 12))'; then
+        echo "[ERROR] this stack requires Python 3.12; the existing environment is unchanged."
+        echo "        Use a fresh checkout/environment for the upgrade."
         exit 1
     fi
     export VIRTUAL_ENV="$venv" PATH="$venv/bin:$PATH"
-    PIP_CMD=(uv pip)
-    echo "[ENV] installer: ${PIP_CMD[*]} -> $VIRTUAL_ENV"
+    PIP_CMD=(uv --no-config pip)
+    echo "[ENV] installer: uv pip -> $venv"
 }
 
 # lock_rows <path-prefix> [excluded-name...] -> pipe-separated records.
@@ -160,7 +152,7 @@ sync_one() {
     echo "    url:  $url"
     echo "    path: $rel_path"
 
-    if [ ! -d "$path/.git" ]; then
+    if [ ! -e "$path/.git" ]; then
         echo "[ CLONE  ] $name -> $rel_path"
         mkdir -p "$path"
         git -C "$path" init -q
@@ -171,6 +163,9 @@ sync_one() {
     local current
     current=$(git -C "$path" rev-parse HEAD 2>/dev/null || echo none)
     if [ "$current" != "$sha" ]; then
+        if [ -f "$LOCK_HELPER" ]; then
+            python "$LOCK_HELPER" before-checkout "$REPO_ROOT" "$name"
+        fi
         echo "[ FETCH  ] depth=1 $sha"
         fetch_sha "$path" "$sha"
         if [ "$lfs" = 1 ]; then
@@ -205,13 +200,6 @@ sync_one() {
         fi
     fi
 
-    if [ "$pip_install" = 1 ]; then
-        local pip_args=(install)
-        [ "$pip_no_deps" = 0 ] || pip_args+=(--no-deps)
-        pip_args+=(-e "$path")
-        echo "[ PIP    ] ${PIP_CMD[*]} ${pip_args[*]}"
-        "${PIP_CMD[@]}" "${pip_args[@]}"
-    fi
 }
 
 sync_rows() {
@@ -245,4 +233,18 @@ verify_rows() {
         echo "[ERROR] checkout does not match deps.lock; sync again after pushing the pin."
     fi
     return $rc
+}
+
+# The consumer supplies every editable dependency to ONE resolver invocation.
+# This prevents transient PyPI replacements and resolves extras with the fork.
+install_code() {
+    local extras="$1" rows="$2"
+    local args=(-e "$REPO_ROOT[$extras]") name url sha rel_path pip_install rest
+    while IFS='|' read -r name url sha rel_path pip_install rest; do
+        [ "$pip_install" != 1 ] || args+=(-e "$REPO_ROOT/$rel_path")
+    done <<< "$rows"
+    python "$LOCK_HELPER" patch "$REPO_ROOT"
+    "${PIP_CMD[@]}" install --no-sources --default-index https://pypi.org/simple --python "$VIRTUAL_ENV/bin/python" "${args[@]}"
+    "${PIP_CMD[@]}" check --python "$VIRTUAL_ENV/bin/python"
+    python "$LOCK_HELPER" check-install "$REPO_ROOT"
 }

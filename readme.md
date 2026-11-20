@@ -57,8 +57,6 @@ and GitHub SSH access.
 
 ```bash
 git clone https://github.com/lok-i/orcs && cd orcs
-uv venv --prompt orcs
-source .venv/bin/activate
 ```
 
 full:
@@ -74,6 +72,16 @@ lean:
 bash scripts/setup/sync_deps.sh --no-smpl
 bash scripts/setup/sync_data.sh --no-smpl
 ```
+
+`sync_deps.sh` creates the repository's Python 3.12 `.venv` and resolves ORCS,
+all pinned editable dependencies, and extras in one uv invocation. Activate it
+with `source .venv/bin/activate` for the commands below. An unrelated active
+environment or an existing wrong-version environment is rejected without replacement.
+Consumers such as ViBe run their own setup and own the source pins.
+The candidate simulator uses a reviewed [mjlab patch](patches/README.md) over
+1.6.1 with MuJoCo Core 4.0.1 and a pinned mujoco-warp main snapshot. Add `--optix`
+for optional OptiX bindings; this does not enable it automatically. Do not run
+standalone pip/uv installs of extras that could replace the rsl_rl fork.
 
 `--no-smpl` skips SMPL support as full setup prompts for three licensed SMPL-X model files (details: [PerLoco](docs/perceptive_locomotion.md) · [SMPL retargeting](docs/smpl_retargeting.md)).
 

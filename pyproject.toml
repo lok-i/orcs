@@ -3,19 +3,17 @@ name = "orcs"
 version = "0.1.1"
 description = "Optimize, Retarget, Control Suite — post-training humanoid controllers with privileged observations"
 readme = "readme.md"
-# 3.11, not 3.10: `tomllib` (rosters) is stdlib only from 3.11.
-requires-python = ">=3.11"
+# Python 3.12 supports the published warp-optix wheels.
+requires-python = ">=3.12,<3.13"
 license = "BSD-3-Clause"
 license-files = ["LICENSE", "LICENSES/*", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 authors = [{ name = "Lokesh Krishna", email = "lkrajan@usc.edu" }]
 dependencies = [
-    # ── active ─────────────────────────────────────────────────────────────────
-    # Validated simulator stack. ORCS imports MuJoCo directly and patches
-    # mujoco_warp.put_data, so these versions are part of its runtime contract.
-    "mjlab==1.4.0",
-    "mujoco==3.8.1",
-    "mujoco-warp==3.8.1",
-    "warp-lang==1.13.0",
+    # Simulator source checkouts and the reviewed mjlab patch are owned by deps.lock.
+    "mjlab==1.6.1+vibe.1",
+    "mujoco-core[rendering]==4.0.1",
+    "mujoco-warp==4.0.1",
+    "warp-lang==1.18.0",
     "joblib",           # reads SONIC smpl .pkl clips (orcs.tasks.uolm.smpl_data)
     # Capped, not just floored: rsl_rl's WandbLogWriter passes the legacy
     # `Settings(start_method=...)`, which 0.29 turned from a deprecation warning
@@ -77,6 +75,7 @@ orcs-download-released-models = "orcs.cli.download_released_models:main"
 orcs-egohtr = "orcs.cli.ego_htr:main"
 
 [project.optional-dependencies]
+optix = ["warp-optix==0.3.0"]
 dev = ["pytest>=8.0", "ruff>=0.4"]
 # Staging-time only — the runtime never imports these, so a training env that
 # consumes already-staged data does not need them.

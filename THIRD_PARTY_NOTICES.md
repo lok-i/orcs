@@ -5,6 +5,12 @@ material. Third-party material retains its upstream terms.
 
 ## Adapted code
 
+`patches/mjlab-1.6.1.patch` modifies mjlab 1.6.1 for the pinned simulator
+stack and renderer selection. Copyright 2025 The mjlab Developers;
+Apache-2.0. The upstream license is preserved in
+[`LICENSES/mjlab-Apache-2.0.txt`](LICENSES/mjlab-Apache-2.0.txt), and
+[`patches/README.md`](patches/README.md) describes the modifications.
+
 `src/orcs/tasks/dodge/mdp/rewards.py::ball_clearance` adapts MimicKit's
 `compute_dodge_reward` from its SMP dodgeball environment.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -69,16 +70,33 @@ def test_no_smpl_enables_sparse_sync_but_full_mode_can_disable_it() -> None:
 
 def test_setup_is_uv_only() -> None:
     common = (SETUP / "_common.sh").read_text()
-    assert "PIP_CMD=(uv pip)" in common
+    assert "PIP_CMD=(uv --no-config pip)" in common
     assert 'local venv="$REPO_ROOT/.venv"' in common
     assert '${VIRTUAL_ENV:-$REPO_ROOT/.venv}' not in common
     assert 'uv venv --python' in common
-    assert 'source .venv/bin/activate' in common
-    assert 'uv venv --python "$(cat "$REPO_ROOT/.python-version")"' not in common
+    assert 'uv venv --python "$(cat "$REPO_ROOT/.python-version")"' in common
+    assert 'install --no-sources --default-index' in common
+    assert '--no-deps' not in common
     assert "DEPS_PIP_CMD" not in common
     assert "CONDA_PREFIX" not in common
     assert "pip_subpath" not in common
     assert "unzip_csv" not in common
+
+
+def test_sync_rejects_unrelated_active_environment(tmp_path) -> None:
+    other = tmp_path / "other-env"
+    other.mkdir()
+    sentinel = other / "pyvenv.cfg"
+    sentinel.write_text("unrelated environment\n")
+    result = subprocess.run(
+        ["bash", str(SETUP / "sync_deps.sh")],
+        env=dict(os.environ, VIRTUAL_ENV=str(other)),
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+    assert "another environment is active" in result.stdout
+    assert "[ FETCH" not in result.stdout
+    assert sentinel.read_text() == "unrelated environment\n"
 
 
 def test_perloco_setup_keeps_only_body_models_not_grail_code() -> None:

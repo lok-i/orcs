@@ -111,7 +111,7 @@ def test_scripts_are_thin_wrappers():
 def test_requires_python_covers_stdlib_used():
     """`tomllib` is 3.11+; the floor said 3.10 and `import orcs` died there."""
     floor = PYPROJECT["project"]["requires-python"]
-    assert floor.startswith(">=3.11"), floor
+    assert floor == ">=3.12,<3.13", floor  # OptiX's published wheels require 3.12.
 
 
 def test_entry_points_resolve():
