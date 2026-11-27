@@ -50,6 +50,9 @@
         "sha": "8f5b9f116bb26ee2f629ce483511f50849ca3df3",
         "path": "dependencies/mujoco_warp",
         "pip_install": true,
-        "lfs": false
+        "lfs": false,
+        "patches": [
+            "patches/mujoco-warp-optix.patch"
+        ]
     }
 }

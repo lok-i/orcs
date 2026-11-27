@@ -102,6 +102,18 @@ index c228c5e..6d11a7b 100644
      return pos, quat
  
    def _compute_jacobian(self) -> None:
+diff --git a/src/mjlab/scene/scene.py b/src/mjlab/scene/scene.py
+index ce79db5..5566c22 100644
+--- a/src/mjlab/scene/scene.py
++++ b/src/mjlab/scene/scene.py
+@@ -197,6 +197,7 @@ class Scene:
+         camera_sensors=camera_sensors,
+         raycast_sensors=raycast_sensors,
+         device=self._device,
++        env_origins=self.env_origins,
+       )
+ 
+   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
 diff --git a/src/mjlab/scripts/_cli.py b/src/mjlab/scripts/_cli.py
 index b2594fe..82239a7 100644
 --- a/src/mjlab/scripts/_cli.py
@@ -223,7 +235,7 @@ index e303078..ecdaee6 100644
      frame_pos = torch.stack(pos_list, dim=1)  # [B, F, 3]
      frame_mat = torch.stack(mat_list, dim=1)  # [B, F, 3, 3]
 diff --git a/src/mjlab/sensor/sensor_context.py b/src/mjlab/sensor/sensor_context.py
-index ff79766..2f6cb2c 100644
+index ff79766..6e3bfd8 100644
 --- a/src/mjlab/sensor/sensor_context.py
 +++ b/src/mjlab/sensor/sensor_context.py
 @@ -4,6 +4,7 @@ from __future__ import annotations
@@ -234,7 +246,19 @@ index ff79766..2f6cb2c 100644
  from typing import TYPE_CHECKING
  
  import mujoco
-@@ -97,6 +98,11 @@ class SensorContext:
+@@ -52,9 +53,11 @@ class SensorContext:
+     camera_sensors: list[CameraSensor],
+     raycast_sensors: Sequence[RayCastSensor],
+     device: str,
++    env_origins: torch.Tensor | None = None,
+   ):
+     self._model = model
+     self._data = data
++    self._env_origins = env_origins
+     self.wp_device = wp.get_device(device)
+ 
+     # Sort camera sensors by camera index for consistent ordering.
+@@ -97,6 +100,11 @@ class SensorContext:
    def render_context(self) -> mjwarp.RenderContext:
      return self._ctx
  
@@ -246,7 +270,7 @@ index ff79766..2f6cb2c 100644
    def recreate(
      self,
      mj_model: mujoco.MjModel,
-@@ -235,6 +241,8 @@ class SensorContext:
+@@ -235,6 +243,8 @@ class SensorContext:
      ref = self.camera_sensors[0].cfg
      for s in self.camera_sensors[1:]:
        cfg = s.cfg
@@ -255,7 +279,7 @@ index ff79766..2f6cb2c 100644
        if cfg.use_textures != ref.use_textures:
          raise ValueError(
            "All camera sensors must share the same use_textures "
-@@ -275,6 +283,24 @@ class SensorContext:
+@@ -275,6 +285,24 @@ class SensorContext:
  
      if self.camera_sensors:
        ref_cfg = self.camera_sensors[0].cfg
@@ -280,7 +304,7 @@ index ff79766..2f6cb2c 100644
        use_textures = ref_cfg.use_textures
        use_shadows = ref_cfg.use_shadows
        cam_geom_groups = set(ref_cfg.enabled_geom_groups)
-@@ -310,6 +336,7 @@ class SensorContext:
+@@ -310,14 +338,27 @@ class SensorContext:
          render_seg.append("segmentation" in s.cfg.data_types)
      else:
        # Raycasts-only: need BVH but no camera rendering.
@@ -288,16 +312,27 @@ index ff79766..2f6cb2c 100644
        use_textures = False
        use_shadows = False
        enabled_geom_groups = sorted(raycast_geom_groups)
-@@ -318,6 +345,8 @@ class SensorContext:
+       cam_active = [False] * ncam
+ 
++    # MJWarp packs worlds into separate OptiX cells. mjlab's terrain origins
++    # translate simulation coordinates, so reserve their span as well as the
++    # usual local motion margin. Changing MjModel.stat.extent here would also
++    # alter camera clipping and the physics model; pass a rendering-only bound.
++    optix_world_extent = None
++    if backend == "optix" and self._env_origins is not None:
++      origin_span = float(self._env_origins.abs().max().item())
++      optix_world_extent = origin_span + max(4.0 * mj_model.stat.extent, 1.0)
++
      with wp.ScopedDevice(self.wp_device):
        self._ctx = mjwarp.create_render_context(
          mjm=mj_model,
 +        backend=backend,
++        optix_world_extent=optix_world_extent,
 +        deterministic=bool(self._model.opt.deterministic),
          nworld=self._data.nworld,
          cam_res=cam_res,
          render_rgb=render_rgb,
-@@ -332,6 +361,14 @@ class SensorContext:
+@@ -332,6 +373,14 @@ class SensorContext:
          background_color=(0.0, 0.0, 0.0, 1.0),
        )
  

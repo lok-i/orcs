@@ -1,0 +1,92 @@
+diff --git a/mujoco_warp/_src/render_optix.py b/mujoco_warp/_src/render_optix.py
+index b914445..e95ec61 100644
+--- a/mujoco_warp/_src/render_optix.py
++++ b/mujoco_warp/_src/render_optix.py
+@@ -65,10 +65,12 @@ def world_offset(worldid: int, grid: int, spacing: float) -> wp.vec3:
+   return (cell - wp.vec3(center)) * spacing
+ 
+ 
+-def build_scene_bvh(mjm: mujoco.MjModel, mjd: mujoco.MjData, rc: RenderContext, nworld: int):
++def build_scene_bvh(mjm: mujoco.MjModel, mjd: mujoco.MjData, rc: RenderContext, nworld: int, extent: float | None = None):
+   """Build OptiX acceleration structures for all geometries in all worlds."""
+   wo = get_wo()
+-  extent = max(4.0 * mjm.stat.extent, 1.0)
++  extent = max(4.0 * mjm.stat.extent, 1.0) if extent is None else float(extent)
++  if not np.isfinite(extent) or extent <= 0.0:
++    raise ValueError("optix_world_extent must be finite and positive")
+   grid = max(1, int(np.ceil(nworld ** (1.0 / 3.0))))
+ 
+   accels = []
+diff --git a/mujoco_warp/_src/render_test.py b/mujoco_warp/_src/render_test.py
+index 759ae77..16bfd2b 100644
+--- a/mujoco_warp/_src/render_test.py
++++ b/mujoco_warp/_src/render_test.py
+@@ -64,6 +64,37 @@ def _sample_splats(position, scale, rgba):
+ 
+ 
+ class RenderTest(parameterized.TestCase):
++  @absltest.skipUnless("optix" in _BACKENDS, "OptiX GPU required")
++  def test_optix_translated_worlds(self):
++    """Translated simulation origins must not overlap OptiX world cells."""
++    mjm, _, m, d = test_data.fixture(
++      xml="""<mujoco><worldbody>
++        <camera pos="0 -3 1" xyaxes="1 0 0 0 0.3 1"/>
++        <geom type="plane" size="0 0 0.1" rgba="0.2 0.2 0.2 1"/>
++        <geom type="box" size="0.4 0.4 0.4" pos="0 0 0.4" rgba="1 0 0 1"/>
++      </worldbody></mujoco>""",
++      nworld=2,
++    )
++    origins = np.array([[-63, -63, 0], [63, 63, 0]], dtype=np.float32)
++    d.geom_xpos.assign(d.geom_xpos.numpy() + origins[:, None])
++    d.cam_xpos.assign(d.cam_xpos.numpy() + origins[:, None])
++    contexts = []
++    for backend in ("warp", "optix"):
++      rc = mjw.create_render_context(
++        mjm, nworld=2, cam_res=(32, 32), render_rgb=True, render_seg=True,
++        use_textures=False, backend=backend,
++        optix_world_extent=63 + max(4 * mjm.stat.extent, 1),
++      )
++      self.assertEqual(rc.backend, backend)
++      mjw.refit_bvh(m, d, rc)
++      mjw.render(m, d, rc)
++      wp.synchronize()
++      contexts.append(rc)
++    np.testing.assert_array_equal(contexts[0].seg_data.numpy(), contexts[1].seg_data.numpy())
++    rgb = [_unpack_rgb(rc.rgb_data.numpy()).astype(float) for rc in contexts]
++    self.assertGreater(np.count_nonzero(rgb[0][..., 0] > rgb[0][..., 1]), 20)
++    np.testing.assert_allclose(rgb[0], rgb[1], atol=2)
++
+   def test_render_splat(self):
+     xml = """
+     <mujoco>
+diff --git a/mujoco_warp/_src/render_util.py b/mujoco_warp/_src/render_util.py
+index 0f033ed..0a11871 100644
+--- a/mujoco_warp/_src/render_util.py
++++ b/mujoco_warp/_src/render_util.py
+@@ -378,6 +378,7 @@ def create_render_context(
+   splat_group_id: np.ndarray | None = None,
+   deterministic: bool = False,
+   backend: str = "warp",
++  optix_world_extent: float | None = None,
+ ) -> RenderContext:
+   """Creates a render context on device.
+ 
+@@ -441,6 +442,9 @@ def create_render_context(
+              and an OptiX-capable GPU). If "optix" is unavailable for the device or
+              model, a warning explains why and "warp" is used. OptiX launches cannot be
+              recorded into CUDA graphs.
++    optix_world_extent: Half-size of each OptiX world's region, centred at the
++      simulation origin. Include all environment translations and bounded geometry.
++      Defaults to max(4 * mjm.stat.extent, 1). Does not change camera clipping.
+ 
+   Returns:
+     The render context containing rendering fields and output arrays on device.
+@@ -869,7 +873,7 @@ def create_render_context(
+     # render imports this module, so import it here.
+     from mujoco_warp._src import render  # noqa: PLC0415
+ 
+-    render_optix.build_scene_bvh(mjm, mjd, rc, nworld)
++    render_optix.build_scene_bvh(mjm, mjd, rc, nworld, extent=optix_world_extent)
+     rc._megakernel = render._build_megakernel(mjm.nlight, rc)
+     rc.optix.pipeline = render_optix.create_pipeline(rc.optix, rc._megakernel, rc.geom_ray_types, rc.enable_backface_culling)
+   else:
