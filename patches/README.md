@@ -1,11 +1,24 @@
 # mjlab consumer compatibility patch
 
-`mjlab-1.6.1.patch` applies to the exact upstream SHA in `deps.lock`. It adds
-MuJoCo Core 4.0.1 / pinned mujoco-warp main compatibility, explicit camera backend
+`mjlab-main.patch` applies to `d872bfd2b048da657345c07669172fa284b38abf`, the
+exact upstream SHA in `deps.lock`. It adds pinned mujoco-warp main compatibility, explicit camera backend
 selection and a separate OptiX sensing path outside CUDA capture. Physics graphs
 remain enabled. Geometry/site rotations now use scalar-first quaternions.
 The metadata keeps the consumer's rsl_rl 5.4.1 fork and identifies the patched
-framework as `1.6.1+vibe.1`; this is not a published package release.
+framework as `1.6.0+vibe.20261126` (upstream main reports 1.6.0); this is not a
+published package release. MuJoCo Core 4.0.1 support is now upstream.
+
+`SimulationCfg.deterministic=False` enables all MuJoCo Warp determinism modes
+when requested, before compilation/capture in both initialization paths. Overflow
+warnings remain enabled. Play and tracking evaluation accept
+`--env.sim.deterministic True`, as training does. Renderer contexts receive the
+same flag for flex BVHs. The physics flag alone does not guarantee deterministic
+PyTorch learning, cross-GPU results or results across environment counts.
+
+The old world-frame velocity reward functions remain under their original import
+paths and semantics for existing tasks and saved configurations. Upstream's new
+relative-frame rewards remain available separately. G1 model preservation lives
+in ORCS's asset factory, documented in [G1 compatibility](../docs/g1-compatibility.md).
 
 `sync_deps.sh` applies this patch before resolving every editable dependency and
 extra together. A consumer such as ViBe points its own lock at this file. Do not

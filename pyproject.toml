@@ -10,10 +10,10 @@ license-files = ["LICENSE", "LICENSES/*", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 authors = [{ name = "Lokesh Krishna", email = "lkrajan@usc.edu" }]
 dependencies = [
     # Simulator source checkouts and the reviewed mjlab patch are owned by deps.lock.
-    "mjlab==1.6.1+vibe.1",
+    "mjlab==1.6.0+vibe.20261126",
     "mujoco-core[rendering]==4.0.1",
     "mujoco-warp==4.0.1",
-    "warp-lang==1.18.0",
+    "warp-lang==1.19.0",
     "joblib",           # reads SONIC smpl .pkl clips (orcs.tasks.uolm.smpl_data)
     # Capped, not just floored: rsl_rl's WandbLogWriter passes the legacy
     # `Settings(start_method=...)`, which 0.29 turned from a deprecation warning

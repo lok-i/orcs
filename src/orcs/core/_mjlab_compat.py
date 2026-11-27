@@ -243,6 +243,9 @@ def _patch_play_init_agent() -> None:
         play.configure_torch_backends()
         device = cfg.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
         env_cfg = play.load_env_cfg(task_id, play=True)
+        env_cfg.sim.deterministic = cfg.env.sim.deterministic
+        if cfg.env.seed is not None:
+            env_cfg.seed = cfg.env.seed
         agent_cfg = play.load_rl_cfg(task_id)
         if cfg.no_terminations:
             env_cfg.terminations = {}

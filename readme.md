@@ -79,11 +79,14 @@ with `source .venv/bin/activate` for the commands below. An unrelated active
 environment or an existing wrong-version environment is rejected without replacement.
 Consumers such as ViBe run their own setup and own the source pins.
 The candidate simulator uses a reviewed [mjlab patch](patches/README.md) over
-1.6.1 with MuJoCo Core 4.0.1 and a pinned mujoco-warp main snapshot. Add `--optix`
+the pinned main revision with MuJoCo Core 4.0.1 and a pinned mujoco-warp main snapshot. Add `--optix`
 for optional OptiX bindings; this does not enable it automatically. Do not run
 standalone pip/uv installs of extras that could replace the rsl_rl fork.
 
 `--no-smpl` skips SMPL support as full setup prompts for three licensed SMPL-X model files (details: [PerLoco](docs/perceptive_locomotion.md) · [SMPL retargeting](docs/smpl_retargeting.md)).
+
+The G1 retains its pre-upgrade ankle mechanics; see the
+[G1 compatibility contract](docs/g1-compatibility.md).
 
 ## play
 

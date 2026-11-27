@@ -1,0 +1,328 @@
+{
+  "sizes": {
+    "nq": 36,
+    "nv": 35,
+    "nu": 29,
+    "ntendon": 0
+  },
+  "joint_names": [
+    "robot/floating_base_joint",
+    "robot/left_hip_pitch_joint",
+    "robot/left_hip_roll_joint",
+    "robot/left_hip_yaw_joint",
+    "robot/left_knee_joint",
+    "robot/left_ankle_pitch_joint",
+    "robot/left_ankle_roll_joint",
+    "robot/right_hip_pitch_joint",
+    "robot/right_hip_roll_joint",
+    "robot/right_hip_yaw_joint",
+    "robot/right_knee_joint",
+    "robot/right_ankle_pitch_joint",
+    "robot/right_ankle_roll_joint",
+    "robot/waist_yaw_joint",
+    "robot/waist_roll_joint",
+    "robot/waist_pitch_joint",
+    "robot/left_shoulder_pitch_joint",
+    "robot/left_shoulder_roll_joint",
+    "robot/left_shoulder_yaw_joint",
+    "robot/left_elbow_joint",
+    "robot/left_wrist_roll_joint",
+    "robot/left_wrist_pitch_joint",
+    "robot/left_wrist_yaw_joint",
+    "robot/right_shoulder_pitch_joint",
+    "robot/right_shoulder_roll_joint",
+    "robot/right_shoulder_yaw_joint",
+    "robot/right_elbow_joint",
+    "robot/right_wrist_roll_joint",
+    "robot/right_wrist_pitch_joint",
+    "robot/right_wrist_yaw_joint"
+  ],
+  "actuator_names": [
+    "robot/left_shoulder_pitch_joint",
+    "robot/left_shoulder_roll_joint",
+    "robot/left_shoulder_yaw_joint",
+    "robot/left_elbow_joint",
+    "robot/left_wrist_roll_joint",
+    "robot/right_shoulder_pitch_joint",
+    "robot/right_shoulder_roll_joint",
+    "robot/right_shoulder_yaw_joint",
+    "robot/right_elbow_joint",
+    "robot/right_wrist_roll_joint",
+    "robot/left_hip_yaw_joint",
+    "robot/right_hip_yaw_joint",
+    "robot/waist_yaw_joint",
+    "robot/left_hip_pitch_joint",
+    "robot/left_hip_roll_joint",
+    "robot/left_knee_joint",
+    "robot/right_hip_pitch_joint",
+    "robot/right_hip_roll_joint",
+    "robot/right_knee_joint",
+    "robot/left_wrist_pitch_joint",
+    "robot/left_wrist_yaw_joint",
+    "robot/right_wrist_pitch_joint",
+    "robot/right_wrist_yaw_joint",
+    "robot/waist_roll_joint",
+    "robot/waist_pitch_joint",
+    "robot/left_ankle_pitch_joint",
+    "robot/left_ankle_roll_joint",
+    "robot/right_ankle_pitch_joint",
+    "robot/right_ankle_roll_joint"
+  ],
+  "fields": {
+    "jnt_type": {
+      "shape": [
+        30
+      ],
+      "sha256": "2abcf5f9435a8978d0ae471138b3ed94f36f3bd9892eb839f030ef22e27e3c9b"
+    },
+    "jnt_bodyid": {
+      "shape": [
+        30
+      ],
+      "sha256": "606eceab07b864922399d00e9b956fbd8e6e6310bde732dd14d27c5909ff930b"
+    },
+    "jnt_qposadr": {
+      "shape": [
+        30
+      ],
+      "sha256": "602eccfe785f806c60fe0bf61ada7274f06f2973d080aba897e6db8ffd12659c"
+    },
+    "jnt_dofadr": {
+      "shape": [
+        30
+      ],
+      "sha256": "b60fe89c637eee3b77d168dbee0291e02b277536ac91d8cbc89db7c885539c66"
+    },
+    "jnt_limited": {
+      "shape": [
+        30
+      ],
+      "sha256": "5036e48360f402d876a2d451ee9ff011f48a8a168176a5623259e518b26d30a1"
+    },
+    "jnt_range": {
+      "shape": [
+        30,
+        2
+      ],
+      "sha256": "d9c3ef1713609cf7a40450f0054c0980e165d92c383cdc4129a38f8ee9cc06eb"
+    },
+    "jnt_pos": {
+      "shape": [
+        30,
+        3
+      ],
+      "sha256": "fe2f74a1e0b16a66452888eb4d734bc455cf1304481bb495d59afa8cf9cae93b"
+    },
+    "jnt_axis": {
+      "shape": [
+        30,
+        3
+      ],
+      "sha256": "9f2c3a55fce505fe3229f0ed16d18a5ed9bdd4a9e04846dc4e2c9d05db10bcc5"
+    },
+    "qpos0": {
+      "shape": [
+        36
+      ],
+      "sha256": "07ae4043179d6d88897b3601a61c6f042c27a22de9b04cdc6f5228bc7f070645"
+    },
+    "dof_armature": {
+      "shape": [
+        35
+      ],
+      "sha256": "3a20b6523318ca85b44bd94e1b86f8a80e31651be2b2ddf10a7dde5128f05bf7"
+    },
+    "dof_damping": {
+      "shape": [
+        35
+      ],
+      "sha256": "1f6c9de2e555d5d589e1149fed58f9cbcc101739df97d4a4d694a13f1242c5b9"
+    },
+    "dof_frictionloss": {
+      "shape": [
+        35
+      ],
+      "sha256": "1f6c9de2e555d5d589e1149fed58f9cbcc101739df97d4a4d694a13f1242c5b9"
+    },
+    "body_parentid": {
+      "shape": [
+        31
+      ],
+      "sha256": "9f3bd1d6e842bfcf37046994ca42fcffb3329007e756b139858a96e89c2869a8"
+    },
+    "body_pos": {
+      "shape": [
+        31,
+        3
+      ],
+      "sha256": "48d9a98debb6ea0349ccf162fba49e3d50416f2d95de23e0b3f75e3e94247937"
+    },
+    "body_quat": {
+      "shape": [
+        31,
+        4
+      ],
+      "sha256": "ee89d101999306176242338a709c6904bf1cae7c625bc3fe65cc1c95da8b8b97"
+    },
+    "body_ipos": {
+      "shape": [
+        31,
+        3
+      ],
+      "sha256": "55268b80f0c9967012a60b3a3b202560659ef6844640b5c92050f0bb34553e10"
+    },
+    "body_iquat": {
+      "shape": [
+        31,
+        4
+      ],
+      "sha256": "95fdc63f04bb264b5ee89f0bfb80f8048ef07d781d020ef92caa3911eb4b31cd"
+    },
+    "body_mass": {
+      "shape": [
+        31
+      ],
+      "sha256": "2945a27c85b5c8158865963c556be09913f6c91a700aa6d8f9a8b303003ce88f"
+    },
+    "body_inertia": {
+      "shape": [
+        31,
+        3
+      ],
+      "sha256": "c2bb64629c152e40ccf9c9060c2eb50906b90eb953211b98e236d1389c6831ea"
+    },
+    "actuator_trntype": {
+      "shape": [
+        29
+      ],
+      "sha256": "5b517952cbe9c4c147bc3f3434f9d82409e76d09ea58905aefe7fb5415912d9a"
+    },
+    "actuator_trnid": {
+      "shape": [
+        29,
+        2
+      ],
+      "sha256": "25683fa666500f16097549a587eb3be2dfacb12f5aec9d7eecfc673bd6ddf626"
+    },
+    "actuator_gear": {
+      "shape": [
+        29,
+        6
+      ],
+      "sha256": "1c61500f9b6ba835ae56263b342a13e5bcb5f9435771fe40edd02aa7f355ac01"
+    },
+    "actuator_gainprm": {
+      "shape": [
+        29,
+        10
+      ],
+      "sha256": "bde1b31f20d828ff5617fe451ecdbfaad5993bf2e173d06834ea48b94db1e26d"
+    },
+    "actuator_biasprm": {
+      "shape": [
+        29,
+        10
+      ],
+      "sha256": "62da1c56f1e128e70eabf2a611e6f671496822a0a1511f6ca11920769e69146d"
+    },
+    "actuator_forcerange": {
+      "shape": [
+        29,
+        2
+      ],
+      "sha256": "455b66130412bfc9cb0a46e1780b98eca8ac3f6bcccf3d10ff92213f8389b88b"
+    },
+    "actuator_ctrlrange": {
+      "shape": [
+        29,
+        2
+      ],
+      "sha256": "cbea672ee5b7df8afd51287562fe62c2ee2b0a1e38bf59d3045f8740d503a0da"
+    },
+    "geom_bodyid": {
+      "shape": [
+        68
+      ],
+      "sha256": "03209e7a0c0d26475223c85eacf03b0b7d6f05dae100db9a5055387062f6e8cb"
+    },
+    "geom_type": {
+      "shape": [
+        68
+      ],
+      "sha256": "74b07d6ab7ecd06966dccc71b5fc1968457cd86ba00eba557498f9bb149c7f9e"
+    },
+    "geom_size": {
+      "shape": [
+        68,
+        3
+      ],
+      "sha256": "77b878e8eaead4b59c1e9e264dfd66cd9f1f3344dfe388453915b3573e8d7583"
+    },
+    "geom_pos": {
+      "shape": [
+        68,
+        3
+      ],
+      "sha256": "893e27c3d16b0776bfd6c39e7cc3502551f3f23d93533ae588810d58437ea362"
+    },
+    "geom_quat": {
+      "shape": [
+        68,
+        4
+      ],
+      "sha256": "106a1312eb54cc61c4c2f7b117c8977f257a69196c7d07e8130267c446cfb779"
+    },
+    "geom_contype": {
+      "shape": [
+        68
+      ],
+      "sha256": "82a3799eefea491605b926793561efbe6b935b46487a2384efc931abc7f21ed8"
+    },
+    "geom_conaffinity": {
+      "shape": [
+        68
+      ],
+      "sha256": "82a3799eefea491605b926793561efbe6b935b46487a2384efc931abc7f21ed8"
+    },
+    "geom_condim": {
+      "shape": [
+        68
+      ],
+      "sha256": "c31a2f1b42f4f3cb143a43046feaeb30f1a285847874c7638e60b97570694c02"
+    },
+    "geom_friction": {
+      "shape": [
+        68,
+        3
+      ],
+      "sha256": "0fb13cad103e89e553608569e95b9c2931d468c26a0d1daca3fb3ddfc100ff7a"
+    },
+    "geom_solref": {
+      "shape": [
+        68,
+        2
+      ],
+      "sha256": "c9a22c815a75d815d87b255f1d0891a1162805e36b5d4874c81c7373f6f0821f"
+    },
+    "geom_solimp": {
+      "shape": [
+        68,
+        5
+      ],
+      "sha256": "c554a121480f52f8c38193506914ed987c971be05fa63224ee6a63fccb92fd63"
+    },
+    "exclude_signature": {
+      "shape": [
+        4
+      ],
+      "sha256": "22bcfc74cef35ebef20bda9efee59cadc89b4f416d407f654e0ed71debd64f4e"
+    },
+    "tendon_range": {
+      "shape": [
+        0,
+        2
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

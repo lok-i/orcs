@@ -37,17 +37,17 @@
     },
     "mjlab": {
         "url": "https://github.com/mujocolab/mjlab.git",
-        "sha": "11ffee9816e1d0644e538854bfb8dd8acb82ebba",
+        "sha": "d872bfd2b048da657345c07669172fa284b38abf",
         "path": "dependencies/mjlab",
         "pip_install": true,
         "lfs": false,
         "patches": [
-            "patches/mjlab-1.6.1.patch"
+            "patches/mjlab-main.patch"
         ]
     },
     "mujoco_warp": {
         "url": "https://github.com/google-deepmind/mujoco_warp.git",
-        "sha": "e0226800bba7cc09f252f6c8e1a5d922c422f4de",
+        "sha": "8f5b9f116bb26ee2f629ce483511f50849ca3df3",
         "path": "dependencies/mujoco_warp",
         "pip_install": true,
         "lfs": false
